@@ -22,8 +22,10 @@ class NumberingTestCase(TestCase):
         self.employee = f.make_employee()
         f.attest(self.employee, self.family)
 
-    def scope(self):
-        return numbering.NumberingScope.objects.get(family=self.family, employee=self.employee)
+    def scope(self, year: int = 2026):
+        return numbering.NumberingScope.objects.get(
+            family=self.family, employee=self.employee, year=year
+        )
 
     def numbers(self):
         """Номера в порядке возрастания, как они лягут в журнал."""
@@ -45,7 +47,7 @@ class NumberingTestCase(TestCase):
 
         first.refresh_from_db(), second.refresh_from_db(), third.refresh_from_db()
         assert (first.seq, second.seq, third.seq) == (1, 2, 3)
-        assert first.full_number == "ЕИ-03-05-0001"
+        assert first.full_number == "ЕИ-03-05-00001"
 
     def test_assign_is_idempotent(self):
         f.draft(self.family, self.employee, day=1)
@@ -55,7 +57,7 @@ class NumberingTestCase(TestCase):
         second_run = numbering.assign_numbers(self.scope())
 
         assert not second_run.changed
-        assert self.numbers() == ["ЕИ-03-05-0001", "ЕИ-03-05-0002"]
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00002"]
 
     def test_draft_becomes_numbered(self):
         protocol = f.draft(self.family, self.employee, day=1)
@@ -107,7 +109,7 @@ class NumberingTestCase(TestCase):
         day1.refresh_from_db()
         day5.refresh_from_db()
         assert (day1.seq, day5.seq) == (1, 2), "подписанные номера сдвинулись"
-        assert self.numbers()[-1] == "ЕИ-03-05-0003"
+        assert self.numbers()[-1] == "ЕИ-03-05-00003"
 
     def test_new_verifications_continue_after_sealed_high_water(self):
         sealed = f.draft(self.family, self.employee, day=1)
@@ -117,7 +119,7 @@ class NumberingTestCase(TestCase):
         f.draft(self.family, self.employee, day=2)
         numbering.assign_numbers(self.scope())
 
-        assert self.numbers() == ["ЕИ-03-05-0001", "ЕИ-03-05-0002"]
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00002"]
 
     # -- литерные подномера ------------------------------------------------
     def test_out_of_sequence_insert_gets_letter_suffix(self):
@@ -130,8 +132,8 @@ class NumberingTestCase(TestCase):
         late = f.make_verification(self.family, self.employee, day=3, serial="SN903")
         inserted = numbering.insert_out_of_sequence(late, reason="Найден бумажный бланк от 03.03")
 
-        assert inserted.full_number == "ЕИ-03-05-0001А"
-        assert self.numbers() == ["ЕИ-03-05-0001", "ЕИ-03-05-0001А", "ЕИ-03-05-0002"]
+        assert inserted.full_number == "ЕИ-03-05-00001А"
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00001А", "ЕИ-03-05-00002"]
 
     def test_second_insert_gets_next_letter(self):
         day1 = f.draft(self.family, self.employee, day=1)
@@ -142,7 +144,7 @@ class NumberingTestCase(TestCase):
             v = f.make_verification(self.family, self.employee, day=day, serial=serial)
             numbering.insert_out_of_sequence(v, reason="дозаведение")
 
-        assert self.numbers() == ["ЕИ-03-05-0001", "ЕИ-03-05-0001А", "ЕИ-03-05-0001Б"]
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00001А", "ЕИ-03-05-00001Б"]
 
     def test_out_of_sequence_requires_reason(self):
         v = f.make_verification(self.family, self.employee, day=3)
@@ -167,7 +169,7 @@ class NumberingTestCase(TestCase):
         numbering.assign_numbers(self.scope())
 
         inserted.refresh_from_db()
-        assert inserted.full_number == "ЕИ-03-05-0001А"
+        assert inserted.full_number == "ЕИ-03-05-00001А"
 
     # -- подпись -----------------------------------------------------------
     def test_cannot_sign_without_attestation(self):
@@ -204,7 +206,7 @@ class NumberingTestCase(TestCase):
 
         first.refresh_from_db()
         assert first.seq == 1, "аннулированный протокол освободил номер — дыра в журнале"
-        assert self.numbers() == ["ЕИ-03-05-0001", "ЕИ-03-05-0002", "ЕИ-03-05-0003"]
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00002", "ЕИ-03-05-00003"]
 
     # -- публикация в ФИФ ---------------------------------------------------
     def test_only_signed_protocols_go_to_fif(self):
@@ -231,7 +233,34 @@ class NumberingTestCase(TestCase):
         all_numbers = sorted(
             p.full_number for p in numbering.Protocol.objects.exclude(seq=None)
         )
-        assert all_numbers == ["ЕИ-03-05-0001", "ЕИ-03-07-0001"]
+        assert all_numbers == ["ЕИ-03-05-00001", "ЕИ-03-07-00001"]
+
+    def test_numbering_resets_at_the_start_of_the_year(self):
+        """Счётчик обнуляется 1 января: декабрьская и январская поверки — оба 00001."""
+        december = f.draft(
+            self.family, self.employee, day=29, month=12, year=2025, serial="SN1229"
+        )
+        january = f.draft(self.family, self.employee, day=9, month=1, serial="SN0109")
+
+        numbering.assign_numbers(self.scope(2025))
+        numbering.assign_numbers(self.scope(2026))
+
+        december.refresh_from_db()
+        january.refresh_from_db()
+        assert december.full_number == "ЕИ-03-05-00001"
+        assert january.full_number == "ЕИ-03-05-00001"
+        assert december.scope_id != january.scope_id
+
+    def test_december_verification_does_not_shift_january_numbers(self):
+        """Забытая декабрьская поверка не трогает нумерацию нового года."""
+        january = f.draft(self.family, self.employee, day=9, month=1, serial="SN0109")
+        numbering.assign_numbers(self.scope(2026))
+
+        f.draft(self.family, self.employee, day=30, month=12, year=2025, serial="SN1230")
+        numbering.assign_numbers(self.scope(2025))
+
+        january.refresh_from_db()
+        assert january.seq == 1
 
     def test_chronology_breaks_reports_only_real_problems(self):
         f.draft(self.family, self.employee, day=1)

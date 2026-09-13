@@ -110,14 +110,15 @@ class ConditionSource(models.TextChoices):
     """Откуда взялось значение условия поверки.
 
     ВНУТРЕННЕЕ ПОЛЕ. В протокол не выводится и клиенту не показывается —
-    решение от 13.09.2026. Нужно, чтобы система помнила происхождение числа:
-    в старом приложении недостающие условия подставлялись random.uniform
-    и отличить измеренное значение от подставленного было уже невозможно.
+    решение от 13.09.2026. Само поведение старого приложения сохранено:
+    недостающие условия генерируются в нормативном диапазоне и запоминаются
+    в журнале погоды (см. apps.catalog.conditions). Разница только в том,
+    что теперь система помнит, какое значение измерено, а какое подставлено.
     """
 
     MEASURED = "measured", "Измерено"
-    ARCHIVE = "archive", "Метеоархив"
-    DEFAULT = "default", "Норматив по умолчанию"
+    ARCHIVE = "archive", "Из журнала погоды"
+    GENERATED = "generated", "Сгенерировано в нормативном диапазоне"
 
 
 class VerificationStatus(models.TextChoices):
@@ -241,7 +242,8 @@ class NumberingScope(models.Model):
     )
     year = models.PositiveSmallIntegerField(
         "год", null=True, blank=True,
-        help_text="Заполняется, только если у семейства включён ежегодный сброс нумерации",
+        help_text="Счётчик сбрасывается в начале года, поэтому область нумерации — годовая. "
+                  "NULL только у семейств со сквозной нумерацией",
     )
 
     class Meta:
@@ -293,6 +295,12 @@ class Protocol(models.Model):
     )
     out_of_sequence_reason = models.CharField(
         "причина вставки вне очереди", max_length=250, blank=True
+    )
+    field_number = models.CharField(
+        "номер, записанный на свидетельстве в поле", max_length=40, blank=True, db_index=True,
+        help_text="Когда у поверителя на объекте нет доступа к базе, на свидетельстве "
+                  "пишется номер «на месте». Здесь он сохраняется и связывается с настоящим — "
+                  "иначе бумагу на руках у клиента потом не найти",
     )
 
     status = models.CharField(
@@ -346,9 +354,10 @@ class Protocol(models.Model):
         if self.seq is None:
             return ""
         scope = self.scope
+        digits = scope.family.number_digits
         return (
             f"ЕИ-{scope.family.type_code}-{scope.employee.tab_number}-"
-            f"{self.seq:04d}{self.suffix}"
+            f"{self.seq:0{digits}d}{self.suffix}"
         )
 
     @property

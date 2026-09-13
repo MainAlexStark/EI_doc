@@ -12,7 +12,7 @@ from apps.verification.models import Instrument, Protocol, ProtocolStatus, Verif
 from apps.verification.numbering import scope_for
 
 
-def make_family(*, code: str = "water", type_code: str = "03", yearly: bool = False):
+def make_family(*, code: str = "water", type_code: str = "03", yearly: bool = True):
     return MeasurementFamily.objects.create(
         code=code, name="Счётчики воды", type_code=type_code, numbering_resets_yearly=yearly
     )
@@ -42,10 +42,16 @@ def make_instrument(family: MeasurementFamily, serial: str):
 
 
 def make_verification(
-    family: MeasurementFamily, employee: Employee, *, day: int, serial: str | None = None
+    family: MeasurementFamily,
+    employee: Employee,
+    *,
+    day: int,
+    serial: str | None = None,
+    month: int = 3,
+    year: int = 2026,
 ) -> Verification:
-    """Поверка в указанный день марта 2026, 10:00 по местному времени."""
-    moment = timezone.make_aware(dt.datetime(2026, 3, day, 10, 0))
+    """Поверка в указанный день, 10:00 по местному времени. По умолчанию март 2026."""
+    moment = timezone.make_aware(dt.datetime(year, month, day, 10, 0))
     return Verification.objects.create(
         instrument=make_instrument(family, serial or f"SN{day:03d}"),
         verifier=employee,
@@ -61,5 +67,5 @@ def make_protocol(verification: Verification) -> Protocol:
     )
 
 
-def draft(family, employee, *, day: int, serial: str | None = None) -> Protocol:
-    return make_protocol(make_verification(family, employee, day=day, serial=serial))
+def draft(family, employee, *, day: int, serial: str | None = None, **when) -> Protocol:
+    return make_protocol(make_verification(family, employee, day=day, serial=serial, **when))

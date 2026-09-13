@@ -3,12 +3,32 @@ from django.utils.html import format_html
 from simple_history.admin import SimpleHistoryAdmin
 
 from apps.catalog.models import (
+    AmbientRecord,
+    ConditionProfile,
     MeasurementFamily,
     ProtocolTemplate,
     SiType,
     Standard,
     VerificationMethod,
 )
+
+
+@admin.register(ConditionProfile)
+class ConditionProfileAdmin(SimpleHistoryAdmin):
+    list_display = ["name", "is_active"]
+
+
+@admin.register(AmbientRecord)
+class AmbientRecordAdmin(admin.ModelAdmin):
+    list_display = ["date", "temperature", "pressure", "humidity", "origin"]
+    list_filter = ["is_generated"]
+    date_hierarchy = "date"
+
+    @admin.display(description="Происхождение")
+    def origin(self, obj: AmbientRecord):
+        if obj.is_generated:
+            return format_html('<span style="color:#9A5F19">сгенерировано</span>')
+        return format_html('<span style="color:#2C6B4C">измерено</span>')
 
 
 @admin.register(MeasurementFamily)

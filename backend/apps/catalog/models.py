@@ -35,13 +35,17 @@ class MeasurementFamily(models.Model):
         help_text="Имя модуля расчёта, например water_meter",
     )
     numbering_resets_yearly = models.BooleanField(
-        "нумерация сбрасывается ежегодно", default=False,
-        help_text="ВОПРОС К МЕТРОЛОГУ: сейчас формат номера года не содержит, "
-                  "значит нумерация сквозная. Переключить, если это не так.",
+        "нумерация сбрасывается в начале года", default=True,
+        help_text="Счётчик протоколов обнуляется 1 января",
     )
-    uses_number_blocks = models.BooleanField(
-        "выдавать блоки номеров на выезд", default=False,
-        help_text="Нужно, если поверитель обязан назвать номер протокола на объекте",
+    number_digits = models.PositiveSmallIntegerField(
+        "разрядов в номере протокола", default=5,
+        help_text="ЕИ-03-02-00772 — пять разрядов",
+    )
+    condition_ranges = models.JSONField(
+        "диапазоны условий поверки", default=dict, blank=True,
+        help_text="Переопределяет общий профиль условий для этого семейства, "
+                  "см. apps.catalog.conditions",
     )
 
     history = HistoricalRecords()
@@ -129,6 +133,54 @@ class VerificationMethod(models.Model):
 
     def __str__(self) -> str:
         return self.designation
+
+
+class ConditionProfile(models.Model):
+    """Диапазоны условий поверки — то, что раньше лежало в config.yaml.
+
+    Формат `ranges` — как в apps.catalog.conditions.DEFAULT_RANGES:
+    {"temperature": {"min": 18.0, "max": 25.0, "decimals": 1}, …}
+    Указывать можно только те ключи, которые отличаются от значений по умолчанию.
+    """
+
+    name = models.CharField("название", max_length=120, default="Основной")
+    ranges = models.JSONField("диапазоны", default=dict, blank=True)
+    is_active = models.BooleanField("активен", default=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "профиль условий поверки"
+        verbose_name_plural = "профили условий поверки"
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class AmbientRecord(models.Model):
+    """Журнал погоды: одна запись на дату.
+
+    Все протоколы за один день показывают одни и те же условия в помещении —
+    это поведение старого приложения, и оно сохранено намеренно.
+    """
+
+    date = models.DateField("дата", unique=True)
+    temperature = models.DecimalField("температура, °C", max_digits=5, decimal_places=1)
+    pressure = models.DecimalField("давление, кПа", max_digits=6, decimal_places=1)
+    humidity = models.DecimalField("влажность, %", max_digits=4, decimal_places=1)
+    is_generated = models.BooleanField(
+        "сгенерировано", default=True,
+        help_text="Снято, если значения занесены как реально измеренные",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "запись журнала погоды"
+        verbose_name_plural = "журнал погоды"
+        ordering = ["-date"]
+
+    def __str__(self) -> str:
+        return f"{self.date:%d.%m.%Y}: {self.temperature} °C, {self.pressure} кПа, {self.humidity} %"
 
 
 class ProtocolTemplate(models.Model):
