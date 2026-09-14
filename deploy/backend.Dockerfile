@@ -1,3 +1,11 @@
+FROM node:20-alpine AS frontend-build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -23,6 +31,7 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN pip install -r requirements.txt
 
 COPY backend /app
+COPY --from=frontend-build /app/dist /app/frontend_dist
 
 RUN useradd --create-home --uid 1000 app && mkdir -p /srv/media && chown -R app /app /srv/media
 USER app

@@ -15,3 +15,4 @@ node_modules/
 dist/
 *.tsbuildinfo
 local.sqlite3
+frontend_dist/

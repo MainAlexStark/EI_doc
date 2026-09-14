@@ -161,6 +161,12 @@ STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
+
+# Собранный фронтенд (frontend/dist) кладёт сюда deploy/backend.Dockerfile
+# отдельной стадией сборки. Локально без Docker папки нет — тогда фронт
+# поднимают отдельным процессом: cd frontend && npm run dev (см. README).
+FRONTEND_DIST_DIR = BACKEND_DIR / "frontend_dist"
+STATICFILES_DIRS = [("frontend", FRONTEND_DIST_DIR)] if FRONTEND_DIST_DIR.is_dir() else []
 MEDIA_URL = "media/"
 MEDIA_ROOT = env("MEDIA_ROOT", default=str(BACKEND_DIR / "media"))
 
