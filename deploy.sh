@@ -66,6 +66,16 @@ env_set() {
   fi
 }
 
+# env_is_unset — пусто или всё ещё заглушка из .env.example
+# («замените-меня»). Первый прогон копирует .env.example в .env, и там
+# это значение уже непустое — проверка на "-n" его бы не заметила, и
+# секрет НЕ придумался бы, оставшись тем же текстом на всех развёртываниях.
+env_is_unset() {
+  local value
+  value="$(env_get "$1")"
+  [ -z "$value" ] || [ "$value" = "замените-меня" ]
+}
+
 require_tools() {
   command -v docker >/dev/null 2>&1 || die \
     "docker не установлен. На Debian/Ubuntu: curl -fsSL https://get.docker.com | sh"
@@ -223,11 +233,11 @@ cmd_install() {
   [ -n "$(env_get "DB_USER")" ] || env_set "DB_USER" "ei_doc"
   env_set "REDIS_URL" "redis://redis:6379/0"
 
-  [ -n "$(env_get "SECRET_KEY")" ] || {
+  env_is_unset "SECRET_KEY" && {
     env_set "SECRET_KEY" "$(gen_secret 32)"
     say "сгенерирован SECRET_KEY"
   }
-  [ -n "$(env_get "DB_PASSWORD")" ] || {
+  env_is_unset "DB_PASSWORD" && {
     env_set "DB_PASSWORD" "$(gen_secret 16)"
     say "сгенерирован пароль БД"
   }

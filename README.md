@@ -58,7 +58,7 @@ docker compose exec web python manage.py createsuperuser
 на машину, один Caddyfile на все сервисы, TLS от Let's Encrypt сам.
 
 ```bash
-git clone git@github.com:MainAlexStark/EI_doc.git
+git clone https://github.com/MainAlexStark/EI_doc.git
 cd EI_doc
 ./deploy.sh eidoc.example.com
 docker compose exec web python manage.py createsuperuser
