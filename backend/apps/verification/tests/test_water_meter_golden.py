@@ -85,23 +85,38 @@ class GoldenTestCase(SimpleTestCase):
                 )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_reading_end_matches_excel(self):
-        """Показания в конце = показания в начале + V эталона."""
+    def test_template_relation_between_readings_and_standard_volume(self):
+        """В шаблоне показания конца = показания начала + V эталона.
+
+        Физически это не так (счётчик показывает свой объём, а не эталонный),
+        но соотношение фиксируем: по нему сверяется разбор старых протоколов.
+        """
         mismatches = []
         for name, _layout, row in cases():
             measurement = wm.Measurement(
                 flow_rate=Decimal(str(row["q"])),
                 seconds=row["seconds"],
                 volume_meter=Decimal(str(row["v_meter"])),
-                reading_start=Decimal(str(row["reading_start"])),
             )
+            computed = Decimal(str(row["reading_start"])) + measurement.volume_standard
             expected = Decimal(str(row["reading_end"]))
-            if abs(measurement.reading_end - expected) > TOLERANCE:
+            if abs(computed - expected) > TOLERANCE:
                 mismatches.append(
-                    f"{name} строка {row['row']}: получили {measurement.reading_end}, "
-                    f"в протоколе {expected}"
+                    f"{name} строка {row['row']}: получили {computed}, в протоколе {expected}"
                 )
         assert not mismatches, "\n".join(mismatches)
+
+    def test_volume_from_readings_matches_volume_from_pulses(self):
+        """Три способа задать объём по счётчику дают одно и то же."""
+        direct = wm.Measurement(flow_rate="0.03", seconds=720, volume_meter="0.0063")
+        by_readings = wm.Measurement(
+            flow_rate="0.03", seconds=720, reading_start="229.0830", reading_end="229.0893"
+        )
+        by_pulses = wm.Measurement(
+            flow_rate="0.03", seconds=720, pulses=9, pulse_weight="0.0007"
+        )
+        assert direct.volume_meter == by_readings.volume_meter == by_pulses.volume_meter
+        assert direct.relative_error == by_readings.relative_error
 
     def test_all_golden_protocols_are_suitable(self):
         """Все пять протоколов выпущены как годные — калькулятор должен согласиться."""
@@ -168,5 +183,14 @@ class VerdictTestCase(SimpleTestCase):
         assert note == "Поверен в диапазоне расхода (0,03-0.948) м3/ч"
 
     def test_zero_meter_volume_is_an_error_not_a_crash_later(self):
-        with pytest.raises(ZeroDivisionError, match="Объём по счётчику"):
+        with pytest.raises(wm.MeasurementError, match="счётчик не крутился"):
             self.make("0.03", "0").relative_error
+
+    def test_failed_visual_check_makes_the_meter_unsuitable(self):
+        """Погрешность в допуске, но герметичность не прошла."""
+        good = self.make("0.03", "0.0063")
+        verdict = wm.evaluate([good], LIMITS, wm.CLASS_B, checks={"tightness": False})
+
+        assert not verdict.suitable
+        assert verdict.failed_rows == ()
+        assert "герметичности" in verdict.reasons[0]

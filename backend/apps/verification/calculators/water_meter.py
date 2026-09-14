@@ -25,10 +25,33 @@ from decimal import ROUND_HALF_UP, ROUND_UP, Decimal, localcontext
 CLASS_A = "А"
 CLASS_B = "В"
 
-# Режимы измерений и длительность пролива, как в шаблонах.
-SECONDS_MIN = 720      # Qнаим
-SECONDS_TRANSITION = 360   # Qперех
-SECONDS_MAX = 120      # Qнаиб
+# Режимы измерений и длительность пролива, как в рабочих шаблонах.
+MODE_MIN = "min"
+MODE_TRANSITION = "transition"
+MODE_MAX = "max"
+
+MODES = {
+    MODE_MIN: {"seconds": 720, "label": "Qнаим"},
+    MODE_TRANSITION: {"seconds": 360, "label": "Qперех"},
+    MODE_MAX: {"seconds": 120, "label": "Qнаиб"},
+}
+
+# Две раскладки протокола: короткая — по одному проливу на режим,
+# полная — по три. Другой разницы между ними нет.
+LAYOUT_COMPACT = "compact3"
+LAYOUT_EXTENDED = "extended9"
+
+LAYOUTS = {
+    LAYOUT_COMPACT: [MODE_MIN, MODE_TRANSITION, MODE_MAX],
+    LAYOUT_EXTENDED: [MODE_MIN] * 3 + [MODE_TRANSITION] * 3 + [MODE_MAX] * 3,
+}
+
+# Пункты протокола до таблицы измерений — их поверитель отмечает как есть.
+CHECKS = {
+    "visual": "Внешний осмотр (2.7.1)",
+    "operation": "Опробование (2.7.2)",
+    "tightness": "Проверка герметичности (2.7.2.1)",
+}
 
 
 def _dec(value) -> Decimal:
@@ -98,14 +121,60 @@ class MeterLimits:
         return self.error_above_transition
 
 
+class MeasurementError(ValueError):
+    """Со строкой измерений что-то не так — показать поверителю, а не падать."""
+
+
 @dataclass(frozen=True)
 class Measurement:
-    """Одна строка измерений."""
+    """Одна строка измерений: то, что поверитель снял с установки и со счётчика.
 
-    flow_rate: Decimal        # Q, м³/ч
-    seconds: int              # длительность пролива
-    volume_meter: Decimal     # V по счётчику, м³
+    Объём по счётчику можно задать тремя способами, в порядке приоритета:
+
+    1. ``volume_meter`` напрямую;
+    2. импульсами: ``pulses`` × ``pulse_weight`` (K, м³/имп) — так устроены
+       счётчики с импульсным выходом, у них в шаблоне есть коэффициент
+       преобразования;
+    3. показаниями: ``reading_end`` − ``reading_start`` — обычный механический
+       счётчик, поверитель списывает цифры с табло.
+    """
+
+    flow_rate: Decimal            # Q, м³/ч — с установки
+    seconds: int                  # длительность пролива
+    volume_meter: Decimal | None = None
     reading_start: Decimal | None = None
+    reading_end: Decimal | None = None
+    pulses: int | None = None
+    pulse_weight: Decimal | None = None   # K, м³/имп
+    mode: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "volume_meter", self._resolve_volume_meter())
+
+    def _resolve_volume_meter(self) -> Decimal:
+        if self.volume_meter is not None:
+            return _dec(self.volume_meter)
+
+        if self.pulses is not None:
+            if self.pulse_weight is None:
+                raise MeasurementError(
+                    "Указаны импульсы, но не задан коэффициент преобразования счётчика"
+                )
+            return _dec(self.pulses) * _dec(self.pulse_weight)
+
+        if self.reading_start is not None and self.reading_end is not None:
+            volume = _dec(self.reading_end) - _dec(self.reading_start)
+            if volume < 0:
+                raise MeasurementError(
+                    f"Показания в конце ({self.reading_end}) меньше, чем в начале "
+                    f"({self.reading_start})"
+                )
+            return volume
+
+        raise MeasurementError(
+            "Нечем посчитать объём по счётчику: нужны либо показания начала и конца, "
+            "либо импульсы с коэффициентом, либо объём напрямую"
+        )
 
     @property
     def volume_standard(self) -> Decimal:
@@ -117,18 +186,27 @@ class Measurement:
         """δ = ROUND((Vэт − Vсч) / Vсч × 100, 1), %."""
         volume_meter = _dec(self.volume_meter)
         if volume_meter == 0:
-            raise ZeroDivisionError("Объём по счётчику равен нулю — погрешность не определена")
+            raise MeasurementError(
+                "Объём по счётчику равен нулю — счётчик не крутился, погрешность не определена"
+            )
         ratio = (self.volume_standard - volume_meter) / volume_meter * 100
         return excel_round(ratio, 1)
 
-    @property
-    def reading_end(self) -> Decimal | None:
-        if self.reading_start is None:
-            return None
-        return _dec(self.reading_start) + self.volume_standard
-
     def is_within_limits(self, limits: MeterLimits, meter_class: str) -> bool:
         return abs(self.relative_error) <= limits.error_limit(self.flow_rate, meter_class)
+
+    def as_result(self, limits: MeterLimits, meter_class: str) -> dict:
+        """Строка таблицы результатов — то, что уйдёт в протокол."""
+        return {
+            "mode": self.mode,
+            "seconds": self.seconds,
+            "flow_rate": str(_dec(self.flow_rate)),
+            "volume_meter": str(_dec(self.volume_meter)),
+            "volume_standard": str(self.volume_standard),
+            "error_pct": str(self.relative_error),
+            "limit_pct": str(limits.error_limit(self.flow_rate, meter_class)),
+            "within_limits": self.is_within_limits(limits, meter_class),
+        }
 
 
 @dataclass(frozen=True)
@@ -140,14 +218,27 @@ class Verdict:
 
 
 def evaluate(
-    measurements: list[Measurement], limits: MeterLimits, meter_class: str
+    measurements: list[Measurement],
+    limits: MeterLimits,
+    meter_class: str,
+    *,
+    checks: dict[str, bool] | None = None,
 ) -> Verdict:
-    """Годен или нет: погрешность на каждом режиме в пределах допуска."""
+    """Годен или нет.
+
+    Счётчик годен, когда пройдены внешний осмотр, опробование и проверка
+    герметичности И погрешность на каждом режиме в пределах допуска.
+    Вердикт выводится из данных — отдельной «галочки годности» нет.
+    """
     if not measurements:
-        raise ValueError("Нет строк измерений")
+        raise MeasurementError("Нет строк измерений")
+
+    reasons = []
+    for key, label in CHECKS.items():
+        if checks is not None and checks.get(key) is False:
+            reasons.append(f"{label}: не соответствует")
 
     failed = []
-    reasons = []
     for index, measurement in enumerate(measurements, start=1):
         if not measurement.is_within_limits(limits, meter_class):
             failed.append(index)
@@ -158,7 +249,7 @@ def evaluate(
             )
 
     return Verdict(
-        suitable=not failed,
+        suitable=not reasons,
         failed_rows=tuple(failed),
         max_flow_rate=max(_dec(m.flow_rate) for m in measurements),
         reasons=tuple(reasons),
