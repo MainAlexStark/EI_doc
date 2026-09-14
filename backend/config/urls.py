@@ -4,6 +4,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.catalog.api import SiTypeSuggestView
+from apps.core.views import healthz
 from apps.verification.api import (
     LayoutsView,
     VerificationConfirmRowsView,
@@ -23,6 +24,10 @@ admin.site.site_title = "EI_doc"
 admin.site.index_title = "Документооборот поверочных работ"
 
 urlpatterns = [
+    # Без слэша и до admin/: deploy.sh дёргает ровно "/healthz" при
+    # обновлении, а APPEND_SLASH сделал бы редирект на "/healthz/",
+    # который curl -fsS без -L считает не 200 и откатывает деплой.
+    path("healthz", healthz, name="healthz"),
     path("admin/", admin.site.urls),
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

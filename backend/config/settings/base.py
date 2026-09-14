@@ -61,6 +61,11 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Статику раньше отдавал nginx (alias /static/); общий Caddy делает
+    # только TLS и маршрутизацию по доменам, файлы сам не отдаёт — поэтому
+    # whitenoise отдаёт их прямо из процесса Django, со сжатием и
+    # far-future заголовками из коробки.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -152,8 +157,21 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BACKEND_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 MEDIA_URL = "media/"
 MEDIA_ROOT = env("MEDIA_ROOT", default=str(BACKEND_DIR / "media"))
+
+# Протоколы и сканы бланков: право на файл проверяет вьюха, сам файл
+# стримит Django (раньше это был X-Accel-Redirect через nginx — общий
+# Caddy так не умеет). На объёмах этой конторы — не узкое место; если
+# станет одним, есть SENDFILE_BACKEND=sendfile.backends.xsendfile для
+# отдельного файлового сервера за Caddy, меняется одна строка.
+SENDFILE_BACKEND = env("SENDFILE_BACKEND", default="django_sendfile.backends.simple")
+SENDFILE_ROOT = MEDIA_ROOT
+SENDFILE_URL = MEDIA_URL
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

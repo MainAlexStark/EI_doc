@@ -33,7 +33,7 @@
   вынутый из рабочих шаблонов: `python manage.py seed_catalog`
 - Аудит изменений по ключевым моделям (`django-simple-history`)
 - Импорт исторического журнала: на реальном журнале переносится 8073 строки из 8126
-- docker compose: nginx, gunicorn, Celery worker + beat, PostgreSQL, Redis
+- docker compose: gunicorn, Celery worker + beat, PostgreSQL, Redis — за общим Caddy (см. «Развёртывание на VPS»)
 - 110 тестов
 
 Этап 1 закрыт. Дальше этап 2: EI_Hub внутрь, роутинг заявок, наряды, задачи.
@@ -47,7 +47,38 @@ docker compose up -d --build
 docker compose exec web python manage.py createsuperuser
 ```
 
-Админка — `http://localhost/admin/`, схема API — `/api/docs/`.
+Наружу ничего не выставлено (см. «Развёртывание на VPS» — публично торчит
+только Caddy); для локальной проверки раскомментируйте `ports` у `web` в
+`docker-compose.yml`. Тогда админка — `http://localhost:8000/admin/`,
+схема API — `/api/docs/`.
+
+## Развёртывание на VPS
+
+Тем же способом, что и MCP-серверы (`ozon-seller-mcp`, `k8s-mcp`): общий Caddy
+на машину, один Caddyfile на все сервисы, TLS от Let's Encrypt сам.
+
+```bash
+git clone git@github.com:MainAlexStark/EI_doc.git
+cd EI_doc
+./deploy.sh eidoc.example.com
+docker compose exec web python manage.py createsuperuser
+```
+
+Скрипт заведёт `.env` из примера, сгенерирует `SECRET_KEY` и пароль БД,
+пропишет домен в `ALLOWED_HOSTS`/`CSRF_TRUSTED_ORIGINS`, поднимет (или
+переиспользует) общий Caddy в `/opt/infrastructure`, соберёт и запустит
+сервер и дождётся ответа `/healthz` по HTTPS.
+
+```bash
+./deploy.sh update      # обновить до свежего коммита, с откатом при неудаче
+./deploy.sh status      # что запущено и отвечает ли /healthz
+./deploy.sh logs
+./deploy.sh secrets     # где лежат пароли и адрес
+```
+
+Секреты живут в `.env` в корне репозитория (права 600) — тот же файл, что
+читает локальная разработка без Docker, повторный запуск `./deploy.sh` их не
+перевыпускает.
 
 ## Разработка без Docker
 

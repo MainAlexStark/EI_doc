@@ -10,7 +10,6 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 X_FRAME_OPTIONS = "DENY"
 
-# Файлы отдаёт nginx: Django проверяет права и возвращает заголовок,
-# сам файл по сети из Python не течёт.
-USE_X_ACCEL_REDIRECT = True
-X_ACCEL_MEDIA_PREFIX = "/protected-media/"
+# X-Accel-Redirect был завязан на nginx, которого в проде больше нет —
+# см. SENDFILE_* в base.py. Здесь специально ничего не переопределяется:
+# прод и dev отдают защищённые файлы одинаково.
