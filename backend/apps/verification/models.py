@@ -183,6 +183,11 @@ class Verification(models.Model):
     status = models.CharField(
         "статус", max_length=12, choices=VerificationStatus.choices, default=VerificationStatus.DRAFT
     )
+    needs_review = models.BooleanField(
+        "есть строки на сверку", default=False, db_index=True,
+        help_text="Распознано неуверенно или объём по эталону разошёлся с расчётным. "
+                  "Признак вынесен из JSON отдельным полем — по нему фильтруется журнал",
+    )
     review_note = models.TextField("замечание нормоконтроля", blank=True)
 
     created_at = models.DateTimeField("создана", auto_now_add=True, db_index=True)

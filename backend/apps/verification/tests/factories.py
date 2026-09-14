@@ -40,11 +40,27 @@ def attest(employee: Employee, family: MeasurementFamily, *, years: int = 5):
     return attestation
 
 
-def make_instrument(family: MeasurementFamily, serial: str):
+def make_si_type(
+    family: MeasurementFamily,
+    *,
+    registry_number: str = "12345-06",
+    name: str = "СВК-15",
+    limits: dict | None = None,
+) -> SiType:
     si_type, _ = SiType.objects.get_or_create(
-        family=family, registry_number="12345-06", defaults={"name": "СВК-15"}
+        family=family, registry_number=registry_number, name=name,
+        defaults={"limits": limits or {}},
     )
-    return Instrument.objects.create(si_type=si_type, serial_number=serial)
+    if limits and si_type.limits != limits:
+        si_type.limits = limits
+        si_type.save(update_fields=["limits"])
+    return si_type
+
+
+def make_instrument(family: MeasurementFamily, serial: str, si_type: SiType | None = None):
+    return Instrument.objects.create(
+        si_type=si_type or make_si_type(family), serial_number=serial
+    )
 
 
 def make_verification(
@@ -55,11 +71,12 @@ def make_verification(
     serial: str | None = None,
     month: int = 3,
     year: int = 2026,
+    si_type: SiType | None = None,
 ) -> Verification:
     """Поверка в указанный день, 10:00 по местному времени. По умолчанию март 2026."""
     moment = timezone.make_aware(dt.datetime(year, month, day, 10, 0))
     return Verification.objects.create(
-        instrument=make_instrument(family, serial or f"SN{day:03d}"),
+        instrument=make_instrument(family, serial or f"SN{day:03d}", si_type),
         verifier=employee,
         verified_at=moment,
     )

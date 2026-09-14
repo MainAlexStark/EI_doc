@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.verification import measurements as service
+from apps.catalog import conditions as wm_conditions
 from apps.verification.calculators import water_meter as wm
 from apps.verification.models import Verification
 
@@ -41,6 +42,10 @@ class MeasurementsSerializer(serializers.Serializer):
     pulse_weight = serializers.CharField(
         required=False, allow_blank=True,
         help_text="Коэффициент преобразования K, м³/имп — для счётчиков с импульсным выходом",
+    )
+    unit_type = serializers.ChoiceField(
+        choices=[wm_conditions.HOT, wm_conditions.COLD], required=False, allow_blank=True,
+        help_text="Тип счётчика: г/в или х/в",
     )
     water_temperature = serializers.CharField(
         required=False, allow_blank=True,

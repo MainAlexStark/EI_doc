@@ -214,6 +214,9 @@ def apply(verification: Verification, payload: dict) -> Applied:
         "water_temperature": (
             str(payload["water_temperature"]) if payload.get("water_temperature") else None
         ),
+        # Горячая или холодная — идёт в графу «Тип» журнала и задаёт диапазон
+        # температуры поверочной жидкости.
+        "unit_type": payload.get("unit_type") or None,
         "checks": checks,
         "rows": stored,
     }
@@ -227,6 +230,7 @@ def apply(verification: Verification, payload: dict) -> Applied:
     }
     verification.suitable = verdict.suitable
     verification.unsuitability_reason = "; ".join(verdict.reasons) if not verdict.suitable else ""
+    verification.needs_review = bool(needs_review)
 
     # Со сканом поверка не уходит на нормоконтроль, пока спорные строки
     # не подтверждены человеком.
@@ -237,8 +241,8 @@ def apply(verification: Verification, payload: dict) -> Applied:
 
     verification.save(
         update_fields=[
-            "measurements", "results", "suitable",
-            "unsuitability_reason", "status", "updated_at",
+            "measurements", "results", "suitable", "unsuitability_reason",
+            "status", "needs_review", "updated_at",
         ]
     )
 
@@ -270,7 +274,8 @@ def confirm_rows(verification: Verification, rows: list[int]) -> list[int]:
 
     remaining = [row["row"] for row in stored if row.get("needs_review")]
     verification.measurements = data
+    verification.needs_review = bool(remaining)
     if not remaining and verification.status == VerificationStatus.DRAFT:
         verification.status = VerificationStatus.READY
-    verification.save(update_fields=["measurements", "status", "updated_at"])
+    verification.save(update_fields=["measurements", "status", "needs_review", "updated_at"])
     return remaining

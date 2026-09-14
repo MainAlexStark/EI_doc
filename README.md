@@ -4,7 +4,8 @@
 Заменяет десктопное приложение EI_protocols (PyQt6 + Excel COM) и поглощает EI_HUB.
 
 Документация: [архитектура](docs/architecture.md) · [нумерация протоколов](docs/numbering.md) ·
-[условия поверки](docs/conditions.md) · [измерения](docs/measurements.md).
+[условия поверки](docs/conditions.md) · [измерения](docs/measurements.md) ·
+[журнал и нормоконтроль](docs/journal.md).
 
 ## Состояние
 
@@ -24,16 +25,18 @@
 - **Ввод измерений** с экрана и со скана бланка: объём показаниями, импульсами или
   напрямую, вердикт выводится из чисел, спорные распознанные строки уходят на сверку
 - **Печать протокола** Typst-шаблоном, вид один в один с прежним документом из `.xlsm`
-  напрямую, вердикт выводится из чисел, спорные распознанные строки уходят на сверку
+- **Веб-журнал**: таблица с фильтрами и поиском, состояние протокола, выгрузка в `.xlsx`
+  формата ФИФ ОЕИ — те же 49 колонок, что в прежнем журнале
+- **Экран нормоконтроля**: предпросмотр пересчёта номеров до применения,
+  подпись пачкой, самопроверка хронологии
 - **Справочник 60 типов счётчиков** с метрологическими характеристиками,
   вынутый из рабочих шаблонов: `python manage.py seed_catalog`
 - Аудит изменений по ключевым моделям (`django-simple-history`)
 - Импорт исторического журнала: на реальном журнале переносится 8073 строки из 8126
 - docker compose: nginx, gunicorn, Celery worker + beat, PostgreSQL, Redis
-- 91 тест
+- 110 тестов
 
-Дальше по этапу 1: веб-журнал с параллельной работой
-и экраном нормоконтроля.
+Этап 1 закрыт. Дальше этап 2: EI_Hub внутрь, роутинг заявок, наряды, задачи.
 
 ## Запуск
 
@@ -51,10 +54,22 @@ docker compose exec web python manage.py createsuperuser
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r backend/requirements-dev.txt
+
 cd backend
-python manage.py migrate
-python manage.py runserver
+DJANGO_SETTINGS_MODULE=config.settings.local_sqlite python manage.py migrate
+DJANGO_SETTINGS_MODULE=config.settings.local_sqlite python manage.py seed_catalog
+DJANGO_SETTINGS_MODULE=config.settings.local_sqlite python manage.py seed_demo
+DJANGO_SETTINGS_MODULE=config.settings.local_sqlite python manage.py runserver
 ```
+
+Фронт отдельным процессом:
+
+```bash
+cd frontend && npm install && npm run dev    # http://localhost:5173
+```
+
+Вход демо-данных: `metrolog@ei.test` / `demo12345`. `seed_demo` работает
+только при `DEBUG=True`.
 
 Тесты (SQLite, быстро):
 
