@@ -17,7 +17,10 @@ class MeasurementRowSerializer(serializers.Serializer):
     """Одна строка. Объём по счётчику — показаниями, импульсами или напрямую."""
 
     seconds = serializers.IntegerField(required=False, min_value=1)
-    flow_rate = serializers.CharField(help_text="Расход Q с установки, м³/ч")
+    flow_rate = serializers.CharField(help_text="Расход Q, м³/ч — режим установки")
+    volume_standard = serializers.CharField(
+        help_text="Vэтал, м³ — объём по поверочной установке"
+    )
 
     reading_start = serializers.CharField(required=False, allow_blank=True)
     reading_end = serializers.CharField(required=False, allow_blank=True)
@@ -38,6 +41,10 @@ class MeasurementsSerializer(serializers.Serializer):
     pulse_weight = serializers.CharField(
         required=False, allow_blank=True,
         help_text="Коэффициент преобразования K, м³/имп — для счётчиков с импульсным выходом",
+    )
+    water_temperature = serializers.CharField(
+        required=False, allow_blank=True,
+        help_text="Температура поверочной жидкости, °С — строка в условиях поверки",
     )
     checks = serializers.DictField(
         child=serializers.BooleanField(), required=False,

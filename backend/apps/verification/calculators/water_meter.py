@@ -127,29 +127,43 @@ class MeasurementError(ValueError):
 
 @dataclass(frozen=True)
 class Measurement:
-    """Одна строка измерений: то, что поверитель снял с установки и со счётчика.
+    """Одна строка измерений — две величины и их сравнение.
 
-    Объём по счётчику можно задать тремя способами, в порядке приоритета:
+    ``volume_meter`` — сколько намерил поверяемый счётчик. В протоколе это
+    графа «Vсчет (Vij = K*N ij), м³». Задаётся, в порядке приоритета:
 
-    1. ``volume_meter`` напрямую;
-    2. импульсами: ``pulses`` × ``pulse_weight`` (K, м³/имп) — так устроены
-       счётчики с импульсным выходом, у них в шаблоне есть коэффициент
-       преобразования;
-    3. показаниями: ``reading_end`` − ``reading_start`` — обычный механический
-       счётчик, поверитель списывает цифры с табло.
+    1. напрямую;
+    2. импульсами: ``pulses`` × ``pulse_weight`` (K, м³/имп);
+    3. показаниями: ``reading_end`` − ``reading_start``.
+
+    ``volume_standard`` — сколько воды прошло на самом деле, по эталонной
+    установке. В протоколе это графа «Vэтал, м³». Только ввод: установка
+    измеряет его сама, вывести его из расхода нельзя.
+
+    Внимание на порядок: в старых шаблонах ячейка `AW` (Vсчет) считалась как
+    Q × t / 3600, а `BD` (Vэтал) получалась прибавлением случайной поправки.
+    Имена ячеек к смыслу колонок отношения не имеют — смотреть надо на
+    заголовки `AW50` и `BD50` листа «Протокол».
     """
 
-    flow_rate: Decimal            # Q, м³/ч — с установки
+    flow_rate: Decimal            # Q, м³/ч — режим установки
     seconds: int                  # длительность пролива
-    volume_meter: Decimal | None = None
+    volume_standard: Decimal | None = None   # Vэтал — с установки
+    volume_meter: Decimal | None = None      # Vсчет
     reading_start: Decimal | None = None
     reading_end: Decimal | None = None
     pulses: int | None = None
-    pulse_weight: Decimal | None = None   # K, м³/имп
+    pulse_weight: Decimal | None = None      # K, м³/имп
     mode: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "volume_meter", self._resolve_volume_meter())
+        if self.volume_standard is None:
+            raise MeasurementError(
+                "Не указан объём по эталону — его показывает поверочная установка, "
+                "рассчитать его из расхода нельзя"
+            )
+        object.__setattr__(self, "volume_standard", _dec(self.volume_standard))
 
     def _resolve_volume_meter(self) -> Decimal:
         if self.volume_meter is not None:
@@ -177,19 +191,32 @@ class Measurement:
         )
 
     @property
-    def volume_standard(self) -> Decimal:
-        """V эталона: ROUNDUP(Q × t / 3600, 3)."""
+    def expected_volume(self) -> Decimal:
+        """Сколько воды должно было пройти за пролив: ROUNDUP(Q × t / 3600, 3).
+
+        Не результат измерения, а ориентир: помогает поймать опечатку в
+        объёме по эталону или в длительности.
+        """
         return excel_roundup(_dec(self.flow_rate) * self.seconds / Decimal(3600), 3)
 
     @property
+    def standard_deviation_pct(self) -> Decimal:
+        """На сколько объём по эталону разошёлся с расчётным, %."""
+        expected = self.expected_volume
+        if expected == 0:
+            return Decimal(0)
+        return excel_round((_dec(self.volume_standard) - expected) / expected * 100, 1)
+
+    @property
     def relative_error(self) -> Decimal:
-        """δ = ROUND((Vэт − Vсч) / Vсч × 100, 1), %."""
-        volume_meter = _dec(self.volume_meter)
-        if volume_meter == 0:
+        """δ = ROUND((Vсчет − Vэтал) / Vэтал × 100, 1), %."""
+        volume_standard = _dec(self.volume_standard)
+        if volume_standard == 0:
             raise MeasurementError(
-                "Объём по счётчику равен нулю — счётчик не крутился, погрешность не определена"
+                "Объём по эталону равен нулю — через установку не прошло воды, "
+                "погрешность не определена"
             )
-        ratio = (self.volume_standard - volume_meter) / volume_meter * 100
+        ratio = (_dec(self.volume_meter) - volume_standard) / volume_standard * 100
         return excel_round(ratio, 1)
 
     def is_within_limits(self, limits: MeterLimits, meter_class: str) -> bool:
@@ -201,8 +228,11 @@ class Measurement:
             "mode": self.mode,
             "seconds": self.seconds,
             "flow_rate": str(_dec(self.flow_rate)),
+            "reading_start": str(_dec(self.reading_start)) if self.reading_start is not None else None,
+            "reading_end": str(_dec(self.reading_end)) if self.reading_end is not None else None,
             "volume_meter": str(_dec(self.volume_meter)),
-            "volume_standard": str(self.volume_standard),
+            "volume_standard": str(_dec(self.volume_standard)),
+            "expected_volume": str(self.expected_volume),
             "error_pct": str(self.relative_error),
             "limit_pct": str(limits.error_limit(self.flow_rate, meter_class)),
             "within_limits": self.is_within_limits(limits, meter_class),

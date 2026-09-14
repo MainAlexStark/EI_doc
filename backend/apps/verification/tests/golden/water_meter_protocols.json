@@ -1,6 +1,6 @@
 [
  {
-  "file": "__-03-02-00763____-15__13429206_16078-05.xlsm",
+  "file": "10b5fc9d-__-03-02-00763____-15__13429206_16078-05.xlsm",
   "protocol": "ПРОТОКОЛ №ЕИ-04/02-00763",
   "meter_type": "СХВ-15 16078-05",
   "meter_class": "В",
@@ -12,8 +12,8 @@
     "q": 0.03,
     "reading_start": 229.083,
     "reading_end": 229.089,
-    "v_standard": 0.006,
-    "v_meter": 0.0063,
+    "volume_meter": 0.006,
+    "volume_standard": 0.0063,
     "error_pct": -4.8
    },
    {
@@ -22,8 +22,8 @@
     "q": 0.125,
     "reading_start": 229.096,
     "reading_end": 229.109,
-    "v_standard": 0.013000000000000001,
-    "v_meter": 0.013200000000000002,
+    "volume_meter": 0.013000000000000001,
+    "volume_standard": 0.013200000000000002,
     "error_pct": -1.5
    },
    {
@@ -32,14 +32,14 @@
     "q": 0.93,
     "reading_start": 229.126,
     "reading_end": 229.157,
-    "v_standard": 0.031,
-    "v_meter": 0.0313,
+    "volume_meter": 0.031,
+    "volume_standard": 0.0313,
     "error_pct": -1
    }
   ]
  },
  {
-  "file": "__-03-02-00767____-15__12470437_16078-13.xlsm",
+  "file": "82d9ea18-__-03-02-00767____-15__12470437_16078-13.xlsm",
   "protocol": "ПРОТОКОЛ №ЕИ-04/02-00767",
   "meter_type": "СХВ-15 16078-13",
   "meter_class": "В",
@@ -51,8 +51,8 @@
     "q": 0.03,
     "reading_start": 1091.763,
     "reading_end": 1091.769,
-    "v_standard": 0.006,
-    "v_meter": 0.0063,
+    "volume_meter": 0.006,
+    "volume_standard": 0.0063,
     "error_pct": -4.8
    },
    {
@@ -61,8 +61,8 @@
     "q": 0.132,
     "reading_start": 1091.775,
     "reading_end": 1091.789,
-    "v_standard": 0.013999999999999999,
-    "v_meter": 0.014199999999999999,
+    "volume_meter": 0.013999999999999999,
+    "volume_standard": 0.014199999999999999,
     "error_pct": -1.4
    },
    {
@@ -71,14 +71,14 @@
     "q": 0.666,
     "reading_start": 1091.807,
     "reading_end": 1091.83,
-    "v_standard": 0.023,
-    "v_meter": 0.0226,
+    "volume_meter": 0.023,
+    "volume_standard": 0.0226,
     "error_pct": 1.8
    }
   ]
  },
  {
-  "file": "__-03-02-00765_____15-3-8__1010010741403_13869-13.xlsm",
+  "file": "86b90c36-__-03-02-00765_____15-3-8__1010010741403_13869-13.xlsm",
   "protocol": "ПРОТОКОЛ №ЕИ-04/02-00765",
   "meter_type": "СВК 15-3-8 13869-13",
   "meter_class": "В",
@@ -90,8 +90,8 @@
     "q": 0.033,
     "reading_start": 680.076,
     "reading_end": 680.083,
-    "v_standard": 0.007,
-    "v_meter": 0.0071,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0071,
     "error_pct": -1.4
    },
    {
@@ -100,8 +100,8 @@
     "q": 0.033,
     "reading_start": 680.086,
     "reading_end": 680.093,
-    "v_standard": 0.007,
-    "v_meter": 0.0068000000000000005,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0068000000000000005,
     "error_pct": 2.9
    },
    {
@@ -110,8 +110,8 @@
     "q": 0.033,
     "reading_start": 680.096,
     "reading_end": 680.103,
-    "v_standard": 0.007,
-    "v_meter": 0.0069,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0069,
     "error_pct": 1.4
    },
    {
@@ -120,8 +120,8 @@
     "q": 0.13,
     "reading_start": 680.1089999999999,
     "reading_end": 680.122,
-    "v_standard": 0.013,
-    "v_meter": 0.013,
+    "volume_meter": 0.013,
+    "volume_standard": 0.013,
     "error_pct": 0
    },
    {
@@ -130,8 +130,8 @@
     "q": 0.131,
     "reading_start": 680.1279999999999,
     "reading_end": 680.1419999999999,
-    "v_standard": 0.013999999999999999,
-    "v_meter": 0.0139,
+    "volume_meter": 0.013999999999999999,
+    "volume_standard": 0.0139,
     "error_pct": 0.7
    },
    {
@@ -140,8 +140,8 @@
     "q": 0.13,
     "reading_start": 680.146,
     "reading_end": 680.159,
-    "v_standard": 0.013,
-    "v_meter": 0.012799999999999999,
+    "volume_meter": 0.013,
+    "volume_standard": 0.012799999999999999,
     "error_pct": 1.6
    },
    {
@@ -150,8 +150,8 @@
     "q": 0.927,
     "reading_start": 680.176,
     "reading_end": 680.207,
-    "v_standard": 0.031,
-    "v_meter": 0.0309,
+    "volume_meter": 0.031,
+    "volume_standard": 0.0309,
     "error_pct": 0.3
    },
    {
@@ -160,8 +160,8 @@
     "q": 0.931,
     "reading_start": 680.225,
     "reading_end": 680.2570000000001,
-    "v_standard": 0.032,
-    "v_meter": 0.0322,
+    "volume_meter": 0.032,
+    "volume_standard": 0.0322,
     "error_pct": -0.6
    },
    {
@@ -170,14 +170,14 @@
     "q": 0.942,
     "reading_start": 680.272,
     "reading_end": 680.3040000000001,
-    "v_standard": 0.032,
-    "v_meter": 0.0315,
+    "volume_meter": 0.032,
+    "volume_standard": 0.0315,
     "error_pct": 1.6
    }
   ]
  },
  {
-  "file": "__-03-02-00766___-15____14012206_24319-05.xlsm",
+  "file": "c164bc66-__-03-02-00766___-15____14012206_24319-05.xlsm",
   "protocol": "ПРОТОКОЛ №ЕИ-04/02-00766",
   "meter_type": "СВ-15Х 24319-05",
   "meter_class": "В",
@@ -189,8 +189,8 @@
     "q": 0.032,
     "reading_start": 764.246,
     "reading_end": 764.2529999999999,
-    "v_standard": 0.007,
-    "v_meter": 0.0068000000000000005,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0068000000000000005,
     "error_pct": 2.9
    },
    {
@@ -199,8 +199,8 @@
     "q": 0.03,
     "reading_start": 764.256,
     "reading_end": 764.262,
-    "v_standard": 0.006,
-    "v_meter": 0.0061,
+    "volume_meter": 0.006,
+    "volume_standard": 0.0061,
     "error_pct": -1.6
    },
    {
@@ -209,8 +209,8 @@
     "q": 0.031,
     "reading_start": 764.2629999999999,
     "reading_end": 764.2699999999999,
-    "v_standard": 0.007,
-    "v_meter": 0.0073,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0073,
     "error_pct": -4.1
    },
    {
@@ -219,8 +219,8 @@
     "q": 0.132,
     "reading_start": 764.2759999999998,
     "reading_end": 764.2899999999998,
-    "v_standard": 0.013999999999999999,
-    "v_meter": 0.0139,
+    "volume_meter": 0.013999999999999999,
+    "volume_standard": 0.0139,
     "error_pct": 0.7
    },
    {
@@ -229,8 +229,8 @@
     "q": 0.129,
     "reading_start": 764.2939999999999,
     "reading_end": 764.3069999999999,
-    "v_standard": 0.013000000000000001,
-    "v_meter": 0.013200000000000002,
+    "volume_meter": 0.013000000000000001,
+    "volume_standard": 0.013200000000000002,
     "error_pct": -1.5
    },
    {
@@ -239,8 +239,8 @@
     "q": 0.135,
     "reading_start": 764.3109999999999,
     "reading_end": 764.3249999999999,
-    "v_standard": 0.013999999999999999,
-    "v_meter": 0.0139,
+    "volume_meter": 0.013999999999999999,
+    "volume_standard": 0.0139,
     "error_pct": 0.7
    },
    {
@@ -249,8 +249,8 @@
     "q": 0.926,
     "reading_start": 764.342,
     "reading_end": 764.3729999999999,
-    "v_standard": 0.031,
-    "v_meter": 0.0305,
+    "volume_meter": 0.031,
+    "volume_standard": 0.0305,
     "error_pct": 1.6
    },
    {
@@ -259,8 +259,8 @@
     "q": 0.932,
     "reading_start": 764.3889999999999,
     "reading_end": 764.4209999999999,
-    "v_standard": 0.032,
-    "v_meter": 0.0324,
+    "volume_meter": 0.032,
+    "volume_standard": 0.0324,
     "error_pct": -1.2
    },
    {
@@ -269,14 +269,14 @@
     "q": 0.944,
     "reading_start": 764.4369999999999,
     "reading_end": 764.4689999999999,
-    "v_standard": 0.032,
-    "v_meter": 0.0316,
+    "volume_meter": 0.032,
+    "volume_standard": 0.0316,
     "error_pct": 1.3
    }
   ]
  },
  {
-  "file": "__-03-02-00764_____15-3-2_ARZAMAS__1010010527700_13869-13.xlsm",
+  "file": "e08a7f1f-__-03-02-00764_____15-3-2_ARZAMAS__1010010527700_13869-13.xlsm",
   "protocol": "ПРОТОКОЛ №ЕИ-04/02-00764",
   "meter_type": "СВК 15-3-2 ARZAMAS 13869-13",
   "meter_class": "В",
@@ -288,8 +288,8 @@
     "q": 0.033,
     "reading_start": 46.447,
     "reading_end": 46.454,
-    "v_standard": 0.007,
-    "v_meter": 0.0073,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0073,
     "error_pct": -4.1
    },
    {
@@ -298,8 +298,8 @@
     "q": 0.033,
     "reading_start": 46.457,
     "reading_end": 46.464,
-    "v_standard": 0.007,
-    "v_meter": 0.0073,
+    "volume_meter": 0.007,
+    "volume_standard": 0.0073,
     "error_pct": -4.1
    },
    {
@@ -308,8 +308,8 @@
     "q": 0.03,
     "reading_start": 46.466,
     "reading_end": 46.472,
-    "v_standard": 0.006,
-    "v_meter": 0.0062,
+    "volume_meter": 0.006,
+    "volume_standard": 0.0062,
     "error_pct": -3.2
    },
    {
@@ -318,8 +318,8 @@
     "q": 0.13,
     "reading_start": 46.478,
     "reading_end": 46.491,
-    "v_standard": 0.013,
-    "v_meter": 0.0132,
+    "volume_meter": 0.013,
+    "volume_standard": 0.0132,
     "error_pct": -1.5
    },
    {
@@ -328,8 +328,8 @@
     "q": 0.129,
     "reading_start": 46.498,
     "reading_end": 46.510999999999996,
-    "v_standard": 0.013000000000000001,
-    "v_meter": 0.013000000000000001,
+    "volume_meter": 0.013000000000000001,
+    "volume_standard": 0.013000000000000001,
     "error_pct": 0
    },
    {
@@ -338,8 +338,8 @@
     "q": 0.133,
     "reading_start": 46.51499999999999,
     "reading_end": 46.528999999999996,
-    "v_standard": 0.013999999999999999,
-    "v_meter": 0.014099999999999998,
+    "volume_meter": 0.013999999999999999,
+    "volume_standard": 0.014099999999999998,
     "error_pct": -0.7
    },
    {
@@ -348,8 +348,8 @@
     "q": 0.933,
     "reading_start": 46.546,
     "reading_end": 46.577999999999996,
-    "v_standard": 0.032,
-    "v_meter": 0.0317,
+    "volume_meter": 0.032,
+    "volume_standard": 0.0317,
     "error_pct": 0.9
    },
    {
@@ -358,8 +358,8 @@
     "q": 0.95,
     "reading_start": 46.596,
     "reading_end": 46.62799999999999,
-    "v_standard": 0.032,
-    "v_meter": 0.0323,
+    "volume_meter": 0.032,
+    "volume_standard": 0.0323,
     "error_pct": -0.9
    },
    {
@@ -368,8 +368,8 @@
     "q": 0.933,
     "reading_start": 46.645999999999994,
     "reading_end": 46.67799999999999,
-    "v_standard": 0.032,
-    "v_meter": 0.032,
+    "volume_meter": 0.032,
+    "volume_standard": 0.032,
     "error_pct": 0
    }
   ]

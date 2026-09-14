@@ -4,9 +4,10 @@
 обе раскладки шаблона: короткая на 3 строки измерений и полная на 9.
 Значения вынуты из `.xlsm` такими, какими их посчитал Excel.
 
-Проверяется, что Python считает **те же числа**: объём по эталону, показания в
-конце измерения и относительная погрешность. Расходы и объёмы по счётчику —
-входные данные, они берутся из протокола как есть.
+Про названия колонок. В шаблоне ячейка `AW` озаглавлена «Vсчет (Vij = K*N ij)»,
+а `BD` — «Vэтал» (см. `AW50` и `BD50` листа «Протокол»). То есть объём по
+счётчику лежит в `AW`, по эталону — в `BD`, и погрешность считается как
+(Vсчет − Vэтал) / Vэтал — обычное определение относительной погрешности.
 
 Пересобрать эталон из новых файлов: `python tools/extract_golden.py <папка>`.
 """
@@ -39,6 +40,15 @@ LIMITS = wm.MeterLimits.from_dict(
 )
 
 
+def measurement(row: dict) -> wm.Measurement:
+    return wm.Measurement(
+        flow_rate=Decimal(str(row["q"])),
+        seconds=row["seconds"],
+        volume_meter=Decimal(str(row["volume_meter"])),
+        volume_standard=Decimal(str(row["volume_standard"])),
+    )
+
+
 def cases():
     for protocol in GOLDEN:
         for row in protocol["measurements"]:
@@ -51,86 +61,86 @@ class GoldenTestCase(SimpleTestCase):
         assert layouts == {"compact3", "extended9"}
         assert sum(len(p["measurements"]) for p in GOLDEN) == 33
 
-    def test_volume_by_standard_matches_excel(self):
-        """V эталона = ROUNDUP(Q × t / 3600, 3)."""
-        mismatches = []
-        for name, _layout, row in cases():
-            measurement = wm.Measurement(
-                flow_rate=Decimal(str(row["q"])),
-                seconds=row["seconds"],
-                volume_meter=Decimal(str(row["v_meter"])),
-            )
-            expected = Decimal(str(row["v_standard"]))
-            if abs(measurement.volume_standard - expected) > TOLERANCE:
-                mismatches.append(
-                    f"{name} строка {row['row']}: получили {measurement.volume_standard}, "
-                    f"в протоколе {expected}"
-                )
-        assert not mismatches, "\n".join(mismatches)
-
     def test_relative_error_matches_excel(self):
-        """δ = ROUND((Vэт − Vсч) / Vсч × 100, 1)."""
+        """δ = ROUND((Vсчет − Vэтал) / Vэтал × 100, 1)."""
         mismatches = []
         for name, _layout, row in cases():
-            measurement = wm.Measurement(
-                flow_rate=Decimal(str(row["q"])),
-                seconds=row["seconds"],
-                volume_meter=Decimal(str(row["v_meter"])),
-            )
+            got = measurement(row).relative_error
             expected = Decimal(str(row["error_pct"]))
-            if measurement.relative_error != expected:
+            if got != expected:
                 mismatches.append(
-                    f"{name} строка {row['row']}: получили {measurement.relative_error} %, "
-                    f"в протоколе {expected} %"
+                    f"{name} строка {row['row']}: получили {got} %, в протоколе {expected} %"
                 )
         assert not mismatches, "\n".join(mismatches)
 
-    def test_template_relation_between_readings_and_standard_volume(self):
-        """В шаблоне показания конца = показания начала + V эталона.
+    def test_meter_volume_equals_readings_difference(self):
+        """Vсчет = показания в конце − показания в начале."""
+        mismatches = []
+        for name, _layout, row in cases():
+            by_readings = Decimal(str(row["reading_end"])) - Decimal(str(row["reading_start"]))
+            expected = Decimal(str(row["volume_meter"]))
+            if abs(by_readings - expected) > TOLERANCE:
+                mismatches.append(
+                    f"{name} строка {row['row']}: по показаниям {by_readings}, "
+                    f"в графе Vсчет {expected}"
+                )
+        assert not mismatches, "\n".join(mismatches)
 
-        Физически это не так (счётчик показывает свой объём, а не эталонный),
-        но соотношение фиксируем: по нему сверяется разбор старых протоколов.
+    def test_expected_volume_matches_excel_roundup(self):
+        """Расчётный объём за пролив: ROUNDUP(Q × t / 3600, 3).
+
+        В старых протоколах объём по счётчику ему в точности равен — именно так
+        шаблон его и получал.
         """
         mismatches = []
         for name, _layout, row in cases():
-            measurement = wm.Measurement(
-                flow_rate=Decimal(str(row["q"])),
-                seconds=row["seconds"],
-                volume_meter=Decimal(str(row["v_meter"])),
-            )
-            computed = Decimal(str(row["reading_start"])) + measurement.volume_standard
-            expected = Decimal(str(row["reading_end"]))
-            if abs(computed - expected) > TOLERANCE:
+            got = measurement(row).expected_volume
+            expected = Decimal(str(row["volume_meter"]))
+            if abs(got - expected) > TOLERANCE:
                 mismatches.append(
-                    f"{name} строка {row['row']}: получили {computed}, в протоколе {expected}"
+                    f"{name} строка {row['row']}: расчётный {got}, в протоколе {expected}"
                 )
         assert not mismatches, "\n".join(mismatches)
-
-    def test_volume_from_readings_matches_volume_from_pulses(self):
-        """Три способа задать объём по счётчику дают одно и то же."""
-        direct = wm.Measurement(flow_rate="0.03", seconds=720, volume_meter="0.0063")
-        by_readings = wm.Measurement(
-            flow_rate="0.03", seconds=720, reading_start="229.0830", reading_end="229.0893"
-        )
-        by_pulses = wm.Measurement(
-            flow_rate="0.03", seconds=720, pulses=9, pulse_weight="0.0007"
-        )
-        assert direct.volume_meter == by_readings.volume_meter == by_pulses.volume_meter
-        assert direct.relative_error == by_readings.relative_error
 
     def test_all_golden_protocols_are_suitable(self):
         """Все пять протоколов выпущены как годные — калькулятор должен согласиться."""
         for protocol in GOLDEN:
-            measurements = [
-                wm.Measurement(
-                    flow_rate=Decimal(str(row["q"])),
-                    seconds=row["seconds"],
-                    volume_meter=Decimal(str(row["v_meter"])),
-                )
-                for row in protocol["measurements"]
-            ]
-            verdict = wm.evaluate(measurements, LIMITS, protocol["meter_class"])
+            rows = [measurement(row) for row in protocol["measurements"]]
+            verdict = wm.evaluate(rows, LIMITS, protocol["meter_class"])
             assert verdict.suitable, f"{protocol['protocol']}: {verdict.reasons}"
+
+
+class VolumeSourcesTestCase(SimpleTestCase):
+    def test_three_ways_to_give_the_meter_volume_agree(self):
+        common = {"flow_rate": "0.03", "seconds": 720, "volume_standard": "0.0063"}
+        direct = wm.Measurement(volume_meter="0.006", **common)
+        by_readings = wm.Measurement(reading_start="229.083", reading_end="229.089", **common)
+        by_pulses = wm.Measurement(pulses=6, pulse_weight="0.001", **common)
+
+        assert direct.volume_meter == by_readings.volume_meter == by_pulses.volume_meter
+        assert direct.relative_error == by_readings.relative_error == Decimal("-4.8")
+
+    def test_standard_volume_is_required(self):
+        with pytest.raises(wm.MeasurementError, match="объём по эталону"):
+            wm.Measurement(flow_rate="0.03", seconds=720, volume_meter="0.006")
+
+    def test_readings_going_backwards_are_rejected(self):
+        with pytest.raises(wm.MeasurementError, match="меньше, чем в начале"):
+            wm.Measurement(
+                flow_rate="0.03", seconds=720, volume_standard="0.0063",
+                reading_start="229.089", reading_end="229.083",
+            )
+
+    def test_deviation_from_expected_catches_a_typo(self):
+        """Объём по эталону на порядок больше расчётного — где-то лишний ноль."""
+        sane = wm.Measurement(
+            flow_rate="0.03", seconds=720, volume_meter="0.006", volume_standard="0.0063"
+        )
+        typo = wm.Measurement(
+            flow_rate="0.03", seconds=720, volume_meter="0.006", volume_standard="0.063"
+        )
+        assert abs(sane.standard_deviation_pct) == Decimal("5.0")
+        assert typo.standard_deviation_pct == Decimal("950.0")
 
 
 class RoundingTestCase(SimpleTestCase):
@@ -163,14 +173,15 @@ class LimitsTestCase(SimpleTestCase):
 
 
 class VerdictTestCase(SimpleTestCase):
-    def make(self, flow_rate, volume_meter):
+    def make(self, flow_rate, volume_meter, volume_standard):
         return wm.Measurement(
-            flow_rate=Decimal(flow_rate), seconds=720, volume_meter=Decimal(volume_meter)
+            flow_rate=Decimal(flow_rate), seconds=720,
+            volume_meter=Decimal(volume_meter), volume_standard=Decimal(volume_standard),
         )
 
     def test_out_of_tolerance_row_makes_the_meter_unsuitable(self):
-        good = self.make("0.03", "0.0063")     # δ = −4.8 % при допуске 5 %
-        bad = self.make("0.03", "0.0068")      # δ = −11.8 %
+        good = self.make("0.03", "0.006", "0.0063")    # δ = −4.8 % при допуске 5 %
+        bad = self.make("0.03", "0.006", "0.0068")     # δ = −11.8 %
         verdict = wm.evaluate([good, bad], LIMITS, wm.CLASS_B)
 
         assert not verdict.suitable
@@ -178,17 +189,17 @@ class VerdictTestCase(SimpleTestCase):
         assert "δ = -11.8 %" in verdict.reasons[0]
 
     def test_flow_range_note_matches_the_journal_wording(self):
-        measurements = [self.make("0.03", "0.0063"), self.make("0.948", "0.19")]
-        note = wm.flow_range_note(measurements, LIMITS)
+        rows = [self.make("0.03", "0.006", "0.0063"), self.make("0.948", "0.19", "0.19")]
+        note = wm.flow_range_note(rows, LIMITS)
         assert note == "Поверен в диапазоне расхода (0,03-0.948) м3/ч"
 
-    def test_zero_meter_volume_is_an_error_not_a_crash_later(self):
-        with pytest.raises(wm.MeasurementError, match="счётчик не крутился"):
-            self.make("0.03", "0").relative_error
+    def test_zero_standard_volume_is_an_error_not_a_crash_later(self):
+        with pytest.raises(wm.MeasurementError, match="не прошло воды"):
+            self.make("0.03", "0.006", "0").relative_error
 
-    def test_failed_visual_check_makes_the_meter_unsuitable(self):
+    def test_failed_tightness_check_makes_the_meter_unsuitable(self):
         """Погрешность в допуске, но герметичность не прошла."""
-        good = self.make("0.03", "0.0063")
+        good = self.make("0.03", "0.006", "0.0063")
         verdict = wm.evaluate([good], LIMITS, wm.CLASS_B, checks={"tightness": False})
 
         assert not verdict.suitable

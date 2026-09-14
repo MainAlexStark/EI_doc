@@ -20,9 +20,11 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 OUT = Path(__file__).parent.parent / "backend/apps/verification/tests/golden/water_meter_protocols.json"
+# Имена колонок — по заголовкам листа «Протокол» (AW50, BD50), а не по
+# ячейкам: AW — это объём ПО СЧЁТЧИКУ, BD — по эталону.
 COLUMNS = {
     "q": "AC", "reading_start": "AJ", "reading_end": "AQ",
-    "v_standard": "AW", "v_meter": "BD", "error_pct": "BK",
+    "volume_meter": "AW", "volume_standard": "BD", "error_pct": "BK",
 }
 
 

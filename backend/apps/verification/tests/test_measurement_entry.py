@@ -21,11 +21,15 @@ LIMITS = {
     "error_below_transition": "5", "error_above_transition": "2",
 }
 
-# Строки, дающие погрешность в допуске: δ = −4.8 %, −1.5 %, −1.0 %
+# Строки, дающие погрешность в допуске: δ = −4.8 %, −1.5 %, −1.0 %.
+# Объём по счётчику — из показаний, объём по эталону — с установки.
 PASSING = [
-    {"flow_rate": "0.03", "reading_start": "229.0830", "reading_end": "229.0893"},
-    {"flow_rate": "0.125", "reading_start": "229.0960", "reading_end": "229.1092"},
-    {"flow_rate": "0.93", "reading_start": "229.1260", "reading_end": "229.1573"},
+    {"flow_rate": "0.03", "reading_start": "229.0830", "reading_end": "229.0890",
+     "volume_standard": "0.0063"},
+    {"flow_rate": "0.125", "reading_start": "229.0960", "reading_end": "229.1090",
+     "volume_standard": "0.0132"},
+    {"flow_rate": "0.93", "reading_start": "229.1260", "reading_end": "229.1570",
+     "volume_standard": "0.0313"},
 ]
 
 
@@ -53,7 +57,7 @@ class EntryTestCase(TestCase):
 
     def test_out_of_tolerance_row_makes_it_unsuitable_with_a_reason(self):
         rows = [dict(row) for row in PASSING]
-        rows[2]["reading_end"] = "229.1600"          # объём больше → δ вне допуска
+        rows[2]["volume_standard"] = "0.0280"        # счётчик намерил сильно больше
         applied = service.apply(self.verification, self.payload(rows=rows))
 
         assert not applied.suitable
@@ -68,6 +72,12 @@ class EntryTestCase(TestCase):
         )
         assert not applied.suitable
         assert "герметичности" in applied.verdict.reasons[0]
+
+    def test_standard_volume_is_required(self):
+        rows = [dict(row) for row in PASSING]
+        rows[0].pop("volume_standard")
+        with pytest.raises(service.MeasurementInputError, match="объём по эталону"):
+            service.apply(self.verification, self.payload(rows=rows))
 
     def test_journal_note_is_ready_for_the_journal(self):
         applied = service.apply(self.verification, self.payload())
@@ -114,8 +124,19 @@ class EntryTestCase(TestCase):
         with pytest.raises(service.MeasurementInputError, match="уже подписан"):
             service.apply(self.verification, self.payload())
 
+    def test_typo_in_the_standard_volume_goes_to_review(self):
+        """Лишний ноль в объёме по эталону — расчётный Q × t не сходится."""
+        rows = [dict(row) for row in PASSING]
+        rows[0]["volume_standard"] = "0.063"
+        applied = service.apply(self.verification, self.payload(rows=rows))
+
+        assert applied.needs_review == [1]
+        self.verification.refresh_from_db()
+        assert self.verification.status == VerificationStatus.DRAFT
+
     def test_pulse_counter_needs_its_coefficient(self):
-        rows = [{"flow_rate": "0.03", "pulses": 9} for _ in range(3)]
+        rows = [{"flow_rate": "0.03", "pulses": 9, "volume_standard": "0.0063"}
+                for _ in range(3)]
         with pytest.raises(service.MeasurementInputError, match="коэффициент"):
             service.apply(self.verification, self.payload(rows=rows))
 

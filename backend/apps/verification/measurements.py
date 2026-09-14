@@ -34,6 +34,11 @@ SOURCES = (SOURCE_MANUAL, SOURCE_SCAN)
 # Ниже этого порога распознанное значение показывается человеку на сверку.
 REVIEW_CONFIDENCE = 0.90
 
+# Насколько объём по эталону может разойтись с расчётным Q × t, прежде чем
+# строку покажут человеку. Установка держит расход неточно, поэтому проценты,
+# а не доли; но лишний ноль в цифре так уже не проедет.
+MAX_STANDARD_DEVIATION_PCT = 25
+
 
 class MeasurementInputError(ValueError):
     """Ошибка ввода — показывается поверителю, а не падает пятисоткой."""
@@ -117,6 +122,9 @@ def build_rows(payload: dict) -> tuple[list[wm.Measurement], list[dict], list[in
             "flow_rate": _decimal(raw.get("flow_rate"), "расход", index),
             "seconds": int(seconds),
             "mode": mode,
+            # Объём по эталону показывает установка — вывести его из расхода
+            # нельзя, иначе погрешность всегда окажется нулевой.
+            "volume_standard": _decimal(raw.get("volume_standard"), "объём по эталону", index),
         }
 
         if raw.get("pulses") not in (None, ""):
@@ -138,6 +146,13 @@ def build_rows(payload: dict) -> tuple[list[wm.Measurement], list[dict], list[in
         if source == SOURCE_SCAN:
             if confidence is None or float(confidence) < REVIEW_CONFIDENCE:
                 row_needs_review = True
+
+        # Объём по эталону сильно разошёлся с расчётным Q × t — почти всегда
+        # это опечатка в цифре или в длительности пролива.
+        deviation = measurement.standard_deviation_pct
+        if abs(deviation) > MAX_STANDARD_DEVIATION_PCT:
+            row_needs_review = True
+
         if row_needs_review:
             needs_review.append(index)
 
@@ -148,7 +163,9 @@ def build_rows(payload: dict) -> tuple[list[wm.Measurement], list[dict], list[in
                 "mode": mode,
                 "seconds": int(seconds),
                 "flow_rate": str(measurement.flow_rate),
+                "volume_standard": str(measurement.volume_standard),
                 "volume_meter": str(measurement.volume_meter),
+                "deviation_pct": str(deviation),
                 "reading_start": str(raw["reading_start"]) if raw.get("reading_start") not in (None, "") else None,
                 "reading_end": str(raw["reading_end"]) if raw.get("reading_end") not in (None, "") else None,
                 "pulses": raw.get("pulses"),
@@ -192,6 +209,11 @@ def apply(verification: Verification, payload: dict) -> Applied:
         "source": payload.get("source", SOURCE_MANUAL),
         "meter_class": meter_class,
         "pulse_weight": str(payload["pulse_weight"]) if payload.get("pulse_weight") else None,
+        # Температура поверочной жидкости — отдельная строка в условиях поверки,
+        # к строкам измерений отношения не имеет.
+        "water_temperature": (
+            str(payload["water_temperature"]) if payload.get("water_temperature") else None
+        ),
         "checks": checks,
         "rows": stored,
     }
