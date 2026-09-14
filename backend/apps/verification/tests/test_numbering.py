@@ -24,7 +24,7 @@ class NumberingTestCase(TestCase):
 
     def scope(self, year: int = 2026):
         return numbering.NumberingScope.objects.get(
-            family=self.family, employee=self.employee, year=year
+            series=self.family.series, employee=self.employee, year=year
         )
 
     def numbers(self):
@@ -121,8 +121,8 @@ class NumberingTestCase(TestCase):
 
         assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00002"]
 
-    # -- литерные подномера ------------------------------------------------
-    def test_out_of_sequence_insert_gets_letter_suffix(self):
+    # -- дробные подномера -------------------------------------------------
+    def test_out_of_sequence_insert_gets_fraction_suffix(self):
         day1 = f.draft(self.family, self.employee, day=1)
         day5 = f.draft(self.family, self.employee, day=5)
         numbering.assign_numbers(self.scope())
@@ -132,10 +132,10 @@ class NumberingTestCase(TestCase):
         late = f.make_verification(self.family, self.employee, day=3, serial="SN903")
         inserted = numbering.insert_out_of_sequence(late, reason="Найден бумажный бланк от 03.03")
 
-        assert inserted.full_number == "ЕИ-03-05-00001А"
-        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00001А", "ЕИ-03-05-00002"]
+        assert inserted.full_number == "ЕИ-03-05-00001/1"
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00001/1", "ЕИ-03-05-00002"]
 
-    def test_second_insert_gets_next_letter(self):
+    def test_second_insert_gets_next_fraction(self):
         day1 = f.draft(self.family, self.employee, day=1)
         numbering.assign_numbers(self.scope())
         numbering.seal(day1, signed_by=self.employee)
@@ -144,7 +144,7 @@ class NumberingTestCase(TestCase):
             v = f.make_verification(self.family, self.employee, day=day, serial=serial)
             numbering.insert_out_of_sequence(v, reason="дозаведение")
 
-        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00001А", "ЕИ-03-05-00001Б"]
+        assert self.numbers() == ["ЕИ-03-05-00001", "ЕИ-03-05-00001/1", "ЕИ-03-05-00001/2"]
 
     def test_out_of_sequence_requires_reason(self):
         v = f.make_verification(self.family, self.employee, day=3)
@@ -158,7 +158,7 @@ class NumberingTestCase(TestCase):
         with pytest.raises(NumberingError, match="пересчёт хвоста"):
             numbering.insert_out_of_sequence(v, reason="дозаведение")
 
-    def test_letter_numbers_are_not_renumbered_by_tail_pass(self):
+    def test_subnumbers_are_not_renumbered_by_tail_pass(self):
         day1 = f.draft(self.family, self.employee, day=1)
         numbering.assign_numbers(self.scope())
         numbering.seal(day1, signed_by=self.employee)
@@ -169,7 +169,7 @@ class NumberingTestCase(TestCase):
         numbering.assign_numbers(self.scope())
 
         inserted.refresh_from_db()
-        assert inserted.full_number == "ЕИ-03-05-00001А"
+        assert inserted.full_number == "ЕИ-03-05-00001/1"
 
     # -- подпись -----------------------------------------------------------
     def test_cannot_sign_without_attestation(self):

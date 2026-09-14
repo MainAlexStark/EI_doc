@@ -6,15 +6,21 @@ import datetime as dt
 
 from django.utils import timezone
 
-from apps.catalog.models import MeasurementFamily, SiType
+from apps.catalog.models import MeasurementFamily, NumberingSeries, SiType
 from apps.core.models import Attestation, Employee
 from apps.verification.models import Instrument, Protocol, ProtocolStatus, Verification
 from apps.verification.numbering import scope_for
 
 
-def make_family(*, code: str = "water", type_code: str = "03", yearly: bool = True):
+def make_series(*, code: str = "03", yearly: bool = True, default: bool = True):
+    return NumberingSeries.objects.create(
+        code=code, name="Основная", resets_yearly=yearly, is_default=default
+    )
+
+
+def make_family(*, code: str = "water", series=None, name: str = "Счётчики воды"):
     return MeasurementFamily.objects.create(
-        code=code, name="Счётчики воды", type_code=type_code, numbering_resets_yearly=yearly
+        code=code, name=name, numbering_series=series or make_series()
     )
 
 

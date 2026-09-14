@@ -33,7 +33,7 @@ class AmbientRecordAdmin(admin.ModelAdmin):
 
 @admin.register(MeasurementFamily)
 class MeasurementFamilyAdmin(SimpleHistoryAdmin):
-    list_display = ["name", "code", "type_code", "calculator_key", "numbering_resets_yearly"]
+    list_display = ["name", "code", "numbering_series", "calculator_key"]
     search_fields = ["name", "code"]
 
 

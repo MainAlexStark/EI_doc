@@ -39,9 +39,9 @@ from apps.verification.models import (
     Verification,
 )
 
-# Литеры для вставки задним числом. Буквы, которые легко спутать с цифрами
-# или латиницей (З, О, Ч, Ь, Ы, Ъ), исключены намеренно.
-SUFFIX_ALPHABET = "АБВГДЕЖИКЛМНПРСТУФХЦШЭЮЯ"
+# Подномера для вставки задним числом: 00767/1, 00767/2 …
+# Формат не выдуман — так уже помечали протоколы в журнале руками.
+MAX_SUBNUMBER = 99
 
 
 class NumberingError(Exception):
@@ -72,10 +72,15 @@ class AssignResult:
 
 
 def scope_for(verification: Verification, *, create: bool = True) -> NumberingScope:
-    """Область нумерации для поверки: семейство + поверитель [+ год]."""
-    family = verification.family
-    year = verification.verified_at.year if family.numbering_resets_yearly else None
-    lookup = {"family": family, "employee": verification.verifier, "year": year}
+    """Область нумерации для поверки: серия + поверитель + год."""
+    series = verification.family.series
+    if series is None:
+        raise NumberingError(
+            f"У семейства «{verification.family.name}» не указана серия нумерации, "
+            "и серии по умолчанию нет."
+        )
+    year = verification.verified_at.year if series.resets_yearly else None
+    lookup = {"series": series, "employee": verification.verifier, "year": year}
     if create:
         scope, _ = NumberingScope.objects.get_or_create(**lookup)
         return scope
@@ -96,8 +101,8 @@ def _tail_queryset(scope: NumberingScope) -> QuerySet[Protocol]:
     return (
         Protocol.objects.filter(scope=scope)
         .exclude(status__in=ProtocolStatus.sealed())
-        .exclude(suffix__gt="")  # литерные номера привязаны к соседу, их не двигаем
-        .select_related("verification", "scope__family", "scope__employee")
+        .exclude(suffix__gt="")  # подномера привязаны к соседу, их не двигаем
+        .select_related("verification", "scope__series", "scope__employee")
         .order_by("verification__verified_at", "verification__created_at", "pk")
     )
 
@@ -154,10 +159,10 @@ def assign_numbers(scope: NumberingScope, *, dry_run: bool = False) -> AssignRes
 def insert_out_of_sequence(
     verification: Verification, *, reason: str, template=None
 ) -> Protocol:
-    """Вставить поверку в уже запечатанную зону под литерным подномером.
+    """Вставить поверку в уже запечатанную зону под дробным подномером.
 
     Находим последний запечатанный протокол, чья поверка не позже нашей,
-    и встаём сразу за ним: 0147 → 0147А. Хронология журнала сохраняется,
+    и встаём сразу за ним: 00767 → 00767/1. Хронология журнала сохраняется,
     чужие номера не двигаются.
     """
     if not reason:
@@ -185,9 +190,9 @@ def insert_out_of_sequence(
         .exclude(suffix="")
         .values_list("suffix", flat=True)
     )
-    suffix = next((letter for letter in SUFFIX_ALPHABET if letter not in used), None)
+    suffix = next((f"/{n}" for n in range(1, MAX_SUBNUMBER + 1) if f"/{n}" not in used), None)
     if suffix is None:
-        raise NumberingError(f"Литеры для номера {neighbour.seq:04d} закончились.")
+        raise NumberingError(f"Подномера для {neighbour.full_number} закончились.")
 
     return Protocol.objects.create(
         verification=verification,

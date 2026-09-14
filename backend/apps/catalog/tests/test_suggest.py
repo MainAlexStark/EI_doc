@@ -20,7 +20,7 @@ class SuggestTestCase(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(User.objects.create_user("m@ei.test", "pw"))
         self.family = MeasurementFamily.objects.create(
-            code="water", name="Счётчики воды", type_code="03"
+            code="water", name="Счётчики воды"
         )
         SiType.objects.create(
             family=self.family, registry_number="12345-06", name="СВК-15",

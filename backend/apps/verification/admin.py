@@ -66,7 +66,7 @@ class VerificationAdmin(SimpleHistoryAdmin):
 
 @admin.register(NumberingScope)
 class NumberingScopeAdmin(admin.ModelAdmin):
-    list_display = ["__str__", "family", "employee", "year", "high_water", "drafts"]
+    list_display = ["__str__", "series", "employee", "year", "high_water", "drafts"]
     actions = ["preview_numbering", "apply_numbering"]
 
     @admin.display(description="Запечатано до")

@@ -29,24 +29,40 @@ from django.db import transaction
 from django.utils import timezone
 
 FIELDS = {
-    "protocol_number": "Номер протокола (ЕИ-03-05-0147)",
-    "verified_at": "Дата поверки",
+    "protocol_number": "Номер протокола (ЕИ-03-02-00767)",
+    "verified_at": "Дата поверки СИ",
     "next_verification_date": "Дата следующей поверки",
-    "si_name": "Наименование СИ",
-    "si_registry_number": "Регистрационный номер типа СИ",
+    "si_name": "Модификация СИ — наименование, которое печатается в протоколе",
+    "si_registry_number": "Регистрационный номер типа СИ в Госреестре",
     "serial_number": "Заводской номер СИ",
     "manufacture_year": "Год выпуска",
-    "owner": "Владелец",
-    "address": "Адрес поверки",
-    "verifier_tab_number": "Табельный номер поверителя",
-    "standards": "Номера эталонов",
-    "suitable": "Годен / Непригодно",
-    "unsuitability_reason": "Причина непригодности",
+    "owner": "Собственник",
+    "address": "Адрес поверки — лежит в графе «Владелец СИ» формата ФИФ",
+    "verifier_name": "Ф.И.О. поверителя",
+    "method": "Наименование документа, на основании которого выполняется поверка",
+    "standards": "Номера по реестру СИ, применяемых в качестве эталона",
+    "suitable": "Пригодность СИ (Пригодно / Непригодно)",
+    "unsuitability_reason": "Причины непригодности",
     "temperature": "Температура",
-    "pressure": "Давление",
-    "humidity": "Влажность",
-    "readings": "Показания на момент поверки",
+    "pressure": "Атмосферное давление",
+    "humidity": "Относительная влажность",
+    "readings": "Показания",
+    "unit_type": "Тип (г/в или х/в) — только у счётчиков воды",
+    "other_info": "Прочие сведения",
 }
+
+
+def normalize_header(value) -> str:
+    """Первая строка заголовка, без лишних пробелов, точек и регистра.
+
+    Заголовки журнала — это многострочные описания полей формата ФИФ
+    («Дата поверки СИ.\\nФормат: Дата, excel должен понимать…»), поэтому
+    сопоставляем по первой строке, а не по всему тексту.
+    """
+    if value is None:
+        return ""
+    first_line = str(value).split("\n")[0]
+    return " ".join(first_line.split()).strip().strip(".").lower()
 
 
 class Command(BaseCommand):
@@ -75,6 +91,8 @@ class Command(BaseCommand):
 
         rows = sheet.iter_rows(values_only=True)
         header = [str(cell).strip() if cell is not None else "" for cell in next(rows)]
+        # Заголовки в журнале дублируются (несколько пустых «None» в хвосте),
+        # поэтому индекс строим по первому вхождению.
 
         if options["inspect"]:
             self._inspect(sheet.title, header)
@@ -92,7 +110,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.MIGRATE_HEADING(f"Лист «{sheet_title}», столбцов: {len(header)}"))
         for position, title in enumerate(header):
             if title:
-                self.stdout.write(f"  {position:>3}  {title}")
+                self.stdout.write(f"  {position:>3}  {normalize_header(title)}")
         self.stdout.write("")
         self.stdout.write(self.style.MIGRATE_HEADING("Заготовка mapping.json — подставьте заголовки:"))
         template = {field: "" for field in FIELDS}
@@ -102,13 +120,18 @@ class Command(BaseCommand):
             self.stdout.write(f"  {field:<24} — {description}")
 
     def _build_index(self, header: list[str], mapping: dict[str, str]) -> dict[str, int]:
-        lookup = {title.lower(): position for position, title in enumerate(header) if title}
+        lookup: dict[str, int] = {}
+        for position, title in enumerate(header):
+            key = normalize_header(title)
+            if key:
+                lookup.setdefault(key, position)
+
         index: dict[str, int] = {}
         missing: list[str] = []
         for field, title in mapping.items():
-            if not title:
-                continue
-            position = lookup.get(str(title).strip().lower())
+            if not title or field.startswith("_"):
+                continue  # ключи на подчёркивании — комментарии в файле маппинга
+            position = lookup.get(normalize_header(title))
             if position is None:
                 missing.append(f"{field}: «{title}»")
             else:

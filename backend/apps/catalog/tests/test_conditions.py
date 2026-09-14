@@ -109,7 +109,7 @@ class RangesTestCase(TestCase):
             name="Основной", ranges={"temperature": {"min": 19.0, "max": 23.0}}
         )
         family = MeasurementFamily.objects.create(
-            code="water", name="Счётчики воды", type_code="03",
+            code="water", name="Счётчики воды",
             condition_ranges={"temperature": {"max": 22.0}},
         )
 

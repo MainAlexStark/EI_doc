@@ -12,6 +12,44 @@ from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 
+class NumberingSeries(models.Model):
+    """Серия нумерации протоколов — вторая группа в номере: ЕИ-**03**-02-00767.
+
+    Важно: серия НЕ совпадает с видом СИ. В журнале за 2021–2026 годы счётчики
+    воды, весы, гири и дозаторы идут в одной сквозной серии 03, а манометры
+    частью в 03, частью в отдельной серии 01. Поэтому счётчик протоколов общий
+    на серию, а не на семейство СИ.
+    """
+
+    code = models.CharField(
+        "код", max_length=2, unique=True,
+        validators=[RegexValidator(r"^\d{2}$", "Две цифры, например 03")],
+    )
+    name = models.CharField("название", max_length=120)
+    digits = models.PositiveSmallIntegerField(
+        "разрядов в порядковом номере", default=5, help_text="ЕИ-03-02-00767 — пять"
+    )
+    resets_yearly = models.BooleanField("сбрасывается в начале года", default=True)
+    is_default = models.BooleanField(
+        "по умолчанию", default=False,
+        help_text="Используется семействами СИ, у которых серия не указана явно",
+    )
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "серия нумерации"
+        verbose_name_plural = "серии нумерации"
+        ordering = ["code"]
+
+    def __str__(self) -> str:
+        return f"ЕИ-{self.code} — {self.name}"
+
+    @classmethod
+    def default(cls) -> "NumberingSeries | None":
+        return cls.objects.filter(is_default=True).first()
+
+
 class MeasurementFamily(models.Model):
     """Семейство СИ: счётчики воды, манометры и т. д.
 
@@ -21,10 +59,11 @@ class MeasurementFamily(models.Model):
 
     code = models.SlugField("код", max_length=40, unique=True)
     name = models.CharField("наименование", max_length=160)
-    type_code = models.CharField(
-        "номер типа в протоколе", max_length=2,
-        validators=[RegexValidator(r"^\d{2}$", "Две цифры, например 03")],
-        help_text="Вторая группа в номере протокола: ЕИ-<ЭТО>-05-0147",
+    numbering_series = models.ForeignKey(
+        NumberingSeries, on_delete=models.PROTECT, related_name="families",
+        null=True, blank=True, verbose_name="серия нумерации",
+        help_text="Пусто — берётся серия по умолчанию. Несколько семейств СИ "
+                  "в одной серии делят общий счётчик протоколов",
     )
     measurement_schema = models.JSONField(
         "JSON Schema измерений", default=dict, blank=True,
@@ -33,14 +72,6 @@ class MeasurementFamily(models.Model):
     calculator_key = models.CharField(
         "ключ калькулятора", max_length=60, blank=True,
         help_text="Имя модуля расчёта, например water_meter",
-    )
-    numbering_resets_yearly = models.BooleanField(
-        "нумерация сбрасывается в начале года", default=True,
-        help_text="Счётчик протоколов обнуляется 1 января",
-    )
-    number_digits = models.PositiveSmallIntegerField(
-        "разрядов в номере протокола", default=5,
-        help_text="ЕИ-03-02-00772 — пять разрядов",
     )
     condition_ranges = models.JSONField(
         "диапазоны условий поверки", default=dict, blank=True,
@@ -56,7 +87,11 @@ class MeasurementFamily(models.Model):
         ordering = ["name"]
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.type_code})"
+        return self.name
+
+    @property
+    def series(self) -> NumberingSeries | None:
+        return self.numbering_series or NumberingSeries.default()
 
 
 class SiType(models.Model):
@@ -71,6 +106,12 @@ class SiType(models.Model):
     manufacturer = models.CharField("изготовитель", max_length=200, blank=True)
     verification_interval_months = models.PositiveSmallIntegerField(
         "межповерочный интервал, мес.", default=72
+    )
+    limits = models.JSONField(
+        "метрологические характеристики", default=dict, blank=True,
+        help_text="Для счётчиков воды: q_min, q_transition_a, q_transition_b, q_nominal, "
+                  "q_max, error_below_transition, error_above_transition. "
+                  "Читается apps.verification.calculators.water_meter.MeterLimits",
     )
     fif_url = models.URLField("ссылка на ФИФ", blank=True)
     fif_raw = models.JSONField("ответ ФИФ как есть", default=dict, blank=True)

@@ -226,15 +226,18 @@ class Verification(models.Model):
 # Нумерация и протокол
 # ---------------------------------------------------------------------------
 class NumberingScope(models.Model):
-    """Область нумерации: связка «семейство СИ + поверитель [+ год]».
+    """Область нумерации: связка «серия + поверитель + год».
 
-    Номер протокола: ЕИ-{type_code}-{tab_number}-{seq:04d}{suffix}
-    Счётчик свой на каждую такую связку — обычный sequence не подходит.
+    Номер протокола: ЕИ-{серия}-{табельный}-{порядковый}{подномер}
+
+    Счётчик привязан к СЕРИИ, а не к виду СИ: в журнале за 2021–2026 годы
+    счётчики воды, весы и гири идут одной сквозной последовательностью 03.
+    Обычный sequence не подходит — счётчик свой на каждого поверителя и год.
     """
 
-    family = models.ForeignKey(
-        "catalog.MeasurementFamily", on_delete=models.PROTECT, related_name="numbering_scopes",
-        verbose_name="семейство",
+    series = models.ForeignKey(
+        "catalog.NumberingSeries", on_delete=models.PROTECT, related_name="numbering_scopes",
+        verbose_name="серия",
     )
     employee = models.ForeignKey(
         "core.Employee", on_delete=models.PROTECT, related_name="numbering_scopes",
@@ -242,8 +245,8 @@ class NumberingScope(models.Model):
     )
     year = models.PositiveSmallIntegerField(
         "год", null=True, blank=True,
-        help_text="Счётчик сбрасывается в начале года, поэтому область нумерации — годовая. "
-                  "NULL только у семейств со сквозной нумерацией",
+        help_text="Счётчик сбрасывается 1 января, поэтому область нумерации годовая. "
+                  "NULL только у серий со сквозной нумерацией",
     )
 
     class Meta:
@@ -251,14 +254,14 @@ class NumberingScope(models.Model):
         verbose_name_plural = "области нумерации"
         constraints = [
             models.UniqueConstraint(
-                fields=["family", "employee", "year"], name="numberingscope_unique",
+                fields=["series", "employee", "year"], name="numberingscope_unique",
                 nulls_distinct=False,
             )
         ]
 
     def __str__(self) -> str:
         tail = f" / {self.year}" if self.year else ""
-        return f"ЕИ-{self.family.type_code}-{self.employee.tab_number}{tail}"
+        return f"ЕИ-{self.series.code}-{self.employee.tab_number}{tail}"
 
 
 class ProtocolStatus(models.TextChoices):
@@ -290,8 +293,9 @@ class Protocol(models.Model):
         help_text="NULL у черновика. Пересчитывается, пока протокол не подписан",
     )
     suffix = models.CharField(
-        "литера", max_length=2, blank=True, default="",
-        help_text="Для вставки задним числом в уже запечатанный участок: 0147А",
+        "подномер", max_length=4, blank=True, default="",
+        help_text="Для вставки задним числом в уже запечатанный участок: 00767/1. "
+                  "Формат взят из журнала — так уже делали руками",
     )
     out_of_sequence_reason = models.CharField(
         "причина вставки вне очереди", max_length=250, blank=True
@@ -353,11 +357,10 @@ class Protocol(models.Model):
     def full_number(self) -> str:
         if self.seq is None:
             return ""
-        scope = self.scope
-        digits = scope.family.number_digits
+        series = self.scope.series
         return (
-            f"ЕИ-{scope.family.type_code}-{scope.employee.tab_number}-"
-            f"{self.seq:0{digits}d}{self.suffix}"
+            f"ЕИ-{series.code}-{self.scope.employee.tab_number}-"
+            f"{self.seq:0{series.digits}d}{self.suffix}"
         )
 
     @property

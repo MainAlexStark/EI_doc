@@ -1,0 +1,902 @@
+[
+ {
+  "lookup_key": "EV-AM1 24860-03",
+  "name": "EV-AM1",
+  "registry_number": "24860-03",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "JS 1,5  15314-05",
+  "name": "JS 1,5",
+  "registry_number": "15314-05",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "MK-U 56505-14",
+  "name": "MK-U",
+  "registry_number": "56505-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "VLF-R 26382-07",
+  "name": "VLF-R",
+  "registry_number": "26382-07",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "VLF-R 26382-12",
+  "name": "VLF-R",
+  "registry_number": "26382-12",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "VLF-U 58362-14",
+  "name": "VLF-U",
+  "registry_number": "58362-14",
+  "method": "«Счетчики холодной и горячей воды\nкрыльчатые VLF торговой марки VALTEC. Методика поверки» МП-2550-0241-2014",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "WFK2 54418-13",
+  "name": "WFK2",
+  "registry_number": "54418-13",
+  "method": "«Счетчики холодной и горячей воды крыльчатые WFK2; WFW2. Методика поверки» МП 208-037-2020",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "WFW2 54418-13",
+  "name": "WFW2",
+  "registry_number": "54418-13",
+  "method": "«Счетчики холодной и горячей воды крыльчатые WFK2; WFW2. Методика поверки» МП 208-037-2020",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ВДГ-15М 58329-14",
+  "name": "ВДГ-15М",
+  "registry_number": "58329-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ВСКМ 90-20 32539-11",
+  "name": "ВСКМ 90-20",
+  "registry_number": "32539-11",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЕВ-АМ 24860-11",
+  "name": "ЕВ-АМ",
+  "registry_number": "24860-11",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЕВ-АМ1 24860-11",
+  "name": "ЕВ-АМ1",
+  "registry_number": "24860-11",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЛК 15Г Новатор (4-Г, 6-Х) 29898-11",
+  "name": "ЛК 15Г",
+  "registry_number": "29898-11",
+  "method": "«ГСИ. Счетчики холодной воды. Методы и средства поверки» ГОСТ 8.156-83",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ОХТА 47153-11",
+  "name": "ОХТА",
+  "registry_number": "47153-11",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ПУЛЬС 68501-17",
+  "name": "ПУЛЬС",
+  "registry_number": "68501-17",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "СВ-15 МЕТЕР 56279-14",
+  "name": "СВ-15",
+  "registry_number": "56279-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "СВ-15Г 24319-05",
+  "name": "СВ-15Г",
+  "registry_number": "24319-05",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "СВ-15Г 38760-08",
+  "name": "СВ-15Г",
+  "registry_number": "38760-08",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "СВ-15Х 24319-05",
+  "name": "СВ-15Х",
+  "registry_number": "24319-05",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "СВ-15Х 38760-08",
+  "name": "СВ-15Х",
+  "registry_number": "38760-08",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "СВК 15-1,5 31697-06 Бологое",
+  "name": "СВК 15-1,5",
+  "registry_number": "31697-06",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3 13869-03",
+  "name": "СВК 15-3-2",
+  "registry_number": "13869-03",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3-2 13869-08",
+  "name": "СВК 15-3-2",
+  "registry_number": "13869-08",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3-2 13869-13",
+  "name": "СВК 15-3-2",
+  "registry_number": "13869-13",
+  "method": "«ГСИ. Счетчики холодной и горячей воды крыльчатые типа СВК. Методика поверки» ЛГФИ.407223.003",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3-2И 13869-13",
+  "name": "СВК 15-3-2И",
+  "registry_number": "13869-13",
+  "method": "«ГСИ. Счетчики холодной и горячей воды крыльчатые типа СВК. Методика поверки» ЛГФИ.407223.003",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3-8 13869-13",
+  "name": "СВК 15-3-8",
+  "registry_number": "13869-13",
+  "method": "«ГСИ. Счетчики холодной и горячей воды крыльчатые типа СВК. Методика поверки» ЛГФИ.407223.003",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 20-5-1 13869-13",
+  "name": "СВК 20-5-1",
+  "registry_number": "13869-13",
+  "method": "«ГСИ. Счетчики холодной и горячей воды крыльчатые типа СВК. Методика поверки» ЛГФИ.407223.003",
+  "limits": {
+   "q_min": 0.05,
+   "q_transition_a": 0.25,
+   "q_transition_b": 0.2,
+   "q_nominal": 2.5,
+   "q_max": 5,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК-15Г НОРМА 49316-12",
+  "name": "СВК-15Г",
+  "registry_number": "49316-12",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК-15Х НОРМА 49316-12",
+  "name": "СВК-15Х",
+  "registry_number": "49316-12",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК-15Х 54835-13",
+  "name": "СВК-15Х",
+  "registry_number": "54835-13",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3 13869-02",
+  "name": "СВК15-3",
+  "registry_number": "13869-02",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВК 15-3 13869-98",
+  "name": "СВК15-3",
+  "registry_number": "13869-98",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВКМ-15Г 57034-14",
+  "name": "СВКМ-15Г",
+  "registry_number": "57034-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВКМ-15У 57034-14",
+  "name": "СВКМ-15У",
+  "registry_number": "57034-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВКМ-15УИ 57034-14",
+  "name": "СВКМ-15УИ",
+  "registry_number": "57034-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВКМ-15Х 57034-14",
+  "name": "СВКМ-15Х",
+  "registry_number": "57034-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВУ-15 56279-14",
+  "name": "СВУ-15",
+  "registry_number": "56279-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВУ-15 58361-14",
+  "name": "СВУ-15",
+  "registry_number": "58361-14",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СВХ 15 46597-11",
+  "name": "СВХ 15",
+  "registry_number": "46597-11",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СГВ-15 16078-00",
+  "name": "СГВ-15",
+  "registry_number": "16078-00",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СГВ-15 16078-05",
+  "name": "СГВ-15",
+  "registry_number": "16078-05",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СГВ-15 16078-13",
+  "name": "СГВ-15",
+  "registry_number": "16078-13",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СГВ-20 16078-05",
+  "name": "СГВ-20",
+  "registry_number": "16078-05",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.05,
+   "q_transition_a": 0.25,
+   "q_transition_b": 0.2,
+   "q_nominal": 2.5,
+   "q_max": 5,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СГВ-20 16078-13",
+  "name": "СГВ-20",
+  "registry_number": "16078-13",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.05,
+   "q_transition_a": 0.25,
+   "q_transition_b": 0.2,
+   "q_nominal": 2.5,
+   "q_max": 5,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СКВ-3/15 13545-93",
+  "name": "СКВ-3/15",
+  "registry_number": "13545-93",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СКВ-3/15 27361-04",
+  "name": "СКВ-3/15",
+  "registry_number": "27361-04",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СКВГ 90-3/15 13544-93",
+  "name": "СКВГ 90-3/15",
+  "registry_number": "13544-93",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СКВГ 90-3/15 27399-04",
+  "name": "СКВГ 90-3/15",
+  "registry_number": "27399-04",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СХВ-15 16078-00",
+  "name": "СХВ-15",
+  "registry_number": "16078-00",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СХВ-15 16078-05",
+  "name": "СХВ-15",
+  "registry_number": "16078-05",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "СХВ-15 16078-13",
+  "name": "СХВ-15",
+  "registry_number": "16078-13",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ТРИТОН-УЛЬТРА 60780-15",
+  "name": "ТРИТОН-УЛЬТРА",
+  "registry_number": "60780-15",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "УВС-15Г 47204-11",
+  "name": "УВС-15Г",
+  "registry_number": "47204-11",
+  "method": "«ГСИ. Счетчики холодной воды. Методы и средства поверки» ГОСТ 8.156-83",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "УВС-15Х 47204-11",
+  "name": "УВС-15Х",
+  "registry_number": "47204-11",
+  "method": "«ГСИ. Счетчики холодной воды. Методы и средства поверки» ГОСТ 8.156-83",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЭКО НОМ СВ-15-110 67831-17",
+  "name": "ЭКО НОМ СВ-15-110",
+  "registry_number": "67831-17",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ },
+ {
+  "lookup_key": "ЭКО-15 53352-13",
+  "name": "ЭКО-15",
+  "registry_number": "53352-13",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЭКО-15 63564-16",
+  "name": "ЭКО-15",
+  "registry_number": "63564-16",
+  "method": "«ГСИ. Счетчики холодной воды. Методы и средства поверки» ГОСТ 8.156-83",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЭКОМЕРА-15 69675-17",
+  "name": "ЭКОМЕРА-15",
+  "registry_number": "69675-17",
+  "method": "«Счетчики воды крыльчатые универсальные ЭКОМЕРА (с антимагнитной защитой). Методика поверки» МП 59-221-2017",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЭКОМЕРА-15 73546-18",
+  "name": "ЭКОМЕРА-15",
+  "registry_number": "73546-18",
+  "method": "«Счетчики воды крыльчатые универсальные ЭКОМЕРА. Методика поверки» МП 07-221-2018",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 2
+  }
+ },
+ {
+  "lookup_key": "ЭКОНОМ 55467-13",
+  "name": "ЭКОНОМ",
+  "registry_number": "55467-13",
+  "method": "«Рекомендация. ГСИ. Счетчики воды. Методика поверки» МИ 1592-2015",
+  "limits": {
+   "q_min": 0.03,
+   "q_transition_a": 0.15,
+   "q_transition_b": 0.12,
+   "q_nominal": 1.5,
+   "q_max": 3,
+   "error_below_transition": 5,
+   "error_above_transition": 3
+  }
+ }
+]
