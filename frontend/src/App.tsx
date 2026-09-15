@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchMe, isAuthenticated, logout, type Me } from "./api";
 import Availability from "./components/Availability";
+import FieldWork from "./components/FieldWork";
 import Journal from "./components/Journal";
 import Login from "./components/Login";
 import Normocontrol from "./components/Normocontrol";
@@ -8,13 +9,14 @@ import RequestsInbox from "./components/RequestsInbox";
 import Tasks from "./components/Tasks";
 import WorkOrders from "./components/WorkOrders";
 
-type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "tasks" | "availability";
+type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "journal", label: "Журнал" },
   { key: "normocontrol", label: "Нормоконтроль" },
   { key: "requests", label: "Заявки" },
   { key: "work-orders", label: "Наряды" },
+  { key: "field-work", label: "Поверки" },
   { key: "tasks", label: "Задачи" },
   { key: "availability", label: "Мой график" },
 ];
@@ -68,6 +70,7 @@ export default function App() {
         {tab === "normocontrol" && <Normocontrol />}
         {tab === "requests" && <RequestsInbox />}
         {tab === "work-orders" && <WorkOrders />}
+        {tab === "field-work" && <FieldWork me={me} />}
         {tab === "tasks" && <Tasks />}
         {tab === "availability" && <Availability />}
       </main>

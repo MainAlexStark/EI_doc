@@ -507,3 +507,107 @@ export async function fetchCaptchaConfig(): Promise<CaptchaConfig> {
   if (!response.ok) return { configured: false, client_key: "" };
   return response.json();
 }
+
+// ---------------------------------------------------------------------------
+// Полевая работа поверителя: наряд → поверка → измерения
+// ---------------------------------------------------------------------------
+export type FieldVerification = {
+  id: number;
+  client_id: string;
+  work_order: number;
+  si_type_id: number;
+  instrument: string;
+  serial_number: string;
+  verified_at: string;
+  status: string;
+  status_display: string;
+  suitable: boolean;
+  needs_review: boolean;
+};
+
+export const fetchWorkOrderVerifications = (workOrderId: number) =>
+  json<FieldVerification[]>(`/api/work-orders/${workOrderId}/verifications/`);
+
+export type FieldVerificationPayload = {
+  client_id: string;
+  si_type_id: number;
+  serial_number: string;
+  manufacture_year?: number | null;
+  verified_at?: string;
+};
+
+export const createVerification = (workOrderId: number, payload: FieldVerificationPayload) =>
+  json<FieldVerification>(`/api/work-orders/${workOrderId}/verifications/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export type SiTypeSuggestion = {
+  source: "local" | "fif";
+  si_type_id: number | null;
+  registry_number: string;
+  name: string;
+  manufacturer: string;
+  notation: string;
+  interval_months: number | null;
+  label: string;
+  ambiguous: boolean;
+};
+
+export type SiTypeSuggestResponse = { results: SiTypeSuggestion[]; warning?: string };
+
+/** Подсказка типов СИ — авторизованный эндпоинт, поэтому через json(), не суём в public-хелперы. */
+export async function suggestSiTypes(query: string): Promise<SiTypeSuggestResponse> {
+  if (query.trim().length < 2) return { results: [] };
+  try {
+    return await json<SiTypeSuggestResponse>(`/api/catalog/si-types/suggest/?${queryString({ q: query })}`);
+  } catch {
+    return { results: [] };
+  }
+}
+
+export type LayoutMode = { mode: string; label: string; seconds: number };
+export type LayoutsResponse = {
+  layouts: Record<string, LayoutMode[]>;
+  checks: Record<string, string>;
+  classes: string[];
+};
+
+export const fetchLayouts = () => json<LayoutsResponse>("/api/verifications/layouts/");
+
+export type MeasurementRowPayload = {
+  seconds?: number;
+  flow_rate: string;
+  volume_standard: string;
+  reading_start?: string;
+  reading_end?: string;
+  pulses?: number | null;
+  volume_meter?: string;
+};
+
+export type MeasurementsPayload = {
+  layout: string;
+  source?: string;
+  meter_class: string;
+  pulse_weight?: string;
+  unit_type?: string;
+  water_temperature?: string;
+  checks?: Record<string, boolean>;
+  rows: MeasurementRowPayload[];
+};
+
+export type MeasurementsResult = {
+  suitable: boolean;
+  rows: Record<string, unknown>[];
+  failed_rows: number[];
+  reasons: string[];
+  journal_note: string;
+  needs_review: boolean;
+  status: string;
+};
+
+export const submitMeasurements = (verificationId: number, payload: MeasurementsPayload) =>
+  json<MeasurementsResult>(`/api/verifications/${verificationId}/measurements/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });

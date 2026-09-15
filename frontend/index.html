@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EI_doc — журнал поверок</title>
+    <!-- manifest/иконки лежат в public/ и копируются как есть в корень dist —
+         поэтому путь абсолютный и не зависит от base "/static/frontend/",
+         который используется только для JS/CSS бандла (см. vite.config.ts). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#0e6e75" />
+    <link rel="icon" href="/icon-192.png" />
   </head>
   <body>
     <div id="root"></div>

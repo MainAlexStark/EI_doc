@@ -6,7 +6,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from apps.catalog.api import FamilyOptionsView, SiTypeSuggestView
 from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
-from apps.core.views import frontend_index, healthz
+from apps.core.views import frontend_index, frontend_root_file, healthz
 from apps.hub.api import (
     AddressSuggestView,
     CaptchaConfigView,
@@ -42,6 +42,7 @@ from apps.verification.api_journal import (
     NumberingPreviewView,
     SignProtocolsView,
 )
+from apps.verification.api_field import WorkOrderVerificationsView
 from apps.verification.api_workorders import (
     WorkOrderCreateView,
     WorkOrderListView,
@@ -114,6 +115,10 @@ urlpatterns = [
     path("api/work-orders/", WorkOrderListView.as_view(), name="work_order_list"),
     path("api/work-orders/create/", WorkOrderCreateView.as_view(), name="work_order_create"),
     path("api/work-orders/<int:pk>/status/", WorkOrderStatusView.as_view(), name="work_order_status"),
+    path(
+        "api/work-orders/<int:pk>/verifications/",
+        WorkOrderVerificationsView.as_view(), name="work_order_verifications",
+    ),
     # Задачи
     path("api/tasks/", TaskListCreateView.as_view(), name="task_list_create"),
     path("api/tasks/<int:pk>/", TaskDetailView.as_view(), name="task_detail"),
@@ -125,4 +130,8 @@ urlpatterns = [
     # Публичная форма заявки — тот же SPA-бандл, main.tsx решает по пути,
     # какой экран показать (см. apps.core.views.frontend_index).
     path("zayavka/", frontend_index, name="public_request_form"),
+    # service worker/манифест PWA — обязаны быть в корне, см. frontend_root_file.
+    # Последний в списке: односегментный catch-all, не должен перехватывать
+    # ничего из путей выше.
+    path("<str:filename>", frontend_root_file, name="frontend_root_file"),
 ]
