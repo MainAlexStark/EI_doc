@@ -93,7 +93,10 @@ export default function WorkOrders() {
             {orders.map((order) => (
               <tr key={order.id}>
                 <td className="num">{order.id}</td>
-                <td className="num">{formatDate(order.scheduled_date)}</td>
+                <td className="num">
+                  {formatDate(order.scheduled_date)}
+                  {order.scheduled_time ? `, ${order.scheduled_time.slice(0, 5)}` : ""}
+                </td>
                 <td>{order.site}</td>
                 <td>{order.client}</td>
                 <td>{order.assigned_employee}</td>

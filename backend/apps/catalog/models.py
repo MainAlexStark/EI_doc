@@ -78,6 +78,17 @@ class MeasurementFamily(models.Model):
         help_text="Переопределяет общий профиль условий для этого семейства, "
                   "см. apps.catalog.conditions",
     )
+    price = models.DecimalField(
+        "цена поверки, ₽", max_digits=9, decimal_places=2, default=0,
+        help_text="За единицу СИ. Показывается заявителю на форме заявки как "
+                  "приблизительная цена — точная считается менеджером",
+    )
+    requires_time_slot = models.BooleanField(
+        "нужно выбирать время, не только дату", default=True,
+        help_text="Включено у счётчиков — поверка идёт на месте у заявителя, время "
+                  "выезда согласуется. У приборов, которые сдаются в контору (весы, "
+                  "гири), выключите — заявителю на форме время не показывается",
+    )
 
     history = HistoricalRecords()
 
@@ -256,6 +267,35 @@ class ProtocolTemplate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.family.code} v{self.version}"
+
+
+class PricingSettings(models.Model):
+    """Единая настройка ценообразования формы заявки — одна действующая запись.
+
+    Не завели отдельное поле в MeasurementFamily, потому что скидка не про
+    прибор, а про то, что заявитель выбрал приоритетное время сотрудника —
+    единая политика на всю контору, а не на тип СИ.
+    """
+
+    priority_discount_percent = models.DecimalField(
+        "скидка за приоритетное время, %", max_digits=4, decimal_places=1, default=10,
+        help_text="Вычитается из примерной цены на форме заявки, если заявитель "
+                  "выбрал слот, отмеченный сотрудником как приоритетный",
+    )
+    is_active = models.BooleanField("действует", default=True)
+
+    class Meta:
+        verbose_name = "настройка цен"
+        verbose_name_plural = "настройки цен"
+
+    def __str__(self) -> str:
+        return f"Скидка за приоритетное время: {self.priority_discount_percent}%"
+
+    @classmethod
+    def current(cls) -> "PricingSettings":
+        """Действующая запись — заводится сама со значением по умолчанию при первом обращении."""
+        obj = cls.objects.filter(is_active=True).order_by("id").first()
+        return obj or cls.objects.create()
 
 
 class District(models.Model):

@@ -7,6 +7,7 @@ from apps.catalog.models import (
     ConditionProfile,
     District,
     MeasurementFamily,
+    PricingSettings,
     ProtocolTemplate,
     SiType,
     Standard,
@@ -34,8 +35,14 @@ class AmbientRecordAdmin(admin.ModelAdmin):
 
 @admin.register(MeasurementFamily)
 class MeasurementFamilyAdmin(SimpleHistoryAdmin):
-    list_display = ["name", "code", "numbering_series", "calculator_key"]
+    list_display = ["name", "code", "numbering_series", "calculator_key", "price", "requires_time_slot"]
+    list_editable = ["price", "requires_time_slot"]
     search_fields = ["name", "code"]
+
+
+@admin.register(PricingSettings)
+class PricingSettingsAdmin(admin.ModelAdmin):
+    list_display = ["priority_discount_percent", "is_active"]
 
 
 @admin.register(SiType)

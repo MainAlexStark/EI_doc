@@ -26,11 +26,13 @@ USAGE_EXTRA='
 именно это доступ (см. docs/architecture.md).
 
 Подсказка адреса (DADATA_API_KEY) и уведомления в Telegram
-(TELEGRAM_BOT_TOKEN) — тоже необязательны: если их ещё нет, ./deploy.sh
-спрашивает при каждом запуске и обновлении (Enter — пропустить вопрос,
-спросит снова в следующий раз). Пока не заданы, деградирует мягко: форма
-заявки показывает обычное текстовое поле адреса вместо подсказки с
-районом, уведомления только пишутся в лог (см. claude/hub.md).'
+(TELEGRAM_BOT_TOKEN, необязательно TELEGRAM_BOT_USERNAME) — тоже необязательны:
+если их ещё нет, ./deploy.sh спрашивает при каждом запуске и обновлении
+(Enter — пропустить вопрос, спросит снова в следующий раз). Пока не заданы,
+деградирует мягко: форма заявки показывает обычное текстовое поле адреса
+вместо подсказки с районом, уведомления только пишутся в лог. TELEGRAM_WEBHOOK_SECRET
+генерируется сам, как SECRET_KEY, — как только появится TELEGRAM_BOT_TOKEN,
+вебхук регистрируется сам при каждом запуске контейнера (см. claude/hub.md).'
 
 set -euo pipefail
 
@@ -270,10 +272,15 @@ cmd_install() {
     env_set "DB_PASSWORD" "$(gen_secret 16)"
     say "сгенерирован пароль БД"
   }
+  env_is_unset "TELEGRAM_WEBHOOK_SECRET" && {
+    env_set "TELEGRAM_WEBHOOK_SECRET" "$(gen_secret 16)"
+    say "сгенерирован TELEGRAM_WEBHOOK_SECRET"
+  }
 
   step "необязательные ключи"
   prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
   prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
+  prompt_secret "TELEGRAM_BOT_USERNAME" "Имя Telegram-бота без @ — для подсказки в профиле сотрудника (необязательно)"
 
   step "инфраструктура"
   ensure_network
@@ -304,9 +311,15 @@ cmd_update() {
   DOMAIN="$(domain_from_env)"
   [ -n "$DOMAIN" ] || die "в $ENV_FILE не задан ALLOWED_HOSTS"
 
+  env_is_unset "TELEGRAM_WEBHOOK_SECRET" && {
+    env_set "TELEGRAM_WEBHOOK_SECRET" "$(gen_secret 16)"
+    say "сгенерирован TELEGRAM_WEBHOOK_SECRET"
+  }
+
   step "необязательные ключи"
   prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
   prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
+  prompt_secret "TELEGRAM_BOT_USERNAME" "Имя Telegram-бота без @ — для подсказки в профиле сотрудника (необязательно)"
 
   local before
   before="$(git rev-parse HEAD)"

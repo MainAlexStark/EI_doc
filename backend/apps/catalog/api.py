@@ -10,11 +10,12 @@ from __future__ import annotations
 from django.db.models import Q
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers, status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.arshin.fif import FifClient, FifUnavailable, mark_ambiguous
-from apps.catalog.models import SiType
+from apps.catalog.models import MeasurementFamily, PricingSettings, SiType
 
 
 class SiTypeSuggestionSerializer(serializers.Serializer):
@@ -112,3 +113,34 @@ class SiTypeSuggestView(APIView):
             if counts[item["name"].strip().lower()] > 1:
                 item["ambiguous"] = True
         return suggestions
+
+
+# ---------------------------------------------------------------------------
+# Семейства СИ для формы заявки на сайте
+# ---------------------------------------------------------------------------
+class FamilyOptionSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    code = serializers.CharField()
+    name = serializers.CharField()
+    price = serializers.DecimalField(max_digits=9, decimal_places=2)
+    requires_time_slot = serializers.BooleanField()
+
+
+class FamilyOptionsView(APIView):
+    """GET /api/catalog/families/ — публичный список семейств СИ для формы заявки.
+
+    Заявитель выбирает из него, что нужно поверить (мультивыбор + количество),
+    цена — ориентир, не привязана к конкретному прибору из Госреестра: столько
+    вариантов на форме не нужно, это делает уже поверитель при заведении наряда.
+    """
+
+    permission_classes = [AllowAny]
+
+    @extend_schema(responses={200: FamilyOptionSerializer(many=True)})
+    def get(self, request):
+        families = MeasurementFamily.objects.order_by("name")
+        settings_obj = PricingSettings.current()
+        return Response({
+            "families": FamilyOptionSerializer(families, many=True).data,
+            "priority_discount_percent": settings_obj.priority_discount_percent,
+        })

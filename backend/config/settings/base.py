@@ -214,8 +214,16 @@ DADATA_API_KEY = env("DADATA_API_KEY", default="")
 # Telegram-уведомления
 # --------------------------------------------------------------------------
 # Пусто — apps.core.telegram.send_message() только логирует и ничего не шлёт.
-# Токен получают у @BotFather; сотрудник привязывается через Employee.telegram_chat_id.
+# Токен получают у @BotFather. Сотрудник привязывается сам, кодом из своего
+# профиля в EI_doc — см. apps.core.telegram.handle_update и manage.py set_telegram_webhook.
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+# Секрет в пути вебхука (/api/telegram/webhook/<секрет>/) и в заголовке
+# X-Telegram-Bot-Api-Secret-Token — без него любой в интернете мог бы слать
+# сюда поддельные апдейты. Генерируется один раз ./deploy.sh, как SECRET_KEY.
+TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
+# Необязательно: имя бота без @, только чтобы показать его в подсказке
+# сотруднику в профиле ("напишите @имя_бота"). Не участвует в проверках.
+TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 
 # --------------------------------------------------------------------------
 # Celery

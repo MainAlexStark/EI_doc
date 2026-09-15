@@ -424,6 +424,11 @@ class WorkOrder(models.Model):
         "статус", max_length=12, choices=WorkOrderStatus.choices, default=WorkOrderStatus.PLANNED
     )
     scheduled_date = models.DateField("плановая дата", null=True, blank=True)
+    scheduled_time = models.TimeField(
+        "плановое время", null=True, blank=True,
+        help_text="Переносится из Request.desired_time при подтверждении заявки, "
+                  "если среди приборов был хоть один, требующий выбора времени",
+    )
     note = models.TextField("примечание", blank=True)
 
     created_at = models.DateTimeField("создан", auto_now_add=True)

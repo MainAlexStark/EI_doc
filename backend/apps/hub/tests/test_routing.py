@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from django.test import TestCase
 
+import datetime as dt
+
+from django.utils import timezone
+
 from apps.catalog.models import District
 from apps.core.models import Employee
-from apps.hub.models import DistrictAssignment, Request, RequestStatus
+from apps.hub.models import AvailabilityKind, DistrictAssignment, EmployeeAvailability, Request, RequestStatus
 from apps.hub.routing import resolve_district, route
 
 
@@ -68,3 +72,31 @@ class RouteTestCase(TestCase):
         request_obj = make_request(district=self.district, status=RequestStatus.CONFIRMED)
         route(request_obj)
         assert request_obj.suggested_employee is None
+
+    def test_prefers_an_employee_with_matching_availability_over_priority_order(self):
+        """Бэкап-сотрудник ниже по приоритету закрепления, но именно он свободен
+
+        на желаемую дату заявки — роутинг должен предложить его, а не того, кто
+        просто первый в списке закрепления за районом.
+        """
+        DistrictAssignment.objects.create(district=self.district, employee=self.preferred, priority=10)
+        DistrictAssignment.objects.create(district=self.district, employee=self.backup, priority=50)
+        desired = timezone.localdate() + dt.timedelta(days=3)
+        EmployeeAvailability.objects.create(
+            employee=self.backup, kind=AvailabilityKind.DISTRICT, date=desired,
+        )
+
+        request_obj = make_request(district=self.district, desired_date=desired)
+        route(request_obj)
+
+        assert request_obj.suggested_employee_id == self.backup.pk
+
+    def test_falls_back_to_priority_order_when_nobody_marked_available(self):
+        DistrictAssignment.objects.create(district=self.district, employee=self.backup, priority=50)
+        DistrictAssignment.objects.create(district=self.district, employee=self.preferred, priority=10)
+        desired = timezone.localdate() + dt.timedelta(days=3)
+
+        request_obj = make_request(district=self.district, desired_date=desired)
+        route(request_obj)
+
+        assert request_obj.suggested_employee_id == self.preferred.pk

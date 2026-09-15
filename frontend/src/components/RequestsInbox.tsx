@@ -8,6 +8,9 @@ import {
   type HubRequest,
 } from "../api";
 
+const money = (value: string | number) =>
+  new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Number(value));
+
 const STATUS_LABELS: Record<string, string> = {
   new: "новая", routed: "подобран исполнитель", confirmed: "подтверждена",
   rejected: "отклонена", spam: "спам / дубль",
@@ -24,6 +27,7 @@ export default function RequestsInbox() {
   const [open, setOpen] = useState<number | null>(null);
   const [pickEmployee, setPickEmployee] = useState<Record<number, string>>({});
   const [pickDate, setPickDate] = useState<Record<number, string>>({});
+  const [pickTime, setPickTime] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -58,6 +62,7 @@ export default function RequestsInbox() {
       [request.id]: current[request.id] ?? (request.suggested_employee_id?.toString() ?? ""),
     }));
     setPickDate((current) => ({ ...current, [request.id]: current[request.id] ?? (request.desired_date ?? "") }));
+    setPickTime((current) => ({ ...current, [request.id]: current[request.id] ?? (request.desired_time ?? "") }));
   };
 
   const confirm = async (request: HubRequest) => {
@@ -72,6 +77,7 @@ export default function RequestsInbox() {
       await confirmRequest(request.id, {
         employee_id: Number(employeeId),
         scheduled_date: pickDate[request.id] || null,
+        scheduled_time: pickTime[request.id] || null,
       });
       setOpen(null);
       await load(status);
@@ -136,10 +142,26 @@ export default function RequestsInbox() {
                 <span className="pill ok">исполнитель: {request.assigned_employee}</span>
               )}
               {request.desired_date && (
-                <span className="pill muted">желаемая дата: {formatDate(request.desired_date)}</span>
+                <span className="pill muted">
+                  желаемая дата: {formatDate(request.desired_date)}
+                  {request.desired_time ? `, ${request.desired_time.slice(0, 5)}` : ""}
+                </span>
+              )}
+              {request.is_priority_slot && <span className="pill ok">приоритетный слот</span>}
+              {request.estimated_price && (
+                <span className="pill muted">≈ {money(request.estimated_price)} ₽</span>
               )}
             </div>
 
+            {request.items.length > 0 && (
+              <ul className="request-items">
+                {request.items.map((item) => (
+                  <li key={item.id}>
+                    {item.family} × {item.quantity} — {money(item.subtotal)} ₽
+                  </li>
+                ))}
+              </ul>
+            )}
             {request.si_description && <p>{request.si_description}</p>}
             {request.comment && <p className="sub">{request.comment}</p>}
             <p className="sub">
@@ -191,6 +213,17 @@ export default function RequestsInbox() {
                       value={pickDate[request.id] ?? ""}
                       onChange={(event) =>
                         setPickDate((current) => ({ ...current, [request.id]: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor={`time-${request.id}`}>Время</label>
+                    <input
+                      id={`time-${request.id}`}
+                      type="time"
+                      value={pickTime[request.id] ?? ""}
+                      onChange={(event) =>
+                        setPickTime((current) => ({ ...current, [request.id]: event.target.value }))
                       }
                     />
                   </div>

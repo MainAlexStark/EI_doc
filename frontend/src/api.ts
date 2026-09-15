@@ -206,6 +206,8 @@ export async function suggestAddress(query: string): Promise<AddressSuggestRespo
   return response.json();
 }
 
+export type RequestItemPayload = { family_id: number; quantity: number };
+
 export type RequestPayload = {
   contact_name: string;
   contact_phone?: string;
@@ -217,8 +219,11 @@ export type RequestPayload = {
   latitude?: number | null;
   longitude?: number | null;
   is_address_confirmed?: boolean;
+  items?: RequestItemPayload[];
   si_description?: string;
   desired_date?: string | null;
+  desired_time?: string | null;
+  is_priority_slot?: boolean;
   comment?: string;
   website?: string; // honeypot — держать пустым
 };
@@ -239,6 +244,15 @@ export async function submitRequest(payload: RequestPayload): Promise<{ id: numb
 // ---------------------------------------------------------------------------
 // Диспетчерская: заявки
 // ---------------------------------------------------------------------------
+export type HubRequestItem = {
+  id: number;
+  family: string;
+  family_id: number;
+  quantity: number;
+  unit_price: string;
+  subtotal: string;
+};
+
 export type HubRequest = {
   id: number;
   source: string;
@@ -249,8 +263,13 @@ export type HubRequest = {
   contact_email: string;
   address: string;
   district: string;
+  items: HubRequestItem[];
   si_description: string;
   desired_date: string | null;
+  desired_time: string | null;
+  is_priority_slot: boolean;
+  estimated_price: string | null;
+  discount_percent: string;
   comment: string;
   suggested_employee: string;
   suggested_employee_id: number | null;
@@ -271,7 +290,7 @@ export const routeRequest = (id: number) =>
 
 export const confirmRequest = (
   id: number,
-  payload: { employee_id: number; scheduled_date?: string | null; note?: string },
+  payload: { employee_id: number; scheduled_date?: string | null; scheduled_time?: string | null; note?: string },
 ) => json<{ work_order_id: number }>(`/api/hub/requests/${id}/confirm/`, {
   method: "POST",
   body: JSON.stringify(payload),
@@ -292,6 +311,7 @@ export type WorkOrder = {
   assigned_employee: string;
   assigned_employee_id: number;
   scheduled_date: string | null;
+  scheduled_time: string | null;
   note: string;
   request_id: number | null;
   verifications_total: number;
@@ -363,3 +383,83 @@ export type Workload = {
 export const fetchWorkload = (dateFrom: string, dateTo: string) =>
   json<Workload>(`/api/tasks/workload/?date_from=${dateFrom}&date_to=${dateTo}`);
 
+// ---------------------------------------------------------------------------
+// Типы приборов и цены (форма заявки на сайте)
+// ---------------------------------------------------------------------------
+export type Family = {
+  id: number;
+  code: string;
+  name: string;
+  price: string;
+  requires_time_slot: boolean;
+};
+
+export type FamilyOptionsResponse = { families: Family[]; priority_discount_percent: string };
+
+/** Публичный эндпоинт, без токена — как suggestAddress. */
+export async function fetchFamilies(): Promise<FamilyOptionsResponse> {
+  const response = await fetch("/api/catalog/families/");
+  if (!response.ok) return { families: [], priority_discount_percent: "0" };
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Доступность сотрудников — публичные слоты для формы + личный график
+// ---------------------------------------------------------------------------
+export type PublicSlot = { date: string; start_time: string | null; end_time: string | null; is_priority: boolean };
+export type PublicSlotsResponse = { district_known: boolean; slots: PublicSlot[] };
+
+/** Публичный эндпоинт — район ещё не подтверждён диспетчером, поэтому передаём его строкой. */
+export async function fetchPublicSlots(district: string): Promise<PublicSlotsResponse> {
+  if (!district.trim()) return { district_known: false, slots: [] };
+  const response = await fetch(`/api/hub/availability/slots/?${queryString({ district })}`);
+  if (!response.ok) return { district_known: false, slots: [] };
+  return response.json();
+}
+
+export type AvailabilitySlot = {
+  id: number;
+  employee: number;
+  employee_name: string;
+  kind: "district" | "trip";
+  date: string;
+  start_time: string | null;
+  end_time: string | null;
+  is_priority: boolean;
+  note: string;
+  created_at: string;
+};
+
+export type AvailabilityPayload = {
+  kind: "district" | "trip";
+  date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  is_priority?: boolean;
+  note?: string;
+};
+
+export const fetchMyAvailability = (filters: { date_from?: string; date_to?: string } = {}) =>
+  json<Page<AvailabilitySlot>>(`/api/hub/availability/?${queryString(filters)}`);
+
+export const createAvailability = (payload: AvailabilityPayload) =>
+  json<AvailabilitySlot>("/api/hub/availability/", { method: "POST", body: JSON.stringify(payload) });
+
+export const updateAvailability = (id: number, patch: Partial<AvailabilityPayload>) =>
+  json<AvailabilitySlot>(`/api/hub/availability/${id}/`, { method: "PATCH", body: JSON.stringify(patch) });
+
+export const deleteAvailability = (id: number) =>
+  json<void>(`/api/hub/availability/${id}/`, { method: "DELETE" });
+
+// ---------------------------------------------------------------------------
+// Telegram — привязка личного чата
+// ---------------------------------------------------------------------------
+export type TelegramLinkInfo = {
+  code: string;
+  expires_at: string;
+  bot_username: string;
+  already_linked: boolean;
+};
+
+export const requestTelegramLinkCode = () =>
+  json<TelegramLinkInfo>("/api/core/employees/me/telegram-link-code/", { method: "POST" });

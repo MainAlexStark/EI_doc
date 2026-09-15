@@ -15,10 +15,12 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
+from apps.catalog.models import MeasurementFamily
 from apps.core.models import Employee
 from apps.hub import routing
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
-from apps.hub.models import Request, RequestStatus
+from apps.hub.models import Request, RequestItem, RequestStatus
+from apps.hub.pricing import estimate
 from apps.verification.models import Client, ClientKind, Site, WorkOrder
 
 
@@ -88,6 +90,11 @@ class AddressSuggestView(APIView):
 # ---------------------------------------------------------------------------
 # Приём заявки с сайта
 # ---------------------------------------------------------------------------
+class RequestItemInputSerializer(serializers.Serializer):
+    family_id = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1, max_value=99)
+
+
 class RequestCreateSerializer(serializers.Serializer):
     contact_name = serializers.CharField(max_length=200)
     contact_phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
@@ -101,8 +108,11 @@ class RequestCreateSerializer(serializers.Serializer):
     longitude = serializers.FloatField(required=False, allow_null=True)
     is_address_confirmed = serializers.BooleanField(default=False)
 
+    items = RequestItemInputSerializer(many=True, required=False, default=list)
     si_description = serializers.CharField(required=False, allow_blank=True)
     desired_date = serializers.DateField(required=False, allow_null=True)
+    desired_time = serializers.TimeField(required=False, allow_null=True)
+    is_priority_slot = serializers.BooleanField(default=False)
     comment = serializers.CharField(required=False, allow_blank=True)
 
     # Honeypot: обычному человеку это поле не видно и незачем заполнять.
@@ -112,11 +122,20 @@ class RequestCreateSerializer(serializers.Serializer):
     def validate(self, data):
         if not (data.get("contact_phone") or data.get("contact_email")):
             raise serializers.ValidationError("Укажите телефон или email для связи")
+        if not data.get("items") and not data.get("si_description", "").strip():
+            raise serializers.ValidationError("Укажите хотя бы один прибор или опишите, что нужно поверить")
         return data
 
 
 class RequestCreateView(APIView):
-    """POST /api/hub/requests/ — публичная форма заявки на сайте."""
+    """POST /api/hub/requests/ — публичная форма заявки на сайте.
+
+    Цена — серверный снимок: доверять присланной клиентом сумме нельзя,
+    поэтому здесь она пересчитывается заново по актуальным MeasurementFamily.price
+    и PricingSettings, и это и есть то, что уходит в Request.estimated_price
+    (apps.hub.pricing.estimate). Клиентский расчёт на форме — только чтобы
+    цена обновлялась вживую без похода на сервер при каждом клике.
+    """
 
     permission_classes = [AllowAny]  # троттлинг — DEFAULT_THROTTLE_RATES.anon = 20/час
 
@@ -128,6 +147,29 @@ class RequestCreateView(APIView):
 
         honeypot_tripped = bool(data.pop("website", ""))
         district_name = data.pop("district", "")
+        items_input = data.pop("items", [])
+        is_priority_slot = data.pop("is_priority_slot", False)
+
+        families_by_id = {}
+        if items_input:
+            families_by_id = {
+                f.id: f for f in MeasurementFamily.objects.filter(
+                    id__in=[item["family_id"] for item in items_input]
+                )
+            }
+            missing = [item["family_id"] for item in items_input if item["family_id"] not in families_by_id]
+            if missing:
+                raise serializers.ValidationError({"items": f"Неизвестный тип прибора: {missing}"})
+
+        needs_time = any(families_by_id[item["family_id"]].requires_time_slot for item in items_input)
+        if not needs_time:
+            data["desired_time"] = None
+        effective_priority = is_priority_slot and needs_time
+
+        price = estimate(
+            [(families_by_id[item["family_id"]], item["quantity"]) for item in items_input],
+            is_priority_slot=effective_priority,
+        )
 
         obj = Request.objects.create(
             source="site",
@@ -135,8 +177,16 @@ class RequestCreateView(APIView):
             honeypot_tripped=honeypot_tripped,
             status=RequestStatus.SPAM if honeypot_tripped else RequestStatus.NEW,
             district=None if honeypot_tripped else routing.resolve_district(district_name),
+            is_priority_slot=effective_priority,
+            estimated_price=price["total"] if items_input else None,
+            discount_percent=price["discount_percent"] if items_input else 0,
             **data,
         )
+        for item in items_input:
+            family = families_by_id[item["family_id"]]
+            RequestItem.objects.create(
+                request=obj, family=family, quantity=item["quantity"], unit_price=family.price
+            )
         if not honeypot_tripped:
             routing.route(obj)
 
@@ -146,6 +196,15 @@ class RequestCreateView(APIView):
 # ---------------------------------------------------------------------------
 # Диспетчерская очередь
 # ---------------------------------------------------------------------------
+class RequestItemSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    family = serializers.CharField(source="family.name")
+    family_id = serializers.IntegerField()
+    quantity = serializers.IntegerField()
+    unit_price = serializers.DecimalField(max_digits=9, decimal_places=2)
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
 class RequestSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     source = serializers.CharField()
@@ -156,8 +215,13 @@ class RequestSerializer(serializers.Serializer):
     contact_email = serializers.CharField()
     address = serializers.CharField()
     district = serializers.CharField(source="district.name", default="", allow_null=True)
+    items = RequestItemSerializer(many=True)
     si_description = serializers.CharField()
     desired_date = serializers.DateField(allow_null=True)
+    desired_time = serializers.TimeField(allow_null=True)
+    is_priority_slot = serializers.BooleanField()
+    estimated_price = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    discount_percent = serializers.DecimalField(max_digits=4, decimal_places=1)
     comment = serializers.CharField()
     suggested_employee = serializers.CharField(source="suggested_employee.full_name", default="", allow_null=True)
     suggested_employee_id = serializers.IntegerField(allow_null=True)
@@ -172,7 +236,9 @@ class RequestListView(APIView):
     """GET /api/hub/requests/?status=&district=&assigned_employee="""
 
     def get(self, request):
-        qs = Request.objects.select_related("district", "suggested_employee", "assigned_employee")
+        qs = Request.objects.select_related(
+            "district", "suggested_employee", "assigned_employee"
+        ).prefetch_related("items__family")
         status_param = request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
@@ -197,6 +263,7 @@ class RequestRouteView(APIView):
 class RequestConfirmSerializer(serializers.Serializer):
     employee_id = serializers.IntegerField()
     scheduled_date = serializers.DateField(required=False, allow_null=True)
+    scheduled_time = serializers.TimeField(required=False, allow_null=True)
     client_id = serializers.IntegerField(required=False, allow_null=True)
     site_id = serializers.IntegerField(required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True)
@@ -251,6 +318,7 @@ class RequestConfirmView(APIView):
                 site=site,
                 assigned_employee=employee,
                 scheduled_date=data.get("scheduled_date") or obj.desired_date,
+                scheduled_time=data.get("scheduled_time") or obj.desired_time,
                 note=data.get("note", ""),
             )
 
@@ -286,6 +354,8 @@ def _notify_work_order_assigned(work_order: WorkOrder) -> None:
     if not employee.telegram_chat_id:
         return
     when = work_order.scheduled_date.strftime("%d.%m.%Y") if work_order.scheduled_date else "дата не указана"
+    if work_order.scheduled_time:
+        when += f", {work_order.scheduled_time:%H:%M}"
     send_message(
         employee.telegram_chat_id,
         f"Новый наряд №{work_order.id}: {work_order.site.address}, {when}",

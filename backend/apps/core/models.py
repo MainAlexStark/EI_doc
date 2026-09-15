@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import datetime as dt
 
+import secrets
+
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
+
+TELEGRAM_LINK_CODE_TTL = dt.timedelta(minutes=15)
 
 
 class Role(models.TextChoices):
@@ -81,8 +85,16 @@ class Employee(models.Model):
     stamp_image = models.ImageField("оттиск клейма", upload_to="stamps/", blank=True)
     telegram_chat_id = models.CharField(
         "Telegram chat_id", max_length=32, blank=True,
-        help_text="Сотрудник пишет боту /start, chat_id из апдейта вносится сюда руками — "
-                  "привязки по номеру телефона нет",
+        help_text="Заполняется само, когда сотрудник привязывает Telegram кодом "
+                  "(см. telegram_link_code) — руками трогать не нужно",
+    )
+    telegram_link_code = models.CharField(
+        "код привязки Telegram", max_length=8, blank=True,
+        help_text="Сотрудник получает его в своём профиле в EI_doc и присылает боту "
+                  "командой /start <код>; код одноразовый и живёт 15 минут",
+    )
+    telegram_link_code_expires_at = models.DateTimeField(
+        "код привязки действует до", null=True, blank=True,
     )
     is_active = models.BooleanField("работает", default=True)
 
@@ -102,6 +114,19 @@ class Employee(models.Model):
         return self.attestations.filter(
             families=family, valid_from__lte=on_date, valid_to__gte=on_date,
         ).exists()
+
+    def generate_telegram_link_code(self) -> str:
+        """Новый одноразовый код привязки Telegram — старый (если был) перестаёт работать.
+
+        Не путать с постоянным идентификатором: код одноразовый и короткоживущий,
+        chat_id из него не следует, привязка происходит только через apps.core.telegram
+        при получении команды /start с этим кодом в вебхуке бота.
+        """
+        code = secrets.token_hex(4).upper()  # 8 hex-символов, не путается с O/0/I/1 на слух
+        self.telegram_link_code = code
+        self.telegram_link_code_expires_at = timezone.now() + TELEGRAM_LINK_CODE_TTL
+        self.save(update_fields=["telegram_link_code", "telegram_link_code_expires_at"])
+        return code
 
 
 class Attestation(models.Model):

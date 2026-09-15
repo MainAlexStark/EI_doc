@@ -25,6 +25,7 @@ class WorkOrderSerializer(serializers.Serializer):
     assigned_employee = serializers.CharField(source="assigned_employee.full_name")
     assigned_employee_id = serializers.IntegerField()
     scheduled_date = serializers.DateField(allow_null=True)
+    scheduled_time = serializers.TimeField(allow_null=True)
     note = serializers.CharField()
     request_id = serializers.IntegerField(allow_null=True)
     verifications_total = serializers.SerializerMethodField()
@@ -66,6 +67,7 @@ class WorkOrderCreateSerializer(serializers.Serializer):
     site_id = serializers.IntegerField()
     employee_id = serializers.IntegerField(source="assigned_employee_id")
     scheduled_date = serializers.DateField(required=False, allow_null=True)
+    scheduled_time = serializers.TimeField(required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True)
 
 

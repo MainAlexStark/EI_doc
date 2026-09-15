@@ -65,6 +65,65 @@ class DistrictAssignment(models.Model):
         return f"{self.district} → {self.employee}"
 
 
+class AvailabilityKind(models.TextChoices):
+    DISTRICT = "district", "Выезд в своём районе"
+    TRIP = "trip", "Командировка"
+
+
+class EmployeeAvailability(models.Model):
+    """Слот, когда сотрудник может выезжать — заводит сам сотрудник в своём календаре.
+
+    Два независимых смысла в одной модели:
+
+    * `kind` — куда сотрудник готов выезжать (в своём районе или в командировку);
+    * `is_priority` — это время сотрудник отмечает как предпочтительное для себя;
+      заявителю на форме такой слот показывается со скидкой
+      (apps.catalog.models.PricingSettings.priority_discount_percent) — стимул
+      выбрать время, которое сотруднику удобнее, а не только клиенту.
+
+    Время (`start_time`/`end_time`) обязательно только для слотов, которые
+    реально предлагаются заявителю с выбором времени (счётчики — см.
+    MeasurementFamily.requires_time_slot); для остальных типов СИ на форме
+    учитывается только дата, независимо от времени слота.
+    """
+
+    employee = models.ForeignKey(
+        "core.Employee", on_delete=models.CASCADE, related_name="availability_slots",
+        verbose_name="сотрудник",
+    )
+    kind = models.CharField(
+        "тип", max_length=10, choices=AvailabilityKind.choices, default=AvailabilityKind.DISTRICT
+    )
+    date = models.DateField("дата", db_index=True)
+    start_time = models.TimeField("с", null=True, blank=True, help_text="Пусто — весь день")
+    end_time = models.TimeField("по", null=True, blank=True, help_text="Пусто — весь день")
+    is_priority = models.BooleanField(
+        "приоритетное время", default=False,
+        help_text="Показывается заявителю со скидкой — это время сотруднику удобнее",
+    )
+    note = models.CharField("примечание", max_length=200, blank=True)
+
+    created_at = models.DateTimeField("создано", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "слот доступности сотрудника"
+        verbose_name_plural = "слоты доступности сотрудников"
+        ordering = ["date", "start_time"]
+        indexes = [models.Index(fields=["employee", "date"])]
+
+    def __str__(self) -> str:
+        when = self.date.strftime("%d.%m.%Y")
+        if self.start_time and self.end_time:
+            when += f", {self.start_time:%H:%M}–{self.end_time:%H:%M}"
+        return f"{self.employee} — {when}"
+
+    def covers(self, *, at_time) -> bool:
+        """Слот без времени покрывает весь день; со временем — только свой интервал."""
+        if at_time is None or self.start_time is None or self.end_time is None:
+            return True
+        return self.start_time <= at_time <= self.end_time
+
+
 class Request(models.Model):
     """Заявка на поверку — с сайта, по телефону или занесённая вручную.
 
@@ -100,8 +159,31 @@ class Request(models.Model):
         help_text="Снято — заявитель ввёл адрес вручную, район не распознан автоматически",
     )
 
-    si_description = models.TextField("что нужно поверить", blank=True)
+    si_description = models.TextField(
+        "что нужно поверить — доп. примечание", blank=True,
+        help_text="Список приборов теперь — RequestItem (family + количество); "
+                  "здесь только свободный текст, если заявитель что-то уточнил словами",
+    )
     desired_date = models.DateField("желаемая дата", null=True, blank=True)
+    desired_time = models.TimeField(
+        "желаемое время", null=True, blank=True,
+        help_text="Заполняется, только если среди приборов заявки есть хотя бы один, "
+                  "требующий выбора времени (MeasurementFamily.requires_time_slot)",
+    )
+    is_priority_slot = models.BooleanField(
+        "выбран приоритетный слот", default=False,
+        help_text="Заявитель выбрал дату/время, отмеченные сотрудником как приоритетные "
+                  "(apps.hub.models.EmployeeAvailability.is_priority) — даёт скидку",
+    )
+    estimated_price = models.DecimalField(
+        "примерная цена", max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Снимок расчёта на момент отправки формы — по текущим ценам может "
+                  "отличаться, это ориентир заявителю, а не выставленный счёт",
+    )
+    discount_percent = models.DecimalField(
+        "применённая скидка, %", max_digits=4, decimal_places=1, default=0,
+        help_text="Снимок PricingSettings.priority_discount_percent на момент отправки",
+    )
     comment = models.TextField("комментарий", blank=True)
 
     suggested_employee = models.ForeignKey(
@@ -138,3 +220,33 @@ class Request(models.Model):
         self.confirmed_at = timezone.now()
         self.assigned_employee = employee
         self.save(update_fields=["status", "confirmed_at", "assigned_employee"])
+
+
+class RequestItem(models.Model):
+    """Одна строка «что поверить» в заявке — семейство СИ + количество.
+
+    Семейство, не конкретный SiType из Госреестра: на форме заявитель выбирает
+    из короткого списка (счётчики воды, манометры, весы...), точную модель
+    прибора устанавливает поверитель уже на месте.
+    """
+
+    request = models.ForeignKey(Request, on_delete=models.CASCADE, related_name="items", verbose_name="заявка")
+    family = models.ForeignKey(
+        "catalog.MeasurementFamily", on_delete=models.PROTECT, related_name="+", verbose_name="тип прибора"
+    )
+    quantity = models.PositiveSmallIntegerField("количество", default=1)
+    unit_price = models.DecimalField(
+        "цена за единицу на момент заявки", max_digits=9, decimal_places=2, default=0,
+        help_text="Снимок MeasurementFamily.price на момент отправки формы",
+    )
+
+    class Meta:
+        verbose_name = "прибор в заявке"
+        verbose_name_plural = "приборы в заявке"
+
+    def __str__(self) -> str:
+        return f"{self.family} × {self.quantity}"
+
+    @property
+    def subtotal(self):
+        return self.unit_price * self.quantity

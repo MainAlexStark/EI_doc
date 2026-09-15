@@ -238,3 +238,50 @@ textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--acce
   .workload-row { grid-template-columns: 1fr; gap: 4px; }
 }
 
+
+/* --- выбор приборов и цена (публичная форма заявки) --- */
+.item-picker { display: flex; gap: 8px; }
+.item-picker select { flex: 1; }
+
+.item-list { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.item-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; background: var(--surface-2); border-radius: var(--radius);
+}
+.item-list li .name { flex: 1; }
+.item-list li input[type="number"] { width: 56px; }
+.item-list li .price { font-variant-numeric: tabular-nums; min-width: 80px; text-align: right; }
+
+.price-box {
+  padding: 10px 14px; margin: 4px 0;
+  background: var(--accent-soft); border-radius: var(--radius);
+}
+.price-box > div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; }
+.price-box .sub { color: var(--accent); }
+.price-box .hint { margin-top: 4px; }
+
+.slot-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.slot-chip {
+  position: relative; padding: 6px 12px; font-size: 13px;
+}
+.slot-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.slot-chip .dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 999px;
+  background: var(--warn); margin-left: 6px; vertical-align: middle;
+}
+.slot-chip.active .dot { background: #fff; }
+
+/* --- заявки: список приборов в карточке диспетчерской --- */
+.request-items { margin: 6px 0; padding-left: 18px; font-size: 13px; }
+.request-items li { margin-bottom: 2px; }
+
+/* --- Telegram и мой график --- */
+.telegram-box {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; margin-bottom: 16px; max-width: 480px;
+}
+.telegram-box h3 { margin: 0 0 8px; font-size: 14px; }
+.telegram-code code {
+  display: inline-block; margin: 6px 0; padding: 6px 10px;
+  background: var(--surface-2); border-radius: var(--radius); font-size: 15px; letter-spacing: 0.04em;
+}

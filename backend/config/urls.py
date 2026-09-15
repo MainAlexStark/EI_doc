@@ -3,8 +3,9 @@ from django.urls import path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from apps.catalog.api import SiTypeSuggestView
-from apps.core.api import EmployeeListView
+from apps.catalog.api import FamilyOptionsView, SiTypeSuggestView
+from apps.core.api import EmployeeListView, TelegramLinkCodeView
+from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, healthz
 from apps.hub.api import (
     AddressSuggestView,
@@ -13,6 +14,11 @@ from apps.hub.api import (
     RequestListView,
     RequestRejectView,
     RequestRouteView,
+)
+from apps.hub.api_availability import (
+    AvailabilityDetailView,
+    AvailabilityListCreateView,
+    AvailabilityPublicSlotsView,
 )
 from apps.tasks.api import (
     TaskBoardView,
@@ -54,7 +60,16 @@ urlpatterns = [
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
+    path("api/catalog/families/", FamilyOptionsView.as_view(), name="family_options"),
     path("api/core/employees/", EmployeeListView.as_view(), name="employee_list"),
+    path(
+        "api/core/employees/me/telegram-link-code/",
+        TelegramLinkCodeView.as_view(), name="telegram_link_code",
+    ),
+    path(
+        "api/telegram/webhook/<str:secret>/",
+        TelegramWebhookView.as_view(), name="telegram_webhook",
+    ),
     path("api/journal/", JournalView.as_view(), name="journal"),
     path("api/journal/export/", JournalExportView.as_view(), name="journal_export"),
     path("api/normocontrol/scopes/", NormocontrolScopesView.as_view(), name="normocontrol_scopes"),
@@ -83,6 +98,13 @@ urlpatterns = [
     path("api/hub/requests/<int:pk>/route/", RequestRouteView.as_view(), name="request_route"),
     path("api/hub/requests/<int:pk>/confirm/", RequestConfirmView.as_view(), name="request_confirm"),
     path("api/hub/requests/<int:pk>/reject/", RequestRejectView.as_view(), name="request_reject"),
+    # Доступность сотрудников — их собственный календарь + публичные слоты для формы
+    path("api/hub/availability/", AvailabilityListCreateView.as_view(), name="availability_list"),
+    path("api/hub/availability/<int:pk>/", AvailabilityDetailView.as_view(), name="availability_detail"),
+    path(
+        "api/hub/availability/slots/",
+        AvailabilityPublicSlotsView.as_view(), name="availability_public_slots",
+    ),
     # Наряды
     path("api/work-orders/", WorkOrderListView.as_view(), name="work_order_list"),
     path("api/work-orders/create/", WorkOrderCreateView.as_view(), name="work_order_create"),

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { isAuthenticated, logout } from "./api";
+import Availability from "./components/Availability";
 import Journal from "./components/Journal";
 import Login from "./components/Login";
 import Normocontrol from "./components/Normocontrol";
@@ -7,7 +8,7 @@ import RequestsInbox from "./components/RequestsInbox";
 import Tasks from "./components/Tasks";
 import WorkOrders from "./components/WorkOrders";
 
-type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "tasks";
+type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "tasks" | "availability";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "journal", label: "Журнал" },
@@ -15,6 +16,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "requests", label: "Заявки" },
   { key: "work-orders", label: "Наряды" },
   { key: "tasks", label: "Задачи" },
+  { key: "availability", label: "Мой график" },
 ];
 
 export default function App() {
@@ -55,6 +57,7 @@ export default function App() {
         {tab === "requests" && <RequestsInbox />}
         {tab === "work-orders" && <WorkOrders />}
         {tab === "tasks" && <Tasks />}
+        {tab === "availability" && <Availability />}
       </main>
     </div>
   );
