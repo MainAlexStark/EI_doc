@@ -124,7 +124,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.AnonRateThrottle",),
-    "DEFAULT_THROTTLE_RATES": {"anon": "20/hour"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "20/hour", "address_suggest": "120/min"},
     "PAGE_SIZE": 50,
 }
 
@@ -202,6 +202,20 @@ ARSHIN_BASE_URL = env("ARSHIN_BASE_URL", default="https://fgis.gost.ru/fundmetro
 # перед реализацией выгрузки сведений о поверке.
 ARSHIN_PUBLIC_KEY = env("ARSHIN_PUBLIC_KEY", default="")
 ARSHIN_PRIVATE_KEY = env("ARSHIN_PRIVATE_KEY", default="")
+
+# --------------------------------------------------------------------------
+# Подсказка адресов (DaData) — этап 2, роутинг заявок по району
+# --------------------------------------------------------------------------
+# Пусто — форма заявки на сайте падает на обычное текстовое поле адреса,
+# роутинг по району в этом случае просто не срабатывает (see apps.hub.address).
+DADATA_API_KEY = env("DADATA_API_KEY", default="")
+
+# --------------------------------------------------------------------------
+# Telegram-уведомления
+# --------------------------------------------------------------------------
+# Пусто — apps.core.telegram.send_message() только логирует и ничего не шлёт.
+# Токен получают у @BotFather; сотрудник привязывается через Employee.telegram_chat_id.
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
 
 # --------------------------------------------------------------------------
 # Celery

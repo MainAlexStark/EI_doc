@@ -79,6 +79,11 @@ class Employee(models.Model):
     position = models.CharField("должность", max_length=120, blank=True)
     signature_image = models.ImageField("подпись", upload_to="signatures/", blank=True)
     stamp_image = models.ImageField("оттиск клейма", upload_to="stamps/", blank=True)
+    telegram_chat_id = models.CharField(
+        "Telegram chat_id", max_length=32, blank=True,
+        help_text="Сотрудник пишет боту /start, chat_id из апдейта вносится сюда руками — "
+                  "привязки по номеру телефона нет",
+    )
     is_active = models.BooleanField("работает", default=True)
 
     history = HistoricalRecords()

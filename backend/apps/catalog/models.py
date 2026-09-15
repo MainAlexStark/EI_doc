@@ -256,3 +256,25 @@ class ProtocolTemplate(models.Model):
 
     def __str__(self) -> str:
         return f"{self.family.code} v{self.version}"
+
+
+class District(models.Model):
+    """Район обслуживания — единица роутинга заявок.
+
+    Геокодирование и карта появятся на этапе 4. До тех пор район заявке
+    даёт не система, а структурированный ответ подсказки адреса (DaData,
+    см. apps.hub.address): area/city_district приходит вместе с выбранным
+    вариантом, вводить его руками не нужно. Таблица растёт сама — при
+    подсказке новый район заводится по имени (get_or_create).
+    """
+
+    name = models.CharField("название", max_length=120, unique=True)
+    is_active = models.BooleanField("используется", default=True)
+
+    class Meta:
+        verbose_name = "район обслуживания"
+        verbose_name_plural = "районы обслуживания"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name

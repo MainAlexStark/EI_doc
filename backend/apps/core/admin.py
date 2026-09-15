@@ -30,7 +30,7 @@ class AttestationInline(admin.TabularInline):
 
 @admin.register(Employee)
 class EmployeeAdmin(SimpleHistoryAdmin):
-    list_display = ["full_name", "tab_number", "position", "is_active"]
+    list_display = ["full_name", "tab_number", "position", "telegram_chat_id", "is_active"]
     list_filter = ["is_active"]
     search_fields = ["full_name", "tab_number"]
     inlines = [AttestationInline]

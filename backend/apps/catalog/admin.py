@@ -5,6 +5,7 @@ from simple_history.admin import SimpleHistoryAdmin
 from apps.catalog.models import (
     AmbientRecord,
     ConditionProfile,
+    District,
     MeasurementFamily,
     ProtocolTemplate,
     SiType,
@@ -68,3 +69,10 @@ class VerificationMethodAdmin(admin.ModelAdmin):
 class ProtocolTemplateAdmin(SimpleHistoryAdmin):
     list_display = ["family", "version", "valid_from", "is_active", "comment"]
     list_filter = ["family", "is_active"]
+
+
+@admin.register(District)
+class DistrictAdmin(admin.ModelAdmin):
+    list_display = ["name", "is_active"]
+    search_fields = ["name"]
+

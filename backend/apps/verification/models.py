@@ -10,6 +10,7 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 
@@ -51,6 +52,15 @@ class Site(models.Model):
         verbose_name="клиент",
     )
     address = models.CharField("адрес", max_length=350)
+    postal_code = models.CharField("индекс", max_length=6, blank=True)
+    fias_id = models.CharField(
+        "ФИАС ID", max_length=64, blank=True,
+        help_text="Заполняется, когда адрес выбран из подсказки (DaData), а не введён вручную",
+    )
+    district = models.ForeignKey(
+        "catalog.District", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="sites", verbose_name="район",
+    )
     latitude = models.DecimalField("широта", max_digits=9, decimal_places=6, null=True, blank=True)
     longitude = models.DecimalField("долгота", max_digits=9, decimal_places=6, null=True, blank=True)
     is_restricted = models.BooleanField(
@@ -137,6 +147,11 @@ class Verification(models.Model):
     device = models.ForeignKey(
         "core.Device", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="verifications", verbose_name="устройство",
+    )
+    work_order = models.ForeignKey(
+        "WorkOrder", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="verifications", verbose_name="наряд",
+        help_text="Пусто, если поверка заведена не из наряда (например, импорт истории)",
     )
 
     instrument = models.ForeignKey(
@@ -371,3 +386,83 @@ class Protocol(models.Model):
     @property
     def is_sealed(self) -> bool:
         return self.status in ProtocolStatus.sealed()
+
+# ---------------------------------------------------------------------------
+# Наряды
+# ---------------------------------------------------------------------------
+class WorkOrderStatus(models.TextChoices):
+    PLANNED = "planned", "Запланирован"
+    IN_PROGRESS = "in_progress", "В работе"
+    DONE = "done", "Закрыт"
+    CANCELLED = "cancelled", "Отменён"
+
+
+class WorkOrder(models.Model):
+    """Наряд — задание поверителю на выезд или приём.
+
+    Наряд не хранит измерения сам — каждая поверка внутри него своя
+    (Verification.work_order), а закрывается наряд, когда все его поверки
+    приняты нормоконтролем (см. apps.verification.signals).
+    """
+
+    request = models.ForeignKey(
+        "hub.Request", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="work_orders", verbose_name="заявка",
+        help_text="Пусто, если наряд заведён напрямую, не из заявки с сайта",
+    )
+    client = models.ForeignKey(
+        Client, on_delete=models.PROTECT, related_name="work_orders", verbose_name="клиент"
+    )
+    site = models.ForeignKey(
+        Site, on_delete=models.PROTECT, related_name="work_orders", verbose_name="объект"
+    )
+    assigned_employee = models.ForeignKey(
+        "core.Employee", on_delete=models.PROTECT, related_name="work_orders",
+        verbose_name="исполнитель",
+    )
+    status = models.CharField(
+        "статус", max_length=12, choices=WorkOrderStatus.choices, default=WorkOrderStatus.PLANNED
+    )
+    scheduled_date = models.DateField("плановая дата", null=True, blank=True)
+    note = models.TextField("примечание", blank=True)
+
+    created_at = models.DateTimeField("создан", auto_now_add=True)
+    closed_at = models.DateTimeField("закрыт", null=True, blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "наряд"
+        verbose_name_plural = "наряды"
+        ordering = ["-scheduled_date", "-created_at"]
+        indexes = [models.Index(fields=["status", "scheduled_date"])]
+
+    def __str__(self) -> str:
+        return f"Наряд №{self.pk} — {self.site}"
+
+    @property
+    def is_closed(self) -> bool:
+        return self.status in (WorkOrderStatus.DONE, WorkOrderStatus.CANCELLED)
+
+    def refresh_status(self) -> None:
+        """Пересчитать статус по состоянию поверок. Вызывается сигналом при их сохранении.
+
+        Отменённый наряд руками — состояние ручное, автоматика его не трогает.
+        """
+        if self.status == WorkOrderStatus.CANCELLED:
+            return
+        verifications = list(self.verifications.all())
+        if not verifications:
+            return
+        all_accepted = all(v.status == VerificationStatus.ACCEPTED for v in verifications)
+        if all_accepted and self.status != WorkOrderStatus.DONE:
+            self.status = WorkOrderStatus.DONE
+            self.closed_at = timezone.now()
+            self.save(update_fields=["status", "closed_at"])
+        elif not all_accepted and self.status in (WorkOrderStatus.PLANNED, WorkOrderStatus.DONE):
+            # DONE -> IN_PROGRESS: нормоконтроль вернул один из протоколов на
+            # доработку уже после закрытия наряда — наряд открывается снова.
+            self.status = WorkOrderStatus.IN_PROGRESS
+            self.closed_at = None
+            self.save(update_fields=["status", "closed_at"])
+

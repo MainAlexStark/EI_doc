@@ -12,6 +12,8 @@ from apps.verification.models import (
     ProtocolStatus,
     Site,
     Verification,
+    WorkOrder,
+    WorkOrderStatus,
 )
 
 
@@ -24,9 +26,9 @@ class ClientAdmin(admin.ModelAdmin):
 
 @admin.register(Site)
 class SiteAdmin(admin.ModelAdmin):
-    list_display = ["address", "client", "is_restricted"]
-    list_filter = ["is_restricted"]
-    search_fields = ["address"]
+    list_display = ["address", "client", "district", "is_restricted"]
+    list_filter = ["is_restricted", "district"]
+    search_fields = ["address", "postal_code"]
 
 
 @admin.register(Instrument)
@@ -111,3 +113,25 @@ class ProtocolAdmin(SimpleHistoryAdmin):
     @admin.display(description="Дата поверки", ordering="verification__verified_at")
     def verified_at(self, obj: Protocol):
         return obj.verification.verified_at
+
+@admin.register(WorkOrder)
+class WorkOrderAdmin(SimpleHistoryAdmin):
+    list_display = [
+        "id", "site", "client", "assigned_employee", "status_badge", "scheduled_date", "request",
+    ]
+    list_filter = ["status", "assigned_employee"]
+    search_fields = ["site__address", "client__name"]
+    date_hierarchy = "scheduled_date"
+    readonly_fields = ["created_at", "closed_at"]
+
+    @admin.display(description="Статус")
+    def status_badge(self, obj: WorkOrder):
+        colours = {
+            WorkOrderStatus.PLANNED: "#6E7A7E",
+            WorkOrderStatus.IN_PROGRESS: "#0E6E75",
+            WorkOrderStatus.DONE: "#2C6B4C",
+            WorkOrderStatus.CANCELLED: "#9E362E",
+        }
+        return format_html(
+            '<b style="color:{}">{}</b>', colours.get(obj.status, "#000"), obj.get_status_display()
+        )
