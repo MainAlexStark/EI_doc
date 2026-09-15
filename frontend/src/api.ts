@@ -226,6 +226,7 @@ export type RequestPayload = {
   is_priority_slot?: boolean;
   comment?: string;
   website?: string; // honeypot — держать пустым
+  captcha_token?: string;
 };
 
 export async function submitRequest(payload: RequestPayload): Promise<{ id: number; status: string }> {
@@ -463,3 +464,15 @@ export type TelegramLinkInfo = {
 
 export const requestTelegramLinkCode = () =>
   json<TelegramLinkInfo>("/api/core/employees/me/telegram-link-code/", { method: "POST" });
+
+// ---------------------------------------------------------------------------
+// Капча (Yandex SmartCaptcha) — публичная форма заявки
+// ---------------------------------------------------------------------------
+export type CaptchaConfig = { configured: boolean; client_key: string };
+
+/** Публичный эндпоинт, без токена — как fetchFamilies. */
+export async function fetchCaptchaConfig(): Promise<CaptchaConfig> {
+  const response = await fetch("/api/hub/captcha-config/");
+  if (!response.ok) return { configured: false, client_key: "" };
+  return response.json();
+}

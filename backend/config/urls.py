@@ -9,6 +9,7 @@ from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, healthz
 from apps.hub.api import (
     AddressSuggestView,
+    CaptchaConfigView,
     RequestConfirmView,
     RequestCreateView,
     RequestListView,
@@ -93,6 +94,7 @@ urlpatterns = [
     ),
     # Заявки (EI_Hub)
     path("api/hub/address-suggest/", AddressSuggestView.as_view(), name="address_suggest"),
+    path("api/hub/captcha-config/", CaptchaConfigView.as_view(), name="captcha_config"),
     path("api/hub/requests/", RequestCreateView.as_view(), name="request_create"),
     path("api/hub/requests/list/", RequestListView.as_view(), name="request_list"),
     path("api/hub/requests/<int:pk>/route/", RequestRouteView.as_view(), name="request_route"),

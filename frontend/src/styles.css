@@ -200,6 +200,10 @@ textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--acce
 /* honeypot — спрятано от людей, доступно ботам-автозаполнялкам */
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 
+/* капча (Yandex SmartCaptcha) на публичной форме заявки */
+.captcha-field { display: flex; justify-content: center; }
+.captcha-widget { min-height: 100px; }
+
 /* --- доска задач --- */
 .board { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; }
 .board-column {

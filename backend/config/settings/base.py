@@ -211,6 +211,15 @@ ARSHIN_PRIVATE_KEY = env("ARSHIN_PRIVATE_KEY", default="")
 DADATA_API_KEY = env("DADATA_API_KEY", default="")
 
 # --------------------------------------------------------------------------
+# Капча (Yandex SmartCaptcha) — публичная форма заявки
+# --------------------------------------------------------------------------
+# Пусто — форма работает как раньше, на одном honeypot-поле (см. apps.hub.captcha
+# и apps.hub.api.RequestCreateView). Ключи — в Yandex Cloud, бесплатного лимита
+# хватает на такую форму: https://cloud.yandex.ru/docs/smartcaptcha/
+CAPTCHA_CLIENT_KEY = env("CAPTCHA_CLIENT_KEY", default="")  # публичный — отдаётся виджету
+CAPTCHA_SERVER_KEY = env("CAPTCHA_SERVER_KEY", default="")  # секретный — только для проверки
+
+# --------------------------------------------------------------------------
 # Telegram-уведомления
 # --------------------------------------------------------------------------
 # Пусто — apps.core.telegram.send_message() только логирует и ничего не шлёт.

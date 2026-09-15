@@ -25,14 +25,16 @@ USAGE_EXTRA='
 релиза не обязательны — впишите их в .env позже, когда решится, какой
 именно это доступ (см. docs/architecture.md).
 
-Подсказка адреса (DADATA_API_KEY) и уведомления в Telegram
-(TELEGRAM_BOT_TOKEN, необязательно TELEGRAM_BOT_USERNAME) — тоже необязательны:
-если их ещё нет, ./deploy.sh спрашивает при каждом запуске и обновлении
-(Enter — пропустить вопрос, спросит снова в следующий раз). Пока не заданы,
-деградирует мягко: форма заявки показывает обычное текстовое поле адреса
-вместо подсказки с районом, уведомления только пишутся в лог. TELEGRAM_WEBHOOK_SECRET
-генерируется сам, как SECRET_KEY, — как только появится TELEGRAM_BOT_TOKEN,
-вебхук регистрируется сам при каждом запуске контейнера (см. claude/hub.md).'
+Капча (CAPTCHA_CLIENT_KEY/CAPTCHA_SERVER_KEY, Yandex SmartCaptcha), подсказка
+адреса (DADATA_API_KEY) и уведомления в Telegram (TELEGRAM_BOT_TOKEN,
+необязательно TELEGRAM_BOT_USERNAME) — тоже необязательны: если их ещё нет,
+./deploy.sh спрашивает при каждом запуске и обновлении (Enter — пропустить
+вопрос, спросит снова в следующий раз). Пока не заданы, деградирует мягко:
+форма заявки защищена только honeypot-полем без виджета капчи, показывает
+обычное текстовое поле адреса вместо подсказки с районом, уведомления только
+пишутся в лог. TELEGRAM_WEBHOOK_SECRET генерируется сам, как SECRET_KEY, —
+как только появится TELEGRAM_BOT_TOKEN, вебхук регистрируется сам при каждом
+запуске контейнера (см. claude/hub.md).'
 
 set -euo pipefail
 
@@ -278,6 +280,8 @@ cmd_install() {
   }
 
   step "необязательные ключи"
+  prompt_secret "CAPTCHA_CLIENT_KEY" "Публичный ключ Yandex SmartCaptcha — виджет на форме заявки (https://cloud.yandex.ru/docs/smartcaptcha/)"
+  prompt_secret "CAPTCHA_SERVER_KEY" "Секретный ключ Yandex SmartCaptcha — проверка токена на сервере"
   prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
   prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
   prompt_secret "TELEGRAM_BOT_USERNAME" "Имя Telegram-бота без @ — для подсказки в профиле сотрудника (необязательно)"
@@ -317,6 +321,8 @@ cmd_update() {
   }
 
   step "необязательные ключи"
+  prompt_secret "CAPTCHA_CLIENT_KEY" "Публичный ключ Yandex SmartCaptcha — виджет на форме заявки (https://cloud.yandex.ru/docs/smartcaptcha/)"
+  prompt_secret "CAPTCHA_SERVER_KEY" "Секретный ключ Yandex SmartCaptcha — проверка токена на сервере"
   prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
   prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
   prompt_secret "TELEGRAM_BOT_USERNAME" "Имя Telegram-бота без @ — для подсказки в профиле сотрудника (необязательно)"

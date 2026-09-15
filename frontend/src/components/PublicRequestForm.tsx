@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  fetchCaptchaConfig,
   fetchFamilies,
   fetchPublicSlots,
   submitRequest,
@@ -10,6 +11,7 @@ import {
   type RequestItemPayload,
   type RequestPayload,
 } from "../api";
+import { loadSmartCaptcha, type SmartCaptchaApi } from "../smartCaptcha";
 
 type ContactState = {
   contact_name: string;
@@ -63,11 +65,38 @@ export default function PublicRequestForm() {
   const [chosenPriority, setChosenPriority] = useState(false);
   const [manualDate, setManualDate] = useState(""); // когда по району слотов нет
 
+  // --- капча (Yandex SmartCaptcha) ---
+  const [captchaConfigured, setCaptchaConfigured] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const captchaContainerRef = useRef<HTMLDivElement | null>(null);
+  const captchaWidgetId = useRef<number | null>(null);
+  const captchaApiRef = useRef<SmartCaptchaApi | null>(null);
+
   useEffect(() => {
     void fetchFamilies().then((response) => {
       setFamilies(response.families);
       setDiscountPercent(Number(response.priority_discount_percent) || 0);
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCaptchaConfig().then((config) => {
+      if (cancelled || !config.configured || !config.client_key) return;
+      setCaptchaConfigured(true);
+      void loadSmartCaptcha().then((api) => {
+        if (cancelled || !captchaContainerRef.current) return;
+        captchaApiRef.current = api;
+        captchaWidgetId.current = api.render(captchaContainerRef.current, {
+          sitekey: config.client_key,
+          hl: "ru",
+          callback: (token: string) => setCaptchaToken(token),
+        });
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -213,6 +242,10 @@ export default function PublicRequestForm() {
       setError("Среди выбранных приборов есть счётчики — уточните время");
       return;
     }
+    if (captchaConfigured && !captchaToken) {
+      setError("Подтвердите, что вы не робот");
+      return;
+    }
 
     const desiredDate = availableDates.length > 0 ? chosenDate || null : manualDate || null;
     const desiredTime = needsTime && chosenDate ? chosenTime || null : null;
@@ -224,6 +257,7 @@ export default function PublicRequestForm() {
       desired_time: desiredTime,
       is_priority_slot: chosenPriority && Boolean(desiredDate),
       is_address_confirmed: addressConfirmed,
+      captcha_token: captchaToken || undefined,
     };
 
     setSubmitting(true);
@@ -232,6 +266,11 @@ export default function PublicRequestForm() {
       setDoneId(result.id);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось отправить заявку");
+      // токен капчи одноразовый — после неудачи просим пройти её заново
+      if (captchaWidgetId.current !== null && captchaApiRef.current) {
+        captchaApiRef.current.reset(captchaWidgetId.current);
+      }
+      setCaptchaToken("");
     } finally {
       setSubmitting(false);
     }
@@ -450,6 +489,10 @@ export default function PublicRequestForm() {
             onChange={(event) => update({ comment: event.target.value })}
             placeholder="Что-то уточнить об адресе, доступе, приборах..."
           />
+        </div>
+
+        <div className="field captcha-field" style={{ display: captchaConfigured ? "block" : "none" }}>
+          <div ref={captchaContainerRef} className="captcha-widget" />
         </div>
 
         {/* honeypot: обычному человеку не видно и незачем заполнять */}

@@ -135,6 +135,7 @@ class FamilyOptionsView(APIView):
     """
 
     permission_classes = [AllowAny]
+    throttle_classes = []  # справочник, не заявка — не делит бюджет с анти-спамом формы
 
     @extend_schema(responses={200: FamilyOptionSerializer(many=True)})
     def get(self, request):

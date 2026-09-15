@@ -17,7 +17,7 @@ from rest_framework.views import APIView
 
 from apps.catalog.models import MeasurementFamily
 from apps.core.models import Employee
-from apps.hub import routing
+from apps.hub import captcha, routing
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
 from apps.hub.models import Request, RequestItem, RequestStatus
 from apps.hub.pricing import estimate
@@ -88,6 +88,29 @@ class AddressSuggestView(APIView):
 
 
 # ---------------------------------------------------------------------------
+# Конфиг капчи (Yandex SmartCaptcha) — публичный ключ для виджета
+# ---------------------------------------------------------------------------
+class CaptchaConfigSerializer(serializers.Serializer):
+    configured = serializers.BooleanField()
+    client_key = serializers.CharField(allow_blank=True)
+
+
+class CaptchaConfigView(APIView):
+    """GET /api/hub/captcha-config/ — без CAPTCHA_SERVER_KEY/CAPTCHA_CLIENT_KEY
+
+    отвечает configured=false, форма в этом случае не рисует виджет и
+    полагается только на honeypot, как раньше (см. apps.hub.captcha).
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = []  # статичный конфиг, не заявка — нет смысла делить бюджет с анти-спамом
+
+    @extend_schema(responses={200: CaptchaConfigSerializer})
+    def get(self, request):
+        return Response({"configured": captcha.is_configured(), "client_key": captcha.client_key()})
+
+
+# ---------------------------------------------------------------------------
 # Приём заявки с сайта
 # ---------------------------------------------------------------------------
 class RequestItemInputSerializer(serializers.Serializer):
@@ -116,8 +139,10 @@ class RequestCreateSerializer(serializers.Serializer):
     comment = serializers.CharField(required=False, allow_blank=True)
 
     # Honeypot: обычному человеку это поле не видно и незачем заполнять.
-    # Настоящей капчи (провайдер не выбран) заменяет на первое время.
     website = serializers.CharField(required=False, allow_blank=True, default="")
+    # Токен виджета Yandex SmartCaptcha — пусто, если капча не настроена
+    # (apps.hub.captcha.is_configured()) или заявитель без JS.
+    captcha_token = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate(self, data):
         if not (data.get("contact_phone") or data.get("contact_email")):
@@ -146,9 +171,19 @@ class RequestCreateView(APIView):
         data = payload.validated_data
 
         honeypot_tripped = bool(data.pop("website", ""))
+        captcha_token = data.pop("captcha_token", "")
         district_name = data.pop("district", "")
         items_input = data.pop("items", [])
         is_priority_slot = data.pop("is_priority_slot", False)
+
+        # Пойманного honeypot'ом бота капчей не перепроверяем — он и так уже
+        # помечен спамом ниже и сохраняется для статистики, как и раньше.
+        if not honeypot_tripped and captcha.is_configured():
+            if not captcha.verify(captcha_token, remote_ip=request.META.get("REMOTE_ADDR", "")):
+                return Response(
+                    {"detail": "Капча не пройдена — обновите её на форме и попробуйте снова"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         families_by_id = {}
         if items_input:
