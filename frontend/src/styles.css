@@ -152,3 +152,89 @@ th:nth-child(7), td:nth-child(7) { min-width: 150px; }
   .topbar { flex-wrap: wrap; gap: 10px; }
   main { padding: 14px 12px 32px; }
 }
+
+/* --- поля в строку (публичная форма, диспетчерская) --- */
+.field-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.field-row .field { flex: 1; min-width: 160px; }
+
+textarea {
+  font: inherit; padding: 6px 9px; border: 1px solid var(--line);
+  border-radius: var(--radius); background: var(--surface); color: var(--ink);
+  resize: vertical;
+}
+textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+/* --- публичная форма заявки (/zayavka/) --- */
+.public-page {
+  min-height: 100vh; display: flex; justify-content: center;
+  padding: 6vh 16px; background: var(--ground);
+}
+.public-card {
+  width: 100%; max-width: 480px; height: fit-content;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 28px; display: flex; flex-direction: column; gap: 14px;
+}
+.public-card h1 { margin: 0; font-size: 20px; }
+.public-card p.sub { margin: 0; color: var(--muted); font-size: 13px; }
+.public-card input, .public-card textarea, .public-card select { width: 100%; }
+.public-card button.primary { margin-top: 4px; }
+.public-card.thanks { text-align: center; gap: 8px; }
+
+.suggest-field { position: relative; }
+.suggestions {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 5;
+  margin: 2px 0 0; padding: 4px; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.08); max-height: 240px; overflow-y: auto;
+}
+.suggestions li {
+  padding: 7px 9px; border-radius: calc(var(--radius) - 1px); cursor: pointer;
+  display: flex; justify-content: space-between; gap: 10px; font-size: 13px;
+}
+.suggestions li:hover { background: var(--surface-2); }
+.suggestions li .sub { white-space: nowrap; }
+
+.hint { font-size: 12px; color: var(--muted); }
+.hint.ok { color: var(--ok); }
+
+/* honeypot — спрятано от людей, доступно ботам-автозаполнялкам */
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* --- доска задач --- */
+.board { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; }
+.board-column {
+  flex: 1; min-width: 240px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 10px;
+}
+.board-column h4 {
+  margin: 0 0 10px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--muted); display: flex; justify-content: space-between;
+}
+.board-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px; margin-bottom: 8px;
+}
+.board-card .title { font-weight: 600; margin-bottom: 4px; }
+.board-card button { margin-top: 8px; width: 100%; }
+
+/* --- календарь задач --- */
+.calendar-day {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 14px; margin-bottom: 8px;
+}
+.calendar-day h4 { margin: 0 0 6px; font-size: 13px; }
+.calendar-day ul { margin: 0; padding-left: 18px; }
+.calendar-day li { margin-bottom: 3px; font-size: 13px; }
+
+/* --- загрузка сотрудников --- */
+.workload { display: flex; flex-direction: column; gap: 10px; }
+.workload-row { display: grid; grid-template-columns: 160px 1fr 140px; align-items: center; gap: 12px; }
+.workload-row .who { font-size: 13px; }
+.bar-wrap { background: var(--surface-2); border-radius: 999px; height: 10px; overflow: hidden; }
+.bar-wrap .bar { background: var(--accent); height: 100%; border-radius: 999px; }
+.workload-row .num { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+@media (max-width: 620px) {
+  .workload-row { grid-template-columns: 1fr; gap: 4px; }
+}
+

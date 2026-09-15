@@ -135,7 +135,7 @@ export type JournalFilters = {
   page?: number;
 };
 
-export function queryString(filters: JournalFilters): string {
+export function queryString(filters: Record<string, string | number | undefined | null>): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(filters)) {
     if (value !== undefined && value !== "" && value !== null) params.set(key, String(value));
@@ -172,3 +172,194 @@ export async function downloadJournal(filters: JournalFilters): Promise<void> {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// ---------------------------------------------------------------------------
+// Сотрудники (для выбора исполнителя)
+// ---------------------------------------------------------------------------
+export type Employee = { id: number; full_name: string; tab_number: string; position: string };
+
+export const fetchEmployees = () => json<Employee[]>("/api/core/employees/");
+
+// ---------------------------------------------------------------------------
+// Подсказка адреса (заявка на сайте)
+// ---------------------------------------------------------------------------
+export type AddressSuggestion = {
+  value: string;
+  postal_code: string;
+  fias_id: string;
+  district: string;
+  city: string;
+  latitude: number | null;
+  longitude: number | null;
+};
+
+export type AddressSuggestResponse = {
+  configured: boolean;
+  results: AddressSuggestion[];
+  unavailable?: boolean;
+};
+
+/** Публичный эндпоинт — без токена, но через тот же call(), retry на 401 просто не сработает. */
+export async function suggestAddress(query: string): Promise<AddressSuggestResponse> {
+  const response = await call(`/api/hub/address-suggest/?q=${encodeURIComponent(query)}`);
+  if (!response.ok) return { configured: false, results: [] };
+  return response.json();
+}
+
+export type RequestPayload = {
+  contact_name: string;
+  contact_phone?: string;
+  contact_email?: string;
+  address: string;
+  postal_code?: string;
+  fias_id?: string;
+  district?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  is_address_confirmed?: boolean;
+  si_description?: string;
+  desired_date?: string | null;
+  comment?: string;
+  website?: string; // honeypot — держать пустым
+};
+
+export async function submitRequest(payload: RequestPayload): Promise<{ id: number; status: string }> {
+  const response = await fetch("/api/hub/requests/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new ApiError(body.detail ?? "Не удалось отправить заявку");
+  }
+  return response.json();
+}
+
+// ---------------------------------------------------------------------------
+// Диспетчерская: заявки
+// ---------------------------------------------------------------------------
+export type HubRequest = {
+  id: number;
+  source: string;
+  status: string;
+  status_display: string;
+  contact_name: string;
+  contact_phone: string;
+  contact_email: string;
+  address: string;
+  district: string;
+  si_description: string;
+  desired_date: string | null;
+  comment: string;
+  suggested_employee: string;
+  suggested_employee_id: number | null;
+  assigned_employee: string;
+  assigned_employee_id: number | null;
+  reject_reason: string;
+  is_address_confirmed: boolean;
+  created_at: string;
+};
+
+export type RequestFilters = { status?: string; district?: string; assigned_employee?: string };
+
+export const fetchRequests = (filters: RequestFilters = {}) =>
+  json<HubRequest[]>(`/api/hub/requests/list/?${queryString(filters)}`);
+
+export const routeRequest = (id: number) =>
+  json<HubRequest>(`/api/hub/requests/${id}/route/`, { method: "POST" });
+
+export const confirmRequest = (
+  id: number,
+  payload: { employee_id: number; scheduled_date?: string | null; note?: string },
+) => json<{ work_order_id: number }>(`/api/hub/requests/${id}/confirm/`, {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
+
+export const rejectRequest = (id: number, payload: { reason?: string; spam?: boolean }) =>
+  json<HubRequest>(`/api/hub/requests/${id}/reject/`, { method: "POST", body: JSON.stringify(payload) });
+
+// ---------------------------------------------------------------------------
+// Наряды
+// ---------------------------------------------------------------------------
+export type WorkOrder = {
+  id: number;
+  status: string;
+  status_display: string;
+  client: string;
+  site: string;
+  assigned_employee: string;
+  assigned_employee_id: number;
+  scheduled_date: string | null;
+  note: string;
+  request_id: number | null;
+  verifications_total: number;
+  verifications_accepted: number;
+  created_at: string;
+  closed_at: string | null;
+};
+
+export type WorkOrderFilters = { status?: string; assigned_employee?: string; date_from?: string; date_to?: string };
+
+export const fetchWorkOrders = (filters: WorkOrderFilters = {}) =>
+  json<WorkOrder[]>(`/api/work-orders/?${queryString(filters)}`);
+
+export const setWorkOrderStatus = (id: number, status: string) =>
+  json<WorkOrder>(`/api/work-orders/${id}/status/`, { method: "POST", body: JSON.stringify({ status }) });
+
+// ---------------------------------------------------------------------------
+// Задачи
+// ---------------------------------------------------------------------------
+export type Task = {
+  id: number;
+  title: string;
+  description: string;
+  parent: number | null;
+  assignee: number | null;
+  assignee_name: string;
+  created_by: number | null;
+  created_by_name: string;
+  status: string;
+  priority: string;
+  due_date: string | null;
+  estimated_hours: string | null;
+  content_type: string | null;
+  object_id: number | null;
+  linked_label: string;
+  recurrence: string;
+  recurrence_parent: number | null;
+  progress: number;
+  children_count: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type TaskFilters = { status?: string; priority?: string; assignee?: string; mine?: string; parent?: string };
+
+export const fetchTasks = (filters: TaskFilters = {}) =>
+  json<Page<Task>>(`/api/tasks/?${queryString(filters)}`);
+
+export const createTask = (payload: Partial<Task>) =>
+  json<Task>("/api/tasks/", { method: "POST", body: JSON.stringify(payload) });
+
+export const updateTask = (id: number, patch: Partial<Task>) =>
+  json<Task>(`/api/tasks/${id}/`, { method: "PATCH", body: JSON.stringify(patch) });
+
+export type TaskBoard = Record<string, Task[]>;
+export const fetchTaskBoard = (assignee?: string) =>
+  json<TaskBoard>(`/api/tasks/board/${assignee ? `?assignee=${assignee}` : ""}`);
+
+export type TaskCalendar = Record<string, Task[]>;
+export const fetchTaskCalendar = (dateFrom: string, dateTo: string) =>
+  json<TaskCalendar>(`/api/tasks/calendar/?date_from=${dateFrom}&date_to=${dateTo}`);
+
+export type Workload = {
+  date_from: string;
+  date_to: string;
+  employees: { employee_id: number; employee: string; hours: number; count: number }[];
+};
+export const fetchWorkload = (dateFrom: string, dateTo: string) =>
+  json<Workload>(`/api/tasks/workload/?date_from=${dateFrom}&date_to=${dateTo}`);
+
