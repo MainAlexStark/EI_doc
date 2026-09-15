@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { isAuthenticated, logout } from "./api";
+import { useEffect, useState } from "react";
+import { fetchMe, isAuthenticated, logout, type Me } from "./api";
 import Availability from "./components/Availability";
 import Journal from "./components/Journal";
 import Login from "./components/Login";
@@ -22,8 +22,19 @@ const TABS: { key: Tab; label: string }[] = [
 export default function App() {
   const [authenticated, setAuthenticated] = useState(isAuthenticated());
   const [tab, setTab] = useState<Tab>("journal");
+  const [me, setMe] = useState<Me | null>(null);
+
+  useEffect(() => {
+    if (!authenticated) {
+      setMe(null);
+      return;
+    }
+    void fetchMe().then(setMe).catch(() => setMe(null));
+  }, [authenticated]);
 
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
+
+  const displayName = me?.employee?.full_name ?? me?.email ?? "";
 
   return (
     <div className="app">
@@ -41,6 +52,7 @@ export default function App() {
           ))}
         </nav>
         <div className="spacer" />
+        {displayName && <span className="me-name">{displayName}</span>}
         <button
           onClick={() => {
             logout();

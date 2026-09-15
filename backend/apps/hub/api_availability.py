@@ -11,8 +11,8 @@ import datetime as dt
 from collections import defaultdict
 
 from django.utils import timezone
-from rest_framework import generics, serializers
-from rest_framework.exceptions import PermissionDenied
+from rest_framework import generics, serializers, status
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -93,6 +93,63 @@ class AvailabilityDetailView(generics.RetrieveUpdateDestroyAPIView):
         me = getattr(request.user, "employee", None)
         if obj.employee_id != getattr(me, "id", None) and request.user.role not in MANAGE_ANY_ROLES:
             raise PermissionDenied("Чужой слот можно менять только руководителю и менеджеру")
+
+
+class AvailabilityBulkCreateSerializer(serializers.Serializer):
+    """Один и тот же слот сразу на несколько дат — чтобы не заполнять форму
+
+    по одной дате за раз, когда сотрудник, например, целиком свободен всю
+    следующую неделю.
+    """
+
+    dates = serializers.ListField(
+        child=serializers.DateField(), min_length=1, max_length=62,
+        help_text="До 62 дат за раз — больше двух месяцев сразу заводить не имеет смысла",
+    )
+    kind = serializers.ChoiceField(choices=AvailabilityKind.choices, default=AvailabilityKind.DISTRICT)
+    start_time = serializers.TimeField(required=False, allow_null=True)
+    end_time = serializers.TimeField(required=False, allow_null=True)
+    is_priority = serializers.BooleanField(default=False)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, data):
+        start = data.get("start_time")
+        end = data.get("end_time")
+        if start and end and start >= end:
+            raise serializers.ValidationError("Время начала должно быть раньше времени окончания")
+        return data
+
+
+class AvailabilityBulkCreateView(APIView):
+    """POST /api/hub/availability/bulk/ — тот же слот на список дат разом.
+
+    Заводит только в своём графике (аналог AvailabilityListCreateView.perform_create
+    без ?employee= — массово чужой график не заводят).
+    """
+
+    def post(self, request):
+        payload = AvailabilityBulkCreateSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        me = getattr(request.user, "employee", None)
+        if me is None:
+            raise NotFound("К вашей учётной записи не привязан сотрудник")
+
+        created = [
+            EmployeeAvailability.objects.create(
+                employee=me,
+                kind=data["kind"],
+                date=date,
+                start_time=data.get("start_time"),
+                end_time=data.get("end_time"),
+                is_priority=data["is_priority"],
+                note=data.get("note", ""),
+            )
+            for date in data["dates"]
+        ]
+        serializer = EmployeeAvailabilitySerializer(created, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 # ---------------------------------------------------------------------------

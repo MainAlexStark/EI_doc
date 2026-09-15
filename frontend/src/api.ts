@@ -181,6 +181,24 @@ export type Employee = { id: number; full_name: string; tab_number: string; posi
 export const fetchEmployees = () => json<Employee[]>("/api/core/employees/");
 
 // ---------------------------------------------------------------------------
+// Текущий пользователь (для шапки — показать имя, а не только «Выйти»)
+// ---------------------------------------------------------------------------
+export type Me = {
+  email: string;
+  role: string;
+  role_display: string;
+  employee: {
+    id: number;
+    full_name: string;
+    tab_number: string;
+    position: string;
+    telegram_linked: boolean;
+  } | null;
+};
+
+export const fetchMe = () => json<Me>("/api/core/employees/me/");
+
+// ---------------------------------------------------------------------------
 // Подсказка адреса (заявка на сайте)
 // ---------------------------------------------------------------------------
 export type AddressSuggestion = {
@@ -451,6 +469,19 @@ export const updateAvailability = (id: number, patch: Partial<AvailabilityPayloa
 
 export const deleteAvailability = (id: number) =>
   json<void>(`/api/hub/availability/${id}/`, { method: "DELETE" });
+
+export type AvailabilityBulkPayload = {
+  dates: string[];
+  kind: "district" | "trip";
+  start_time?: string | null;
+  end_time?: string | null;
+  is_priority?: boolean;
+  note?: string;
+};
+
+/** Тот же слот сразу на несколько дат — чтобы не заполнять форму по одной дате за раз. */
+export const bulkCreateAvailability = (payload: AvailabilityBulkPayload) =>
+  json<AvailabilitySlot[]>("/api/hub/availability/bulk/", { method: "POST", body: JSON.stringify(payload) });
 
 // ---------------------------------------------------------------------------
 // Telegram — привязка личного чата

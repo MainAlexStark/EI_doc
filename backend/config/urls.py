@@ -4,7 +4,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.catalog.api import FamilyOptionsView, SiTypeSuggestView
-from apps.core.api import EmployeeListView, TelegramLinkCodeView
+from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, healthz
 from apps.hub.api import (
@@ -17,6 +17,7 @@ from apps.hub.api import (
     RequestRouteView,
 )
 from apps.hub.api_availability import (
+    AvailabilityBulkCreateView,
     AvailabilityDetailView,
     AvailabilityListCreateView,
     AvailabilityPublicSlotsView,
@@ -63,6 +64,7 @@ urlpatterns = [
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
     path("api/catalog/families/", FamilyOptionsView.as_view(), name="family_options"),
     path("api/core/employees/", EmployeeListView.as_view(), name="employee_list"),
+    path("api/core/employees/me/", MeView.as_view(), name="me"),
     path(
         "api/core/employees/me/telegram-link-code/",
         TelegramLinkCodeView.as_view(), name="telegram_link_code",
@@ -102,6 +104,7 @@ urlpatterns = [
     path("api/hub/requests/<int:pk>/reject/", RequestRejectView.as_view(), name="request_reject"),
     # Доступность сотрудников — их собственный календарь + публичные слоты для формы
     path("api/hub/availability/", AvailabilityListCreateView.as_view(), name="availability_list"),
+    path("api/hub/availability/bulk/", AvailabilityBulkCreateView.as_view(), name="availability_bulk"),
     path("api/hub/availability/<int:pk>/", AvailabilityDetailView.as_view(), name="availability_detail"),
     path(
         "api/hub/availability/slots/",

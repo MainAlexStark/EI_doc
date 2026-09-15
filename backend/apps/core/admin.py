@@ -34,6 +34,10 @@ class EmployeeAdmin(SimpleHistoryAdmin):
     list_filter = ["is_active"]
     search_fields = ["full_name", "tab_number"]
     inlines = [AttestationInline]
+    # Chat_id заполняется только через привязку кодом (сотрудник сам, из своего
+    # профиля в EI_doc) — руками в админке при создании учётки его проставлять
+    # не должно быть можно, иначе легко привязать чужой чат по ошибке.
+    readonly_fields = ["telegram_chat_id"]
 
 
 @admin.register(Device)

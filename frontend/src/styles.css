@@ -61,6 +61,7 @@ input:focus, select:focus { outline: 2px solid var(--accent-soft); border-color:
 .topbar nav button { border-color: transparent; background: transparent; }
 .topbar nav button.active { background: var(--accent-soft); color: var(--accent); }
 .topbar .spacer { flex: 1; }
+.topbar .me-name { color: var(--muted); font-size: 13px; margin-right: 10px; }
 
 main { padding: 18px 20px 40px; }
 
@@ -69,10 +70,16 @@ main { padding: 18px 20px 40px; }
   display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
   margin-bottom: 14px;
 }
+
+.new-slot-form { margin-bottom: 14px; }
+.new-slot-form > .field { margin-bottom: 10px; }
+.new-slot-form .filters { margin-bottom: 10px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label {
   font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
 }
+.req { color: var(--crit); margin-left: 2px; text-transform: none; }
+.opt { color: var(--muted); text-transform: none; font-weight: normal; letter-spacing: normal; }
 
 /* --- таблица --- */
 .table-wrap {
@@ -274,6 +281,29 @@ textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--acce
   background: var(--warn); margin-left: 6px; vertical-align: middle;
 }
 .slot-chip.active .dot { background: #fff; }
+
+/* --- интерактивный календарь: график сотрудника + выбор даты в заявке --- */
+.calendar { max-width: 320px; }
+.calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.calendar-head button { padding: 2px 10px; }
+.calendar-month { font-weight: 600; text-transform: capitalize; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calendar-weekdays { margin-bottom: 2px; }
+.calendar-weekday { text-align: center; font-size: 11px; color: var(--muted); }
+.calendar-cell {
+  aspect-ratio: 1; padding: 0; display: flex; align-items: center; justify-content: center;
+  position: relative; border-radius: var(--radius); font-size: 13px;
+}
+.calendar-cell.empty { border: none; background: transparent; cursor: default; }
+.calendar-cell.today { border-color: var(--accent); font-weight: 600; }
+.calendar-cell.marked { background: var(--accent-soft); border-color: var(--accent-soft); }
+.calendar-cell.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+.calendar-cell.disabled { opacity: 0.35; cursor: default; }
+.calendar-dot {
+  position: absolute; bottom: 3px; right: 3px; width: 6px; height: 6px;
+  border-radius: 999px; background: var(--warn);
+}
+.calendar-cell.selected .calendar-dot { background: #fff; }
 
 /* --- заявки: список приборов в карточке диспетчерской --- */
 .request-items { margin: 6px 0; padding-left: 18px; font-size: 13px; }

@@ -22,7 +22,7 @@ class RequestCreateTestCase(TestCase):
     def payload(self, **overrides):
         data = {
             "contact_name": "Иванов И. И.",
-            "contact_phone": "+79990000000",
+            "contact_phone": "+7 (999) 000-00-00",
             "address": "г. Киров, ул. Ленина, 1",
             "district": "Ленинский район",
             "si_description": "Счётчик воды",
@@ -44,6 +44,15 @@ class RequestCreateTestCase(TestCase):
             format="json",
         )
         assert response.status_code == 400
+
+    def test_badly_formatted_phone_is_rejected(self):
+        response = self.api.post(
+            reverse("request_create"),
+            self.payload(contact_phone="8 999 000 00 00"),
+            format="json",
+        )
+        assert response.status_code == 400
+        assert "contact_phone" in response.data
 
     def test_honeypot_field_marks_the_request_as_spam_without_routing(self):
         response = self.api.post(reverse("request_create"), self.payload(website="http://spam"), format="json")
@@ -94,7 +103,7 @@ class DispatchTestCase(TestCase):
         self.api = APIClient()
         self.api.force_authenticate(self.user)
         self.request_obj = Request.objects.create(
-            contact_name="Петров П. П.", contact_phone="+79991112233",
+            contact_name="Петров П. П.", contact_phone="+7 (999) 111-22-33",
             address="г. Киров, ул. Ленина, 1", district=self.district,
         )
         from apps.hub.routing import route

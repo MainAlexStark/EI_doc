@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  createAvailability,
+  bulkCreateAvailability,
   deleteAvailability,
   fetchMyAvailability,
   requestTelegramLinkCode,
-  type AvailabilityPayload,
   type AvailabilitySlot,
   type TelegramLinkInfo,
 } from "../api";
+import MonthCalendar, { type CalendarMarker } from "./Calendar";
 
 const formatDate = (value: string) => new Date(value).toLocaleDateString("ru-RU");
 
@@ -63,8 +63,14 @@ function TelegramLinkBox() {
   );
 }
 
-function NewSlotForm({ onCreated }: { onCreated: () => void }) {
-  const [date, setDate] = useState("");
+function NewSlotForm({
+  onCreated,
+  existingMarkers,
+}: {
+  onCreated: () => void;
+  existingMarkers: Record<string, CalendarMarker>;
+}) {
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
   const [kind, setKind] = useState<"district" | "trip">("district");
   const [allDay, setAllDay] = useState(true);
   const [startTime, setStartTime] = useState("09:00");
@@ -74,72 +80,91 @@ function NewSlotForm({ onCreated }: { onCreated: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const toggleDate = (date: string) => {
+    setSelectedDates((current) =>
+      current.includes(date) ? current.filter((d) => d !== date) : [...current, date].sort(),
+    );
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!date) {
-      setError("Укажите дату");
+    if (selectedDates.length === 0) {
+      setError("Выберите хотя бы один день в календаре");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      const payload: AvailabilityPayload = {
+      await bulkCreateAvailability({
+        dates: selectedDates,
         kind,
-        date,
         start_time: allDay ? null : startTime,
         end_time: allDay ? null : endTime,
         is_priority: isPriority,
         note,
-      };
-      await createAvailability(payload);
-      setDate("");
+      });
+      setSelectedDates([]);
       setNote("");
       setIsPriority(false);
       onCreated();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Не удалось добавить слот");
+      setError(exc instanceof Error ? exc.message : "Не удалось добавить слоты");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <form className="filters" onSubmit={submit}>
+    <form className="new-slot-form" onSubmit={submit}>
       <div className="field">
-        <label htmlFor="av-date">Дата</label>
-        <input id="av-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <label>
+          Дни {selectedDates.length > 0 && <span className="sub">— выбрано {selectedDates.length}</span>}
+        </label>
+        <MonthCalendar selected={selectedDates} onToggle={toggleDate} markers={existingMarkers} />
+        {selectedDates.length > 0 && (
+          <button type="button" onClick={() => setSelectedDates([])} style={{ marginTop: 6 }}>
+            Очистить выбор
+          </button>
+        )}
       </div>
-      <div className="field">
-        <label htmlFor="av-kind">Тип</label>
-        <select id="av-kind" value={kind} onChange={(e) => setKind(e.target.value as "district" | "trip")}>
-          <option value="district">выезд в своём районе</option>
-          <option value="trip">командировка</option>
-        </select>
+
+      <div className="filters">
+        <div className="field">
+          <label htmlFor="av-kind">Тип</label>
+          <select id="av-kind" value={kind} onChange={(e) => setKind(e.target.value as "district" | "trip")}>
+            <option value="district">выезд в своём районе</option>
+            <option value="trip">командировка</option>
+          </select>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20 }}>
+          <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /> весь день
+        </label>
+        {!allDay && (
+          <>
+            <div className="field">
+              <label htmlFor="av-start">С</label>
+              <input id="av-start" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="av-end">По</label>
+              <input id="av-end" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+            </div>
+          </>
+        )}
+        <label
+          style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20 }}
+          title="Заявителю на сайте это время показывается со скидкой"
+        >
+          <input type="checkbox" checked={isPriority} onChange={(e) => setIsPriority(e.target.checked)} /> приоритетное для меня
+        </label>
+        <div className="field">
+          <label htmlFor="av-note">Примечание</label>
+          <input id="av-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="необязательно" />
+        </div>
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20 }}>
-        <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} /> весь день
-      </label>
-      {!allDay && (
-        <>
-          <div className="field">
-            <label htmlFor="av-start">С</label>
-            <input id="av-start" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="av-end">По</label>
-            <input id="av-end" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-          </div>
-        </>
-      )}
-      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20 }} title="Заявителю на сайте это время показывается со скидкой">
-        <input type="checkbox" checked={isPriority} onChange={(e) => setIsPriority(e.target.checked)} /> приоритетное для меня
-      </label>
-      <div className="field">
-        <label htmlFor="av-note">Примечание</label>
-        <input id="av-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="необязательно" />
-      </div>
+
       <button className="primary" type="submit" disabled={busy}>
-        Добавить
+        {busy ? "Добавляю…" : `Добавить${selectedDates.length > 1 ? ` (${selectedDates.length} дн.)` : ""}`}
       </button>
       {error && <span className="error" style={{ marginBottom: 0 }}>{error}</span>}
     </form>
@@ -202,12 +227,23 @@ export default function Availability() {
     byDate.set(slot.date, list);
   }
 
+  // Уже заведённые дни показываем на календаре добавления слотов — чтобы
+  // видеть график целиком, а не гадать, что уже отмечено.
+  const existingMarkers = useMemo(() => {
+    const markers: Record<string, CalendarMarker> = {};
+    for (const [date, daySlots] of byDate) {
+      markers[date] = { priority: daySlots.some((s) => s.is_priority) };
+    }
+    return markers;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slots]);
+
   return (
     <>
       <TelegramLinkBox />
 
       <h3>Мой график</h3>
-      <NewSlotForm onCreated={() => void load()} />
+      <NewSlotForm onCreated={() => void load()} existingMarkers={existingMarkers} />
 
       <div className="filters">
         <div className="field">

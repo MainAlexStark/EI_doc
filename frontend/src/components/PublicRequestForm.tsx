@@ -11,6 +11,8 @@ import {
   type RequestItemPayload,
   type RequestPayload,
 } from "../api";
+import MonthCalendar, { type CalendarMarker } from "./Calendar";
+import { formatPhoneInput, isPhoneComplete } from "../phone";
 import { loadSmartCaptcha, type SmartCaptchaApi } from "../smartCaptcha";
 
 type ContactState = {
@@ -63,7 +65,6 @@ export default function PublicRequestForm() {
   const [chosenDate, setChosenDate] = useState("");
   const [chosenTime, setChosenTime] = useState("");
   const [chosenPriority, setChosenPriority] = useState(false);
-  const [manualDate, setManualDate] = useState(""); // когда по району слотов нет
 
   // --- капча (Yandex SmartCaptcha) ---
   const [captchaConfigured, setCaptchaConfigured] = useState(false);
@@ -162,6 +163,14 @@ export default function PublicRequestForm() {
     if (!chosenDate) return [];
     return (slotsByDate.get(chosenDate) ?? []).filter((s) => s.start_time && s.end_time);
   }, [slotsByDate, chosenDate]);
+  // Для календаря — какие дни отметить (есть слот в графике сотрудников района).
+  const calendarMarkers = useMemo(() => {
+    const map: Record<string, CalendarMarker> = {};
+    for (const [date, daySlots] of slotsByDate) {
+      map[date] = { priority: daySlots.some((s) => s.is_priority) };
+    }
+    return map;
+  }, [slotsByDate]);
 
   const addItem = () => {
     if (!addFamilyId) return;
@@ -206,11 +215,16 @@ export default function PublicRequestForm() {
     if ("address" in patch) setAddressConfirmed(false);
   };
 
-  const pickDate = (date: string, slotsForDate: PublicSlot[]) => {
-    setChosenDate(date);
+  const pickDate = (date: string) => {
+    // Если у района есть график — выбирать можно только отмеченные дни,
+    // иначе диспетчеру придётся согласовывать дату, которую никто не подтверждал.
+    if (availableDates.length > 0 && !slotsByDate.has(date)) return;
+    const next = chosenDate === date ? "" : date; // повторный клик снимает выбор
+    setChosenDate(next);
     setChosenTime("");
     // День без разбивки по времени (или прибор не требует времени) — приоритет,
     // если хоть один слот в этот день отмечен сотрудником как приоритетный.
+    const slotsForDate = next ? slotsByDate.get(next) ?? [] : [];
     setChosenPriority(!needsTime && slotsForDate.some((s) => s.is_priority));
   };
 
@@ -230,12 +244,20 @@ export default function PublicRequestForm() {
       setError("Укажите телефон или email для связи");
       return;
     }
+    if (form.contact_phone.trim() && !isPhoneComplete(form.contact_phone)) {
+      setError("Введите телефон полностью: +7 (900) 123-45-67");
+      return;
+    }
     if (!form.address.trim()) {
       setError("Укажите адрес поверки");
       return;
     }
     if (items.length === 0) {
       setError("Выберите хотя бы один тип прибора");
+      return;
+    }
+    if (needsTime && !chosenDate) {
+      setError("Среди выбранных приборов есть счётчики — укажите дату и время выезда");
       return;
     }
     if (needsTime && chosenDate && !chosenTime) {
@@ -247,7 +269,7 @@ export default function PublicRequestForm() {
       return;
     }
 
-    const desiredDate = availableDates.length > 0 ? chosenDate || null : manualDate || null;
+    const desiredDate = chosenDate || null;
     const desiredTime = needsTime && chosenDate ? chosenTime || null : null;
 
     const payload: RequestPayload = {
@@ -298,8 +320,10 @@ export default function PublicRequestForm() {
 
         {error && <div className="error">{error}</div>}
 
+        <p className="hint"><span className="req">*</span> — обязательные поля</p>
+
         <div className="field">
-          <label htmlFor="rf-name">Имя или организация</label>
+          <label htmlFor="rf-name">Имя или организация<span className="req">*</span></label>
           <input
             id="rf-name"
             value={form.contact_name}
@@ -313,9 +337,12 @@ export default function PublicRequestForm() {
             <label htmlFor="rf-phone">Телефон</label>
             <input
               id="rf-phone"
+              type="tel"
+              inputMode="tel"
               value={form.contact_phone}
-              onChange={(event) => update({ contact_phone: event.target.value })}
-              placeholder="+7 900 000-00-00"
+              onChange={(event) => update({ contact_phone: formatPhoneInput(event.target.value) })}
+              placeholder="+7 (900) 123-45-67"
+              maxLength={18}
             />
           </div>
           <div className="field">
@@ -328,9 +355,10 @@ export default function PublicRequestForm() {
             />
           </div>
         </div>
+        <p className="hint"><span className="req">*</span> телефон или email — укажите хотя бы один</p>
 
         <div className="field suggest-field">
-          <label htmlFor="rf-address">Адрес поверки</label>
+          <label htmlFor="rf-address">Адрес поверки<span className="req">*</span></label>
           <input
             id="rf-address"
             value={form.address}
@@ -357,7 +385,7 @@ export default function PublicRequestForm() {
         </div>
 
         <div className="field">
-          <label htmlFor="rf-add-item">Что нужно поверить</label>
+          <label htmlFor="rf-add-item">Что нужно поверить<span className="req">*</span></label>
           <div className="item-picker">
             <select id="rf-add-item" value={addFamilyId} onChange={(event) => setAddFamilyId(event.target.value)}>
               <option value="">выберите тип прибора…</option>
@@ -419,69 +447,61 @@ export default function PublicRequestForm() {
         )}
 
         <div className="field">
-          <label>{needsTime ? "Дата и время выезда" : "Желаемая дата"}</label>
+          <label>
+            {needsTime ? "Дата и время выезда" : "Желаемая дата"}
+            {needsTime ? <span className="req">*</span> : <span className="opt"> (необязательно)</span>}
+          </label>
 
-          {availableDates.length > 0 ? (
-            <>
+          <MonthCalendar
+            selected={chosenDate ? [chosenDate] : []}
+            onToggle={pickDate}
+            markers={calendarMarkers}
+            restrictToMarkers={availableDates.length > 0}
+          />
+
+          {chosenDate && needsTime && (
+            timesForChosenDate.length > 0 ? (
               <div className="slot-grid">
-                {availableDates.map((date) => {
-                  const slotsForDate = slotsByDate.get(date) ?? [];
-                  const anyPriority = slotsForDate.some((s) => s.is_priority);
-                  return (
-                    <button
-                      type="button"
-                      key={date}
-                      className={`slot-chip ${chosenDate === date ? "active" : ""}`}
-                      onClick={() => pickDate(date, slotsForDate)}
-                    >
-                      {new Date(date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })}
-                      {anyPriority && <span className="dot" title="есть приоритетное время" />}
-                    </button>
-                  );
-                })}
+                {timesForChosenDate.map((slot, index) => (
+                  <button
+                    type="button"
+                    key={`${slot.start_time}-${index}`}
+                    className={`slot-chip ${chosenTime === slot.start_time ? "active" : ""}`}
+                    onClick={() => pickTime(slot)}
+                  >
+                    {slot.start_time}–{slot.end_time}
+                    {slot.is_priority && <span className="dot" title="приоритетное время — скидка" />}
+                  </button>
+                ))}
               </div>
-
-              {chosenDate && needsTime && (
-                <div className="slot-grid">
-                  {timesForChosenDate.length === 0 && (
-                    <div className="hint">На эту дату свободное время не указано — диспетчер согласует его сам</div>
-                  )}
-                  {timesForChosenDate.map((slot, index) => (
-                    <button
-                      type="button"
-                      key={`${slot.start_time}-${index}`}
-                      className={`slot-chip ${chosenTime === slot.start_time ? "active" : ""}`}
-                      onClick={() => pickTime(slot)}
-                    >
-                      {slot.start_time}–{slot.end_time}
-                      {slot.is_priority && <span className="dot" title="приоритетное время — скидка" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {chosenPriority && chosenDate && (
-                <div className="hint ok">Выбрано приоритетное время — скидка {discountPercent}% учтена в цене</div>
-              )}
-            </>
-          ) : (
-            <>
-              <input
-                type="date"
-                value={manualDate}
-                onChange={(event) => setManualDate(event.target.value)}
-              />
-              <div className="hint">
-                {districtKnown
-                  ? "На ближайшее время свободных слотов не указано — дату согласует диспетчер по телефону"
-                  : "Точную дату согласует диспетчер по телефону после выбора адреса"}
+            ) : (
+              <div className="field">
+                <label htmlFor="rf-time">Удобное время<span className="req">*</span></label>
+                <input
+                  id="rf-time"
+                  type="time"
+                  value={chosenTime}
+                  onChange={(event) => setChosenTime(event.target.value)}
+                />
               </div>
-            </>
+            )
           )}
+
+          {chosenPriority && chosenDate && (
+            <div className="hint ok">Выбрано приоритетное время — скидка {discountPercent}% учтена в цене</div>
+          )}
+
+          <div className="hint">
+            {districtKnown
+              ? availableDates.length > 0
+                ? "Отмеченные дни — из графика сотрудников вашего района"
+                : "На ближайшее время свободных слотов не указано — дату и время сверит диспетчер по телефону"
+              : "Точную дату согласует диспетчер по телефону после выбора адреса"}
+          </div>
         </div>
 
         <div className="field">
-          <label htmlFor="rf-comment">Комментарий</label>
+          <label htmlFor="rf-comment">Комментарий<span className="opt"> (необязательно)</span></label>
           <textarea
             id="rf-comment"
             rows={3}

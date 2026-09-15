@@ -72,7 +72,7 @@ class RequestCreateWithCaptchaTestCase(TestCase):
     def payload(self, **overrides):
         data = {
             "contact_name": "Иванов И. И.",
-            "contact_phone": "+79990000000",
+            "contact_phone": "+7 (999) 000-00-00",
             "address": "г. Киров, ул. Ленина, 1",
             "si_description": "Счётчик воды",
         }
@@ -119,7 +119,7 @@ class RequestCreateWithoutCaptchaConfiguredTestCase(TestCase):
             reverse("request_create"),
             {
                 "contact_name": "Иванов И. И.",
-                "contact_phone": "+79990000000",
+                "contact_phone": "+7 (999) 000-00-00",
                 "address": "г. Киров, ул. Ленина, 1",
                 "si_description": "Счётчик воды",
             },

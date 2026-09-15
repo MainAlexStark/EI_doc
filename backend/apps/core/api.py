@@ -37,6 +37,50 @@ class TelegramLinkCodeSerializer(serializers.Serializer):
     already_linked = serializers.BooleanField()
 
 
+class EmployeeMeSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    full_name = serializers.CharField()
+    tab_number = serializers.CharField()
+    position = serializers.CharField()
+    telegram_linked = serializers.BooleanField()
+
+
+class MeSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    role = serializers.CharField()
+    role_display = serializers.CharField()
+    employee = EmployeeMeSerializer(allow_null=True)
+
+
+class MeView(APIView):
+    """GET /api/core/employees/me/ — кто сейчас в системе.
+
+    Нужен, чтобы в шапке SPA показать имя сотрудника, а не просто кнопку
+    «Выйти» — JWT-токен сам по себе имени не несёт. Если к учётной записи
+    не привязан Employee (например, наблюдатель без табельного номера),
+    employee будет null, и фронтенд покажет email вместо ФИО.
+    """
+
+    def get(self, request):
+        user = request.user
+        employee = getattr(user, "employee", None)
+        data = {
+            "email": user.email,
+            "role": user.role,
+            "role_display": user.get_role_display(),
+            "employee": None,
+        }
+        if employee is not None:
+            data["employee"] = {
+                "id": employee.id,
+                "full_name": employee.full_name,
+                "tab_number": employee.tab_number,
+                "position": employee.position,
+                "telegram_linked": bool(employee.telegram_chat_id),
+            }
+        return Response(MeSerializer(data).data)
+
+
 class TelegramLinkCodeView(APIView):
     """POST /api/core/employees/me/telegram-link-code/ — новый код привязки Telegram.
 

@@ -96,6 +96,45 @@ class MyAvailabilityTestCase(TestCase):
         assert response.status_code == 403
         assert EmployeeAvailability.objects.filter(pk=slot.id).exists()
 
+    def test_bulk_create_adds_the_same_slot_on_several_dates(self):
+        dates = [
+            (timezone.localdate() + dt.timedelta(days=offset)).isoformat() for offset in (1, 2, 5)
+        ]
+        response = self.api.post(
+            reverse("availability_bulk"),
+            {"dates": dates, "kind": "district", "is_priority": True, "note": "неделя открыта"},
+            format="json",
+        )
+        assert response.status_code == 201
+        assert len(response.data) == 3
+        created = EmployeeAvailability.objects.filter(employee=self.employee)
+        assert created.count() == 3
+        assert set(created.values_list("date", flat=True)) == {
+            dt.date.fromisoformat(d) for d in dates
+        }
+        assert all(slot.is_priority for slot in created)
+
+    def test_bulk_create_validates_time_order(self):
+        response = self.api.post(
+            reverse("availability_bulk"),
+            {
+                "dates": [(timezone.localdate() + dt.timedelta(days=1)).isoformat()],
+                "start_time": "18:00", "end_time": "09:00",
+            },
+            format="json",
+        )
+        assert response.status_code == 400
+        assert EmployeeAvailability.objects.count() == 0
+
+    def test_bulk_create_always_uses_the_authenticated_employee(self):
+        response = self.api.post(
+            reverse("availability_bulk"),
+            {"dates": [(timezone.localdate() + dt.timedelta(days=1)).isoformat()]},
+            format="json",
+        )
+        assert response.status_code == 201
+        assert EmployeeAvailability.objects.get().employee_id == self.employee.id
+
 
 class RequestWithItemsTestCase(TestCase):
     """Заявка с формы сайта: несколько типов приборов + примерная цена (снимок на сервере)."""
@@ -112,7 +151,7 @@ class RequestWithItemsTestCase(TestCase):
     def payload(self, **overrides):
         data = {
             "contact_name": "Заявитель",
-            "contact_phone": "+79990000000",
+            "contact_phone": "+7 (999) 000-00-00",
             "address": "г. Киров, ул. Ленина, 1",
             "items": [{"family_id": self.water.id, "quantity": 2}, {"family_id": self.scales.id, "quantity": 1}],
         }
@@ -163,7 +202,7 @@ class RequestWithItemsTestCase(TestCase):
             reverse("request_create"),
             {
                 "contact_name": "Заявитель",
-                "contact_phone": "+79990000000",
+                "contact_phone": "+7 (999) 000-00-00",
                 "address": "г. Киров, ул. Ленина, 1",
                 "si_description": "Манометр, 1 шт.",
             },

@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import re
+
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -118,10 +120,22 @@ class RequestItemInputSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1, max_value=99)
 
 
+# Формат ровно тот, что собирает маска на фронте (frontend/src/phone.ts) —
+# так один и тот же паттерн проверяется на обеих сторонах.
+PHONE_RE = re.compile(r"^\+7 \(\d{3}\) \d{3}-\d{2}-\d{2}$")
+
+
 class RequestCreateSerializer(serializers.Serializer):
     contact_name = serializers.CharField(max_length=200)
     contact_phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
     contact_email = serializers.EmailField(required=False, allow_blank=True)
+
+    def validate_contact_phone(self, value: str) -> str:
+        if value and not PHONE_RE.fullmatch(value):
+            raise serializers.ValidationError(
+                "Телефон должен быть в формате +7 (900) 123-45-67"
+            )
+        return value
 
     address = serializers.CharField(max_length=350)
     postal_code = serializers.CharField(max_length=6, required=False, allow_blank=True)
