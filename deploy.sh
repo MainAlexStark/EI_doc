@@ -26,12 +26,11 @@ USAGE_EXTRA='
 именно это доступ (см. docs/architecture.md).
 
 Подсказка адреса (DADATA_API_KEY) и уведомления в Telegram
-(TELEGRAM_BOT_TOKEN) — тоже необязательны для первого запуска и
-деградируют мягко: без DADATA_API_KEY форма заявки просто показывает
-обычное текстовое поле адреса вместо подсказки с районом, без
-TELEGRAM_BOT_TOKEN уведомления только пишутся в лог. Впишите ключи в
-.env на сервере и перезапустите (./deploy.sh restart), когда будут
-готовы (см. claude/hub.md).'
+(TELEGRAM_BOT_TOKEN) — тоже необязательны: если их ещё нет, ./deploy.sh
+спрашивает при каждом запуске и обновлении (Enter — пропустить вопрос,
+спросит снова в следующий раз). Пока не заданы, деградирует мягко: форма
+заявки показывает обычное текстовое поле адреса вместо подсказки с
+районом, уведомления только пишутся в лог (см. claude/hub.md).'
 
 set -euo pipefail
 
@@ -82,6 +81,28 @@ env_is_unset() {
   local value
   value="$(env_get "$1")"
   [ -z "$value" ] || [ "$value" = "замените-меня" ]
+}
+
+# prompt_secret KEY LABEL — если ключ ещё не задан, спрашивает его в
+# интерактивном сеансе; Enter пропускает вопрос (спросит снова при
+# следующем запуске/обновлении). В неинтерактивном сеансе (cron,
+# CI) вопросов не задаёт вовсе — только напоминает вписать вручную.
+prompt_secret() {
+  local key="$1" label="$2" value=""
+  env_is_unset "$key" || return 0
+
+  if [ ! -t 0 ]; then
+    say "  ${key} не задан — впишите в ${ENV_FILE} вручную, когда будет ключ"
+    return 0
+  fi
+
+  printf '  %s\n  [Enter — пропустить, спрошу снова при следующем запуске]: ' "$label"
+  read -r value || value=""
+  [ -n "$value" ] && {
+    env_set "$key" "$value"
+    say "  сохранено в ${ENV_FILE}"
+  }
+  return 0
 }
 
 require_tools() {
@@ -250,6 +271,10 @@ cmd_install() {
     say "сгенерирован пароль БД"
   }
 
+  step "необязательные ключи"
+  prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
+  prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
+
   step "инфраструктура"
   ensure_network
   ensure_caddy
@@ -278,6 +303,10 @@ cmd_update() {
 
   DOMAIN="$(domain_from_env)"
   [ -n "$DOMAIN" ] || die "в $ENV_FILE не задан ALLOWED_HOSTS"
+
+  step "необязательные ключи"
+  prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
+  prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
 
   local before
   before="$(git rev-parse HEAD)"
