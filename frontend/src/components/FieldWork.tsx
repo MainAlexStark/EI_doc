@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  downloadBlank,
+  fetchWorkOrderScans,
   fetchWorkOrders,
   suggestSiTypes,
+  uploadScan,
+  type FieldVerification,
   type LayoutsResponse,
   type Me,
   type MeasurementRowPayload,
   type MeasurementsPayload,
   type MeasurementsResult,
+  type ScanUploadResult,
   type SiTypeSuggestion,
   type WorkOrder,
 } from "../api";
+import ScanReview from "./ScanReview";
 import {
   addVerification,
   flush,
@@ -443,6 +449,16 @@ export default function FieldWork({ me }: { me: Me | null }) {
   const [queued, setQueued] = useState(0);
   const [outboxProblems, setOutboxProblems] = useState<OutboxItem[]>([]);
 
+  // Бланк с QR и распознавание — второй срез офлайна (claude/scans.md).
+  // В отличие от остального экрана это НЕ офлайн-функция: печать и
+  // распознавание требуют связи, ими пользуются уже вернувшись с
+  // режимного объекта, где телефон вообще нельзя было доставать.
+  const [scans, setScans] = useState<ScanUploadResult[]>([]);
+  const [scanBusy, setScanBusy] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [reviewScanId, setReviewScanId] = useState<number | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     const update = () => setOnline(isOnline());
     window.addEventListener("online", update);
@@ -462,6 +478,53 @@ export default function FieldWork({ me }: { me: Me | null }) {
     if (selectedOrder == null) return;
     setVerifications(await listVerifications(selectedOrder));
   }, [selectedOrder]);
+
+  const reloadScans = useCallback(async () => {
+    if (selectedOrder == null) {
+      setScans([]);
+      return;
+    }
+    try {
+      setScans(await fetchWorkOrderScans(selectedOrder));
+    } catch (exc) {
+      setScanError(exc instanceof Error ? exc.message : "Не удалось загрузить сканы");
+    }
+  }, [selectedOrder]);
+
+  useEffect(() => {
+    void reloadScans();
+    setReviewScanId(null);
+  }, [reloadScans]);
+
+  const handlePrintBlank = () => {
+    if (selectedOrder == null) return;
+    setScanError("");
+    downloadBlank(selectedOrder).catch((exc) => setScanError(exc instanceof Error ? exc.message : "Не удалось скачать бланк"));
+  };
+
+  const handleUploadScan = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || selectedOrder == null) return;
+    setScanBusy(true);
+    setScanError("");
+    try {
+      const uploaded = await uploadScan(selectedOrder, file);
+      setScans((current) => [uploaded, ...current]);
+      setReviewScanId(uploaded.id);
+    } catch (exc) {
+      setScanError(exc instanceof Error ? exc.message : "Не удалось загрузить фото");
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
+  const handleScanApplied = (verification: FieldVerification) => {
+    setReviewScanId(null);
+    void reloadScans();
+    void reloadVerifications();
+    setSelectedVerification(verification.client_id);
+  };
 
   useEffect(() => {
     refreshQueueCount();
@@ -552,6 +615,55 @@ export default function FieldWork({ me }: { me: Me | null }) {
 
       {selectedOrder != null && (
         <>
+          <h3>Бланк и сканы</h3>
+          <p className="hint">
+            Для режимных объектов (телефон нельзя пронести) — распечатайте бланк, заполните от руки
+            на месте, а вернувшись со связью, сфотографируйте и сверьте распознанное.
+          </p>
+          <div className="field-row">
+            <button type="button" onClick={handlePrintBlank}>Распечатать бланк</button>
+            <button type="button" onClick={() => fileInput.current?.click()} disabled={scanBusy}>
+              {scanBusy ? "Загружаю…" : "Загрузить фото бланка"}
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={(event) => void handleUploadScan(event)}
+            />
+          </div>
+          {scanError && <div className="error">{scanError}</div>}
+
+          {scans.length > 0 && (
+            <ul className="item-list">
+              {scans.map((s) => (
+                <li key={s.id}>
+                  <span className="name">
+                    Скан №{s.id} от {new Date(s.created_at).toLocaleString("ru-RU")}
+                    {s.verification != null && <span className="pill ok"> поверка заведена</span>}
+                    {s.verification == null && s.error && <span className="pill warn"> {s.error}</span>}
+                  </span>
+                  {s.verification == null && (
+                    <button type="button" onClick={() => setReviewScanId(s.id === reviewScanId ? null : s.id)}>
+                      {s.id === reviewScanId ? "Свернуть" : "Сверить"}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {reviewScanId != null && layoutsInfo && (
+            <ScanReview
+              scan={scans.find((s) => s.id === reviewScanId)!}
+              layoutsInfo={layoutsInfo}
+              onApplied={handleScanApplied}
+              onDismiss={() => setReviewScanId(null)}
+            />
+          )}
+
           <h3>Приборы по наряду</h3>
           {verifications.length === 0 && <div className="empty">Пока ничего не заведено</div>}
           <ul className="item-list">

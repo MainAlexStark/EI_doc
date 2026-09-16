@@ -98,7 +98,11 @@ async function call(path: string, init: RequestInit = {}, retry = true): Promise
   const headers = new Headers(init.headers);
   const access = tokens.access();
   if (access) headers.set("Authorization", `Bearer ${access}`);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  // FormData (загрузка фото скана) сама выставляет Content-Type с boundary —
+  // подставлять application/json здесь нельзя, иначе сервер не разберёт multipart.
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
   const response = await fetch(path, { ...init, headers });
   if (response.status === 401 && retry && (await refreshTokens())) {
@@ -620,6 +624,98 @@ export type MeasurementsResult = {
 
 export const submitMeasurements = (verificationId: number, payload: MeasurementsPayload) =>
   json<MeasurementsResult>(`/api/verifications/${verificationId}/measurements/`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+// ---------------------------------------------------------------------------
+// Бланк с QR и распознавание (второй срез офлайна, claude/scans.md)
+// ---------------------------------------------------------------------------
+
+/** Скачать печатный бланк — открывает PDF в новой вкладке (protected-эндпоинт,
+ * поэтому не голая ссылка: токен нужно подставить в заголовок). */
+export async function downloadBlank(workOrderId: number, copies = 1): Promise<void> {
+  const response = await call(`/api/work-orders/${workOrderId}/blank/?${queryString({ copies })}`);
+  if (!response.ok) {
+    let detail = `Ошибка ${response.status}`;
+    try {
+      const body = await response.json();
+      detail = body.detail ?? detail;
+    } catch {
+      /* PDF-эндпоинт при ошибке тоже отдаёт JSON — но на всякий случай */
+    }
+    throw new ApiError(detail, response.status);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export type ScanRecognizedRow = {
+  flow_rate?: string | null;
+  reading_start?: string | null;
+  reading_end?: string | null;
+  volume_standard?: string | null;
+  confidence?: number | null;
+};
+
+export type ScanRecognized = {
+  legible?: boolean;
+  si_type_query?: string | null;
+  serial_number?: string | null;
+  manufacture_year?: number | null;
+  unit_type?: "hot" | "cold" | null;
+  meter_class?: "A" | "B" | null;
+  pulse_weight?: string | null;
+  water_temperature?: string | null;
+  checks?: { visual?: boolean | null; operation?: boolean | null; tightness?: boolean | null };
+  manual_unsuitable?: boolean | null;
+  manual_unsuitability_reason?: string | null;
+  rows?: ScanRecognizedRow[];
+};
+
+export type ScanUploadResult = {
+  id: number;
+  work_order: number;
+  verification: number | null;
+  created_at: string;
+  error: string;
+  recognized: ScanRecognized;
+  image_url: string;
+  warning?: string;
+};
+
+export const fetchWorkOrderScans = (workOrderId: number) =>
+  json<ScanUploadResult[]>(`/api/work-orders/${workOrderId}/scans/`);
+
+/** Фото бланка → черновик распознавания. Поверку ещё не заводит — см. applyScan(). */
+export async function uploadScan(workOrderId: number, file: File): Promise<ScanUploadResult> {
+  const body = new FormData();
+  body.append("photo", file);
+  return json<ScanUploadResult>(`/api/work-orders/${workOrderId}/scans/`, { method: "POST", body });
+}
+
+export const fetchScan = (scanId: number) => json<ScanUploadResult>(`/api/scans/${scanId}/`);
+
+/** Фото скана как blob-URL — эндпоинт защищён токеном, обычный <img src> его не подставит. */
+export async function fetchScanImageUrl(scanId: number): Promise<string> {
+  const response = await call(`/api/scans/${scanId}/image/`);
+  if (!response.ok) throw new ApiError(`Не удалось загрузить фото (${response.status})`, response.status);
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+export type ScanApplyPayload = {
+  si_type_id: number;
+  serial_number: string;
+  manufacture_year?: number | null;
+  measurements: MeasurementsPayload;
+};
+
+/** Экран сверки подтверждён человеком → заводим поверку. Идемпотентно по scan.id. */
+export const applyScan = (scanId: number, payload: ScanApplyPayload) =>
+  json<FieldVerification>(`/api/scans/${scanId}/apply/`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

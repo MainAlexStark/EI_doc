@@ -10,6 +10,7 @@ from apps.verification.models import (
     NumberingScope,
     Protocol,
     ProtocolStatus,
+    ScanUpload,
     Site,
     Verification,
     WorkOrder,
@@ -113,6 +114,18 @@ class ProtocolAdmin(SimpleHistoryAdmin):
     @admin.display(description="Дата поверки", ordering="verification__verified_at")
     def verified_at(self, obj: Protocol):
         return obj.verification.verified_at
+
+@admin.register(ScanUpload)
+class ScanUploadAdmin(admin.ModelAdmin):
+    list_display = ["id", "work_order", "verification", "uploaded_by", "created_at", "has_error"]
+    list_filter = ["uploaded_by"]
+    readonly_fields = ["created_at"]
+    autocomplete_fields = ["work_order", "verification"]
+
+    @admin.display(description="Ошибка", boolean=True)
+    def has_error(self, obj: ScanUpload) -> bool:
+        return bool(obj.error)
+
 
 @admin.register(WorkOrder)
 class WorkOrderAdmin(SimpleHistoryAdmin):

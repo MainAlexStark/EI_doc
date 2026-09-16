@@ -43,6 +43,13 @@ from apps.verification.api_journal import (
     SignProtocolsView,
 )
 from apps.verification.api_field import WorkOrderVerificationsView
+from apps.verification.api_scan import (
+    ScanApplyView,
+    ScanDetailView,
+    ScanImageView,
+    WorkOrderBlankView,
+    WorkOrderScansView,
+)
 from apps.verification.api_workorders import (
     WorkOrderCreateView,
     WorkOrderListView,
@@ -119,6 +126,18 @@ urlpatterns = [
         "api/work-orders/<int:pk>/verifications/",
         WorkOrderVerificationsView.as_view(), name="work_order_verifications",
     ),
+    # Бланк с QR и распознавание (второй срез офлайна, claude/scans.md)
+    path(
+        "api/work-orders/<int:pk>/blank/",
+        WorkOrderBlankView.as_view(), name="work_order_blank",
+    ),
+    path(
+        "api/work-orders/<int:pk>/scans/",
+        WorkOrderScansView.as_view(), name="work_order_scans",
+    ),
+    path("api/scans/<int:pk>/", ScanDetailView.as_view(), name="scan_detail"),
+    path("api/scans/<int:pk>/image/", ScanImageView.as_view(), name="scan_image"),
+    path("api/scans/<int:pk>/apply/", ScanApplyView.as_view(), name="scan_apply"),
     # Задачи
     path("api/tasks/", TaskListCreateView.as_view(), name="task_list_create"),
     path("api/tasks/<int:pk>/", TaskDetailView.as_view(), name="task_detail"),

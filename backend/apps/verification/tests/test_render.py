@@ -15,6 +15,7 @@ from apps.catalog.models import SiType
 from apps.verification import measurements as service
 from apps.verification import render
 from apps.verification.calculators import water_meter as wm
+from apps.verification.models import Client, Site, WorkOrder
 from apps.verification.tests import factories as f
 
 LIMITS_DICT = {
@@ -120,3 +121,39 @@ class ContextTestCase(TestCase):
 
         assert pdf.startswith(b"%PDF")
         assert len(pdf) > 10_000
+
+
+class BlankFormTestCase(TestCase):
+    """Печатный бланк с QR — второй срез офлайна (claude/scans.md)."""
+
+    def setUp(self) -> None:
+        self.family = f.make_family()
+        self.employee = f.make_employee()
+        self.client_obj = Client.objects.create(name="ООО Ромашка")
+        self.site = Site.objects.create(address="г. Киров, ул. Мира, 1", client=self.client_obj)
+        self.work_order = WorkOrder.objects.create(
+            client=self.client_obj, site=self.site, assigned_employee=self.employee,
+        )
+
+    def test_context_has_three_rows_matching_compact_layout(self):
+        context = render.build_blank_context(self.work_order)
+        assert len(context["rows"]) == 3
+        assert context["work_order_number"] == self.work_order.id
+        assert context["client"] == "ООО Ромашка"
+
+    def test_context_carries_common_unsuitability_reasons(self):
+        context = render.build_blank_context(self.work_order)
+        assert context["common_unsuitability_reasons"]
+
+    @pytest.mark.skipif(not render.typst_available(), reason="typst не установлен")
+    def test_blank_pdf_actually_compiles(self):
+        pdf = render.render_blank(self.work_order)
+        assert pdf.startswith(b"%PDF")
+
+    @pytest.mark.skipif(not render.typst_available(), reason="typst не установлен")
+    def test_copies_produce_multiple_pages(self):
+        one = render.render_blank(self.work_order, copies=1)
+        three = render.render_blank(self.work_order, copies=3)
+        # Не строгая проверка числа страниц (не парсим PDF), но три экземпляра
+        # заметно тяжелее одного — тот же QR и разметка трижды.
+        assert len(three) > len(one)

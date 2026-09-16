@@ -388,6 +388,53 @@ class Protocol(models.Model):
         return self.status in ProtocolStatus.sealed()
 
 # ---------------------------------------------------------------------------
+# Сканы бумажных бланков (второй срез офлайна — QR + распознавание)
+# ---------------------------------------------------------------------------
+class ScanUpload(models.Model):
+    """Фото бумажного бланка — второй сценарий офлайна (см. claude/scans.md).
+
+    Бланк печатается системой (``render.render_blank``) с QR наряда; какой
+    именно счётчик попадёт на бланк, заранее не известно (см. WorkOrder —
+    заявка может включать несколько счётчиков), поэтому QR кодирует только
+    наряд, не СИ. Один наряд может получить несколько сканов — по одному на
+    каждый счётчик, печатаются и заполняются они отдельно.
+    """
+
+    work_order = models.ForeignKey(
+        "WorkOrder", on_delete=models.CASCADE, related_name="scans", verbose_name="наряд",
+    )
+    verification = models.ForeignKey(
+        Verification, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="scans", verbose_name="поверка",
+        help_text="Заполняется после распознавания — какую поверку завела эта фотография",
+    )
+    uploaded_by = models.ForeignKey(
+        "core.Employee", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="scan_uploads", verbose_name="загрузил",
+    )
+    image = models.ImageField("фото бланка", upload_to="scans/%Y/%m/")
+    recognized = models.JSONField(
+        "распознано VLM", default=dict, blank=True,
+        help_text="Сырой ответ распознавания — для отладки и метрики доли строк, "
+                  "исправленных человеком на экране сверки",
+    )
+    error = models.TextField(
+        "ошибка обработки", blank=True,
+        help_text="QR не найден, реперные метки не выровнялись, распознавание "
+                  "недоступно и т. п. — поверитель в этом случае вводит вручную",
+    )
+    created_at = models.DateTimeField("создано", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "скан бланка"
+        verbose_name_plural = "сканы бланков"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Скан по наряду №{self.work_order_id} от {self.created_at:%d.%m.%Y %H:%M}"
+
+
+# ---------------------------------------------------------------------------
 # Наряды
 # ---------------------------------------------------------------------------
 class WorkOrderStatus(models.TextChoices):

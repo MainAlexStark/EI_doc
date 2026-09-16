@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import subprocess
@@ -17,7 +18,9 @@ import tempfile
 from decimal import Decimal
 from pathlib import Path
 
+import qrcode
 from django.conf import settings
+from django.utils import timezone
 
 from apps.verification.calculators import water_meter as wm
 
@@ -195,8 +198,16 @@ def build_context(verification, *, number: str) -> dict:
     }
 
 
-def render_pdf(context: dict, *, template: str | Path = DEFAULT_TEMPLATE) -> bytes:
-    """Сверстать PDF по данным протокола."""
+def render_pdf(
+    context: dict, *, template: str | Path = DEFAULT_TEMPLATE,
+    extra_files: dict[str, bytes] | None = None,
+) -> bytes:
+    """Сверстать PDF по данным протокола.
+
+    ``extra_files`` — дополнительные бинарные файлы рядом с template.typ/
+    data.json в рабочем каталоге (например, qr.png для бланка) — шаблон
+    читает их по относительному пути через image().
+    """
     source = Path(template)
     if not source.is_absolute():
         source = TEMPLATE_DIR / source
@@ -209,6 +220,8 @@ def render_pdf(context: dict, *, template: str | Path = DEFAULT_TEMPLATE) -> byt
         (work / "data.json").write_text(
             json.dumps(context, ensure_ascii=False, indent=1), encoding="utf-8"
         )
+        for name, data in (extra_files or {}).items():
+            (work / name).write_bytes(data)
         output = work / "protocol.pdf"
 
         try:
@@ -238,3 +251,56 @@ def render_for(verification, *, number: str) -> bytes:
 def template_source(name: str = DEFAULT_TEMPLATE) -> str:
     """Исходник шаблона — для загрузки в catalog.ProtocolTemplate."""
     return (TEMPLATE_DIR / name).read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Печатный бланк с QR (второй срез офлайна — см. claude/scans.md)
+# ---------------------------------------------------------------------------
+BLANK_TEMPLATE = "blank_water_meter_v1.typ"
+
+
+def build_blank_context(work_order) -> dict:
+    """Данные для печати пустого бланка — сам он ничего не считает и не хранит."""
+    from apps.verification import measurements as measurements_service
+
+    rows = [
+        {"label": wm.MODES[mode]["label"], "seconds": wm.MODES[mode]["seconds"]}
+        for mode in wm.LAYOUTS[wm.LAYOUT_COMPACT]
+    ]
+    return {
+        "org": ORG,
+        "work_order_number": work_order.id,
+        "client": str(work_order.client),
+        "site": str(work_order.site),
+        "date": timezone.now().strftime("%d.%m.%Y"),
+        "checks": list(wm.CHECKS.values()),
+        "rows": rows,
+        "common_unsuitability_reasons": measurements_service.COMMON_UNSUITABILITY_REASONS,
+    }
+
+
+def render_blank(work_order, *, copies: int = 1) -> bytes:
+    """PDF печатного бланка: QR наряда + реперные метки + клетки под ручной ввод.
+
+    Один бланк — один счётчик (заранее не известно, сколько их будет и какие
+    — см. WorkOrder/RequestItem), поэтому QR кодирует только наряд
+    (``apps.verification.scan.qr_payload_for_work_order``), не конкретное
+    СИ. Если счётчиков несколько, страница просто повторяется ``copies`` раз
+    — различать экземпляры бланка друг от друга не требуется, каждое фото
+    заводит свою поверку через apps.verification.api_scan.
+
+    Реперные метки на bordare листа — под perspective-align на фото, см.
+    apps.verification.scan.align(); их геометрия (отступ, размер) должна
+    остаться согласованной с scan.CANVAS_*/MARKER_MARGIN_PX при правке.
+    """
+    from apps.verification import scan as scan_service
+
+    copies = max(1, min(int(copies), 20))
+    qr_image = qrcode.make(scan_service.qr_payload_for_work_order(work_order.id))
+    qr_buffer = io.BytesIO()
+    qr_image.save(qr_buffer, format="PNG")
+
+    context = build_blank_context(work_order)
+    context["copies"] = copies
+
+    return render_pdf(context, template=BLANK_TEMPLATE, extra_files={"qr.png": qr_buffer.getvalue()})
