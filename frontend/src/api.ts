@@ -51,7 +51,14 @@ export type Preview = {
   lines: string[];
 };
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  /** 0 — ошибка не от сервера (или статус неизвестен на месте вызова), не сетевая: см. offline/sync.ts. */
+  status: number;
+  constructor(message: string, status = 0) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const tokens = {
   access: () => localStorage.getItem(ACCESS),
@@ -110,7 +117,7 @@ async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* тело не разобралось — оставим код */
     }
-    throw new ApiError(detail);
+    throw new ApiError(detail, response.status);
   }
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
@@ -571,6 +578,7 @@ export type LayoutsResponse = {
   layouts: Record<string, LayoutMode[]>;
   checks: Record<string, string>;
   classes: string[];
+  common_unsuitability_reasons: string[];
 };
 
 export const fetchLayouts = () => json<LayoutsResponse>("/api/verifications/layouts/");
@@ -594,6 +602,10 @@ export type MeasurementsPayload = {
   water_temperature?: string;
   checks?: Record<string, boolean>;
   rows: MeasurementRowPayload[];
+  /** Непригоден не по расчётной погрешности (осмотр, повреждение и т. п.) —
+   * тогда rows может быть пустым, прибор физически не проверить. */
+  manual_unsuitable?: boolean;
+  manual_unsuitability_reason?: string;
 };
 
 export type MeasurementsResult = {

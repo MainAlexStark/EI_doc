@@ -141,6 +141,55 @@ class EntryTestCase(TestCase):
             service.apply(self.verification, self.payload(rows=rows))
 
 
+class ManualUnsuitableTestCase(TestCase):
+    """Непригоден не по погрешности — осмотр, повреждение и т. п. (см. измерения.md)."""
+
+    def setUp(self) -> None:
+        self.family = f.make_family()
+        self.employee = f.make_employee()
+        f.attest(self.employee, self.family)
+        self.verification = f.make_verification(self.family, self.employee, day=6)
+        SiType.objects.filter(pk=self.verification.instrument.si_type_id).update(limits=LIMITS)
+        self.verification.instrument.si_type.refresh_from_db()
+
+    def payload(self, **overrides):
+        return {"layout": wm.LAYOUT_COMPACT, "meter_class": wm.CLASS_B,
+                "rows": [dict(row) for row in PASSING]} | overrides
+
+    def test_overrides_a_passing_verdict(self):
+        """Числа в допуске, но прибор всё равно негоден — например, разбито стекло."""
+        applied = service.apply(
+            self.verification,
+            self.payload(manual_unsuitable=True, manual_unsuitability_reason="Разбито стекло корпуса"),
+        )
+        assert not applied.suitable
+        assert "Разбито стекло корпуса" in applied.reasons
+        self.verification.refresh_from_db()
+        assert not self.verification.suitable
+        assert "Разбито стекло корпуса" in self.verification.unsuitability_reason
+
+    def test_works_without_any_rows(self):
+        """Прибор физически не прогнать через измерения — заклинило, разбит и т. п."""
+        applied = service.apply(
+            self.verification,
+            {"manual_unsuitable": True, "manual_unsuitability_reason": "Счётный механизм заклинило", "rows": []},
+        )
+        assert not applied.suitable
+        assert applied.rows == []
+        assert applied.needs_review == []
+        self.verification.refresh_from_db()
+        assert not self.verification.suitable
+        assert self.verification.status == VerificationStatus.READY
+
+    def test_falls_back_to_a_default_reason_when_none_given(self):
+        applied = service.apply(self.verification, {"manual_unsuitable": True, "rows": []})
+        assert applied.reasons == ["Признан непригодным (причина не указана)"]
+
+    def test_without_manual_unsuitable_empty_rows_still_fail_the_layout_check(self):
+        with pytest.raises(service.MeasurementInputError, match="3 строк"):
+            service.apply(self.verification, {"rows": []})
+
+
 class ScanTestCase(TestCase):
     def setUp(self) -> None:
         self.family = f.make_family()
@@ -224,3 +273,30 @@ class ApiTestCase(TestCase):
         assert len(response.data["layouts"][wm.LAYOUT_EXTENDED]) == 9
         assert response.data["layouts"][wm.LAYOUT_COMPACT][0]["seconds"] == 720
         assert "tightness" in response.data["checks"]
+        assert response.data["common_unsuitability_reasons"] == service.COMMON_UNSUITABILITY_REASONS
+
+    def test_manual_unsuitable_without_rows_is_accepted(self):
+        url = reverse("verification_measurements", args=[self.verification.pk])
+        response = self.client.post(
+            url,
+            {"manual_unsuitable": True, "manual_unsuitability_reason": "Нарушена пломба поверителя", "rows": []},
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert response.data["suitable"] is False
+        assert response.data["reasons"] == ["Нарушена пломба поверителя"]
+        assert response.data["rows"] == []
+
+    def test_manual_unsuitable_overrides_a_passing_verdict(self):
+        url = reverse("verification_measurements", args=[self.verification.pk])
+        response = self.client.post(
+            url,
+            {"layout": wm.LAYOUT_COMPACT, "rows": PASSING, "manual_unsuitable": True,
+             "manual_unsuitability_reason": "Механическое повреждение корпуса"},
+            format="json",
+        )
+
+        assert response.status_code == 200, response.data
+        assert response.data["suitable"] is False
+        assert "Механическое повреждение корпуса" in response.data["reasons"]

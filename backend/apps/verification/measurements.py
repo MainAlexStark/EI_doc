@@ -39,6 +39,17 @@ REVIEW_CONFIDENCE = 0.90
 # а не доли; но лишний ноль в цифре так уже не проедет.
 MAX_STANDARD_DEVIATION_PCT = 25
 
+# Частые причины непригодности не по погрешности — подсказка на экране ввода
+# измерений (см. LayoutsView), не ограничивает свободный текст.
+COMMON_UNSUITABILITY_REASONS = [
+    "Механическое повреждение корпуса или стекла",
+    "Нарушена или отсутствует пломба поверителя",
+    "Счётный механизм заклинило — не считает",
+    "Течь в месте присоединения",
+    "Показания не читаются",
+    "Не реагирует на расход — не работает совсем",
+]
+
 
 class MeasurementInputError(ValueError):
     """Ошибка ввода — показывается поверителю, а не падает пятисоткой."""
@@ -47,14 +58,16 @@ class MeasurementInputError(ValueError):
 @dataclass
 class Applied:
     verification: Verification
-    verdict: wm.Verdict
+    # None, когда строк измерений не было вовсе (прибор негоден и физически
+    # не прогнать через измерения — см. apply()); тогда suitable/reasons/
+    # failed_rows определены вручную, не калькулятором.
+    verdict: wm.Verdict | None
     rows: list[dict]
     needs_review: list[int]
     journal_note: str
-
-    @property
-    def suitable(self) -> bool:
-        return self.verdict.suitable
+    suitable: bool
+    reasons: list[str]
+    failed_rows: list[int]
 
 
 def _decimal(value, field: str, row: int | None = None) -> Decimal:
@@ -99,6 +112,13 @@ def build_rows(payload: dict) -> tuple[list[wm.Measurement], list[dict], list[in
 
     expected_modes = wm.LAYOUTS[layout]
     raw_rows = payload.get("rows") or []
+
+    if not raw_rows and payload.get("manual_unsuitable"):
+        # Прибор признан негодным вручную (см. apply()) и физически не прогнать
+        # через измерения — разбит, заклинило и т. п. Строк в этом случае может
+        # не быть вовсе, это не ошибка ввода.
+        return [], [], []
+
     if len(raw_rows) != len(expected_modes):
         raise MeasurementInputError(
             f"Раскладка «{layout}» — это {len(expected_modes)} строк измерений, "
@@ -196,13 +216,35 @@ def apply(verification: Verification, payload: dict) -> Applied:
     checks = {key: bool(payload.get("checks", {}).get(key, True)) for key in wm.CHECKS}
     measurements, stored, needs_review = build_rows(payload)
 
-    try:
-        verdict = wm.evaluate(measurements, limits, meter_class, checks=checks)
-    except wm.MeasurementError as exc:
-        raise MeasurementInputError(str(exc)) from exc
+    manual_unsuitable = bool(payload.get("manual_unsuitable"))
+    manual_reason = (payload.get("manual_unsuitability_reason") or "").strip()
 
-    rows = [m.as_result(limits, meter_class) for m in measurements]
-    journal_note = wm.flow_range_note(measurements, limits)
+    if measurements:
+        try:
+            verdict = wm.evaluate(measurements, limits, meter_class, checks=checks)
+        except wm.MeasurementError as exc:
+            raise MeasurementInputError(str(exc)) from exc
+        rows = [m.as_result(limits, meter_class) for m in measurements]
+        journal_note = wm.flow_range_note(measurements, limits)
+        max_flow_rate = str(verdict.max_flow_rate)
+        calculator_suitable = verdict.suitable
+        calculator_reasons = list(verdict.reasons)
+        failed_rows = list(verdict.failed_rows)
+    else:
+        # build_rows отдаёт пустой список строк, только когда manual_unsuitable=True
+        # и строк не передали вовсе — см. build_rows().
+        verdict = None
+        rows = []
+        journal_note = ""
+        max_flow_rate = None
+        calculator_suitable = True  # калькулятору тут нечего сказать — решает manual_unsuitable ниже
+        calculator_reasons = []
+        failed_rows = []
+
+    final_suitable = calculator_suitable and not manual_unsuitable
+    reasons = list(calculator_reasons)
+    if manual_unsuitable:
+        reasons.append(manual_reason or "Признан непригодным (причина не указана)")
 
     verification.measurements = {
         "layout": payload.get("layout") or wm.LAYOUT_COMPACT,
@@ -219,17 +261,22 @@ def apply(verification: Verification, payload: dict) -> Applied:
         "unit_type": payload.get("unit_type") or None,
         "checks": checks,
         "rows": stored,
+        # Ручная негодность — не по расчётной погрешности (осмотр, повреждение
+        # и т. п.), см. apply(). Хранится отдельно от checks, чтобы форма ввода
+        # могла восстановить состояние при повторном открытии поверки.
+        "manual_unsuitable": manual_unsuitable,
+        "manual_unsuitability_reason": manual_reason,
     }
     verification.results = {
         "rows": rows,
-        "suitable": verdict.suitable,
-        "failed_rows": list(verdict.failed_rows),
-        "max_flow_rate": str(verdict.max_flow_rate),
+        "suitable": final_suitable,
+        "failed_rows": failed_rows,
+        "max_flow_rate": max_flow_rate,
         "journal_note": journal_note,
-        "reasons": list(verdict.reasons),
+        "reasons": reasons,
     }
-    verification.suitable = verdict.suitable
-    verification.unsuitability_reason = "; ".join(verdict.reasons) if not verdict.suitable else ""
+    verification.suitable = final_suitable
+    verification.unsuitability_reason = "; ".join(reasons) if not final_suitable else ""
     verification.needs_review = bool(needs_review)
 
     # Со сканом поверка не уходит на нормоконтроль, пока спорные строки
@@ -252,6 +299,9 @@ def apply(verification: Verification, payload: dict) -> Applied:
         rows=rows,
         needs_review=needs_review,
         journal_note=journal_note,
+        suitable=final_suitable,
+        reasons=reasons,
+        failed_rows=failed_rows,
     )
 
 

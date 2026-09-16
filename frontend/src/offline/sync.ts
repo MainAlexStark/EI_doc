@@ -50,6 +50,20 @@ export function isOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine;
 }
 
+/**
+ * navigator.onLine — не источник истины (известно врёт в ряде браузеров и
+ * окружений), поэтому решение «в очередь или нет» принимается не по нему, а
+ * по тому, ЧТО именно пошло не так при реальной попытке отправки. fetch()
+ * бросает TypeError только при сетевой проблеме (нет соединения, DNS, CORS
+ * и т. п.) — если сервер вообще ответил, пусть даже 400/500, это ApiError,
+ * и глушить её как «нет связи» нельзя: пользователь решит, что его данные
+ * повисли в очереди, хотя на самом деле сервер их отверг (например,
+ * незаполненная строка измерений), и они там и останутся навсегда.
+ */
+function isNetworkFailure(exc: unknown): boolean {
+  return exc instanceof TypeError;
+}
+
 function fromServer(v: FieldVerification): CachedVerification {
   return {
     client_id: v.client_id,
@@ -94,16 +108,18 @@ export async function addVerification(
   const clientId = newUuid();
   const full: FieldVerificationPayload = { ...payload, client_id: clientId };
 
-  if (isOnline()) {
-    try {
-      const created = await createVerification(workOrderId, full);
-      const record = fromServer(created);
-      await db.verifications.put(record);
-      notify();
-      return record;
-    } catch {
-      // сеть не прошла — уходим в очередь ниже, как будто офлайн с самого начала
-    }
+  // Пробуем отправить всегда, не только когда isOnline() говорит "да" — см.
+  // isNetworkFailure(). В очередь уходим только если действительно нет сети;
+  // если сервер ответил отказом (например, неверный si_type_id), это нужно
+  // показать поверителю сразу, а не глушить как "нет связи".
+  try {
+    const created = await createVerification(workOrderId, full);
+    const record = fromServer(created);
+    await db.verifications.put(record);
+    notify();
+    return record;
+  } catch (exc) {
+    if (!isNetworkFailure(exc)) throw exc;
   }
 
   const optimistic: CachedVerification = {
@@ -146,7 +162,10 @@ export async function saveMeasurements(
   const cached = await db.verifications.get(clientId);
   const serverId = cached?.server_id ?? null;
 
-  if (isOnline() && serverId != null) {
+  // Как и в addVerification — пробуем всегда, не по isOnline(); в очередь
+  // падаем только на настоящей сетевой ошибке (isNetworkFailure), иначе
+  // показываем реальный ответ сервера.
+  if (serverId != null) {
     try {
       const result = await submitMeasurements(serverId, payload);
       await db.verifications.update(clientId, {
@@ -156,8 +175,8 @@ export async function saveMeasurements(
       });
       notify();
       return { queued: false, result };
-    } catch {
-      // падаем в очередь ниже
+    } catch (exc) {
+      if (!isNetworkFailure(exc)) throw exc;
     }
   }
 
@@ -199,6 +218,23 @@ export async function pendingCount(): Promise<number> {
   return db.outbox.count();
 }
 
+/** Элементы очереди, которые хотя бы раз не прошли (attempts > 0) — чтобы
+ * показать поверителю не просто "в очереди: N", а что именно застряло и
+ * почему, вместо молчаливого бесконечного retry. */
+export async function outboxErrors(): Promise<import("./db").OutboxItem[]> {
+  // attempts не входит в индексы схемы (см. db.ts) — очередь небольшая
+  // (наряды одного поверителя), полный скан через filter() дешевле, чем
+  // заводить лишний индекс ради этого.
+  return db.outbox.filter((item) => item.attempts > 0).toArray();
+}
+
+/** Убрать застрявший элемент из очереди вручную — например, если данные в
+ * нём были ошибочными и отправлять их больше не нужно. */
+export async function removeOutboxItem(id: string): Promise<void> {
+  await db.outbox.delete(id);
+  notify();
+}
+
 let flushing = false;
 
 /**
@@ -210,7 +246,12 @@ let flushing = false;
  * чтобы это было видно.
  */
 export async function flush(): Promise<void> {
-  if (flushing || !isOnline()) return;
+  // Не проверяем isOnline() здесь — она ненадёжна (см. isNetworkFailure) и
+  // раньше из-за этого flush() мог тихо выходить, даже когда связь реально
+  // есть: кнопка "Синхронизировать" выглядела как ничего не делающая. Сеть
+  // проверяется по факту — первая же настоящая сетевая ошибка (TypeError)
+  // останавливает цикл (см. ниже), лишний повторный удар по серверу не грозит.
+  if (flushing) return;
   flushing = true;
   try {
     const items = await db.outbox.orderBy("created_at").toArray();
@@ -239,13 +280,14 @@ export async function flush(): Promise<void> {
         await db.outbox.delete(item.id);
         notify();
       } catch (exc) {
-        const offline = !isOnline() || exc instanceof TypeError;
         await db.outbox.update(item.id, {
           attempts: item.attempts + 1,
           last_error: exc instanceof Error ? exc.message : "неизвестная ошибка",
         });
         notify();
-        if (offline) break; // связи нет — остальное тоже не пройдёт, не долбим сервер зря
+        if (isNetworkFailure(exc)) break; // связи нет — остальное тоже не пройдёт, не долбим сервер зря
+        // иначе сервер ответил отказом (не сеть) — не блокируем независимые
+        // элементы очереди, идём дальше; этот элемент остаётся с last_error
       }
     }
   } finally {

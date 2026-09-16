@@ -55,7 +55,20 @@ class MeasurementsSerializer(serializers.Serializer):
         child=serializers.BooleanField(), required=False,
         help_text=f"Отметки по пунктам: {', '.join(wm.CHECKS)}",
     )
-    rows = MeasurementRowSerializer(many=True)
+    # required=False: когда manual_unsuitable=True, строк может не быть вовсе —
+    # прибор негоден и физически не прогнать через измерения (разбит и т. п.).
+    # Во всех остальных случаях build_rows() сам требует ровно len(LAYOUTS[layout]).
+    rows = MeasurementRowSerializer(many=True, required=False, default=list)
+    manual_unsuitable = serializers.BooleanField(
+        required=False, default=False,
+        help_text="Непригоден не по расчётной погрешности, а по другой причине "
+                  "(осмотр, повреждение и т. п.) — см. manual_unsuitability_reason. "
+                  "Строки измерений в этом случае необязательны.",
+    )
+    manual_unsuitability_reason = serializers.CharField(
+        required=False, allow_blank=True, default="",
+        help_text="Причина непригодности вручную — свободный текст",
+    )
 
 
 class ConfirmRowsSerializer(serializers.Serializer):
@@ -86,8 +99,8 @@ class VerificationMeasurementsView(APIView):
             {
                 "suitable": applied.suitable,
                 "rows": applied.rows,
-                "failed_rows": list(applied.verdict.failed_rows),
-                "reasons": list(applied.verdict.reasons),
+                "failed_rows": applied.failed_rows,
+                "reasons": applied.reasons,
                 "journal_note": applied.journal_note,
                 "needs_review": applied.needs_review,
                 "status": verification.status,
@@ -132,5 +145,6 @@ class LayoutsView(APIView):
                 },
                 "checks": wm.CHECKS,
                 "classes": [wm.CLASS_A, wm.CLASS_B],
+                "common_unsuitability_reasons": service.COMMON_UNSUITABILITY_REASONS,
             }
         )

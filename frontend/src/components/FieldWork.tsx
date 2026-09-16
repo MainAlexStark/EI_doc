@@ -16,11 +16,13 @@ import {
   isOnline,
   listVerifications,
   loadLayouts,
+  outboxErrors,
   pendingCount,
+  removeOutboxItem,
   saveMeasurements,
   subscribe,
 } from "../offline/sync";
-import type { CachedVerification } from "../offline/db";
+import type { CachedVerification, OutboxItem } from "../offline/db";
 
 /** Экран поверителя: наряд → приборы по нему → ввод измерений — рассчитан на
  * работу без связи (см. src/offline/sync.ts). Раскладка измерений сейчас
@@ -203,12 +205,34 @@ function MeasurementForm({
   const [result, setResult] = useState<MeasurementsResult | null>(null);
   const [queuedNotice, setQueuedNotice] = useState(false);
 
+  // Непригоден не по расчётной погрешности — осмотр, повреждение и т. п.
+  // (тж. непроходимая механическая поломка, когда измерения вообще снять
+  // нельзя). См. apps.verification.measurements.apply().
+  const [manualUnsuitable, setManualUnsuitable] = useState(false);
+  const [manualReason, setManualReason] = useState("");
+  const [reasonPreset, setReasonPreset] = useState("");
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setBusy(true);
     setError("");
     setResult(null);
     setQueuedNotice(false);
+
+    const allRowsEmpty = rows.every((row) => !row.flow_rate.trim() && !row.volume_standard.trim());
+    const allRowsFilled = rows.every((row) => row.flow_rate.trim() && row.volume_standard.trim());
+    if (!allRowsFilled && !(manualUnsuitable && allRowsEmpty)) {
+      setError(
+        "Заполните расход и объём по эталону во всех строках — либо, если прибор физически " +
+          "не проверить (разбит, заклинило), отметьте «Непригоден» и оставьте таблицу пустой",
+      );
+      return;
+    }
+    if (manualUnsuitable && !manualReason.trim()) {
+      setError("Укажите причину непригодности");
+      return;
+    }
+
+    setBusy(true);
     try {
       const payload: MeasurementsPayload = {
         layout,
@@ -217,14 +241,19 @@ function MeasurementForm({
         pulse_weight: pulseWeight || undefined,
         unit_type: unitType || undefined,
         water_temperature: waterTemp || undefined,
-        rows: rows.map((row): MeasurementRowPayload => {
-          const built: MeasurementRowPayload = { flow_rate: row.flow_rate, volume_standard: row.volume_standard };
-          if (row.reading_start) built.reading_start = row.reading_start;
-          if (row.reading_end) built.reading_end = row.reading_end;
-          if (row.pulses) built.pulses = Number(row.pulses);
-          if (row.volume_meter) built.volume_meter = row.volume_meter;
-          return built;
-        }),
+        manual_unsuitable: manualUnsuitable,
+        manual_unsuitability_reason: manualUnsuitable ? manualReason.trim() : undefined,
+        rows:
+          manualUnsuitable && allRowsEmpty
+            ? []
+            : rows.map((row): MeasurementRowPayload => {
+                const built: MeasurementRowPayload = { flow_rate: row.flow_rate, volume_standard: row.volume_standard };
+                if (row.reading_start) built.reading_start = row.reading_start;
+                if (row.reading_end) built.reading_end = row.reading_end;
+                if (row.pulses) built.pulses = Number(row.pulses);
+                if (row.volume_meter) built.volume_meter = row.volume_meter;
+                return built;
+              }),
       };
       const outcome = await saveMeasurements(verification.client_id, payload);
       if (outcome.queued) setQueuedNotice(true);
@@ -304,6 +333,46 @@ function MeasurementForm({
         ))}
       </div>
 
+      <div className="field" style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 10 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={manualUnsuitable} onChange={(event) => setManualUnsuitable(event.target.checked)} />
+          НЕПРИГОДЕН (по другой причине, не по погрешности)
+        </label>
+        {manualUnsuitable && (
+          <div className="field-row" style={{ marginTop: 8 }}>
+            <div className="field">
+              <label htmlFor="fw-reason-preset">Частая причина</label>
+              <select
+                id="fw-reason-preset"
+                value={reasonPreset}
+                onChange={(event) => {
+                  setReasonPreset(event.target.value);
+                  if (event.target.value) setManualReason(event.target.value);
+                }}
+              >
+                <option value="">выберите или впишите свою ниже…</option>
+                {layoutsInfo.common_unsuitability_reasons.map((reason) => (
+                  <option key={reason} value={reason}>{reason}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ flex: 2 }}>
+              <label htmlFor="fw-reason-text">Причина<span className="req">*</span></label>
+              <input
+                id="fw-reason-text"
+                value={manualReason}
+                onChange={(event) => setManualReason(event.target.value)}
+                placeholder="например: разбито стекло корпуса"
+              />
+            </div>
+          </div>
+        )}
+        <p className="hint">
+          Если прибор физически не проверить (заклинило, разбит) — оставьте таблицу измерений пустой,
+          отправлять будет нечего.
+        </p>
+      </div>
+
       <div className="table-wrap">
         <table>
           <thead>
@@ -372,6 +441,7 @@ export default function FieldWork({ me }: { me: Me | null }) {
   const [error, setError] = useState("");
   const [online, setOnline] = useState(isOnline());
   const [queued, setQueued] = useState(0);
+  const [outboxProblems, setOutboxProblems] = useState<OutboxItem[]>([]);
 
   useEffect(() => {
     const update = () => setOnline(isOnline());
@@ -385,6 +455,7 @@ export default function FieldWork({ me }: { me: Me | null }) {
 
   const refreshQueueCount = useCallback(() => {
     void pendingCount().then(setQueued);
+    void outboxErrors().then(setOutboxProblems);
   }, []);
 
   const reloadVerifications = useCallback(async () => {
@@ -431,12 +502,31 @@ export default function FieldWork({ me }: { me: Me | null }) {
       <div className="filters">
         <span className={online ? "pill ok" : "pill warn"}>{online ? "связь есть" : "офлайн"}</span>
         {queued > 0 && <span className="pill warn">в очереди на отправку: {queued}</span>}
-        {online && queued > 0 && (
+        {queued > 0 && (
+          // Не завязано на online — статус связи браузера ненадёжен, а сама
+          // попытка отправки сама разберётся, есть сеть или нет (см. flush()).
           <button type="button" onClick={() => void flush()}>
             Синхронизировать сейчас
           </button>
         )}
       </div>
+
+      {outboxProblems.length > 0 && (
+        <ul className="item-list">
+          {outboxProblems.map((item) => (
+            <li key={item.id}>
+              <span className="name">
+                {item.kind === "create_verification" ? "Заведение СИ" : "Измерения"}
+                {" — "}
+                <span className="sub">{item.last_error || "не удалось отправить"}</span>
+              </span>
+              <button type="button" onClick={() => void removeOutboxItem(item.id).then(refreshQueueCount)}>
+                Убрать из очереди
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {error && <div className="error">{error}</div>}
       {loading && <div className="loading">Загружаю…</div>}

@@ -222,10 +222,16 @@ export default function PublicRequestForm() {
     const next = chosenDate === date ? "" : date; // повторный клик снимает выбор
     setChosenDate(next);
     setChosenTime("");
-    // День без разбивки по времени (или прибор не требует времени) — приоритет,
-    // если хоть один слот в этот день отмечен сотрудником как приоритетный.
+    // Приоритет по умолчанию — если хоть один слот в этот день отмечен
+    // сотрудником как приоритетный. Считаем это независимо от needsTime:
+    // сотрудники чаще всего заводят слоты "весь день" (без времени, см.
+    // Availability.tsx), тогда чипов времени вообще не будет и pickTime()
+    // ниже не вызовется ни разу — раньше это означало, что скидка для
+    // приборов с обязательным временем не применялась практически никогда.
+    // Если время всё же выбирается через чип — pickTime() уточнит по
+    // конкретному слоту.
     const slotsForDate = next ? slotsByDate.get(next) ?? [] : [];
-    setChosenPriority(!needsTime && slotsForDate.some((s) => s.is_priority));
+    setChosenPriority(slotsForDate.some((s) => s.is_priority));
   };
 
   const pickTime = (slot: PublicSlot) => {
@@ -487,7 +493,7 @@ export default function PublicRequestForm() {
             )
           )}
 
-          {chosenPriority && chosenDate && (
+          {pricing.applyDiscount && chosenDate && (
             <div className="hint ok">Выбрано приоритетное время — скидка {discountPercent}% учтена в цене</div>
           )}
 
