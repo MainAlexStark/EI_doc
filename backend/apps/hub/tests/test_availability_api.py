@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -141,6 +142,9 @@ class RequestWithItemsTestCase(TestCase):
 
     def setUp(self) -> None:
         self.api = APIClient()
+        # См. комментарий в test_api.py.RequestCreateTestCase.setUp — тот же
+        # общий на весь прогон AnonRateThrottle.
+        cache.clear()
         self.water = MeasurementFamily.objects.create(
             code="water-meter", name="Счётчики воды", price=Decimal("500.00"), requires_time_slot=True
         )
@@ -154,6 +158,7 @@ class RequestWithItemsTestCase(TestCase):
             "contact_phone": "+7 (999) 000-00-00",
             "address": "г. Киров, ул. Ленина, 1",
             "items": [{"family_id": self.water.id, "quantity": 2}, {"family_id": self.scales.id, "quantity": 1}],
+            "consent_given": True,
         }
         data.update(overrides)
         return data
@@ -205,6 +210,7 @@ class RequestWithItemsTestCase(TestCase):
                 "contact_phone": "+7 (999) 000-00-00",
                 "address": "г. Киров, ул. Ленина, 1",
                 "si_description": "Манометр, 1 шт.",
+                "consent_given": True,
             },
             format="json",
         )

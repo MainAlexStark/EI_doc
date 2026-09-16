@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -68,6 +69,9 @@ class CaptchaConfigViewTestCase(TestCase):
 class RequestCreateWithCaptchaTestCase(TestCase):
     def setUp(self) -> None:
         self.api = APIClient()
+        # См. комментарий в test_api.py.RequestCreateTestCase.setUp — тот же
+        # общий на весь прогон AnonRateThrottle.
+        cache.clear()
 
     def payload(self, **overrides):
         data = {
@@ -75,6 +79,7 @@ class RequestCreateWithCaptchaTestCase(TestCase):
             "contact_phone": "+7 (999) 000-00-00",
             "address": "г. Киров, ул. Ленина, 1",
             "si_description": "Счётчик воды",
+            "consent_given": True,
         }
         data.update(overrides)
         return data
@@ -112,6 +117,7 @@ class RequestCreateWithoutCaptchaConfiguredTestCase(TestCase):
 
     def setUp(self) -> None:
         self.api = APIClient()
+        cache.clear()
 
     @override_settings(CAPTCHA_CLIENT_KEY="", CAPTCHA_SERVER_KEY="")
     def test_request_without_a_token_still_succeeds(self):
@@ -122,6 +128,7 @@ class RequestCreateWithoutCaptchaConfiguredTestCase(TestCase):
                 "contact_phone": "+7 (999) 000-00-00",
                 "address": "г. Киров, ул. Ленина, 1",
                 "si_description": "Счётчик воды",
+                "consent_given": True,
             },
             format="json",
         )

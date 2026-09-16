@@ -13,6 +13,7 @@ const money = (value: string | number) =>
 
 const STATUS_LABELS: Record<string, string> = {
   new: "новая", routed: "подобран исполнитель", confirmed: "подтверждена",
+  done: "выполнена", cancelled: "отменена",
   rejected: "отклонена", spam: "спам / дубль",
 };
 
@@ -114,6 +115,8 @@ export default function RequestsInbox() {
             <option value="new">новые</option>
             <option value="routed">подобран исполнитель</option>
             <option value="confirmed">подтверждены</option>
+            <option value="done">выполнены</option>
+            <option value="cancelled">отменены</option>
             <option value="rejected">отклонены</option>
             <option value="spam">спам / дубли</option>
           </select>

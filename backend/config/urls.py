@@ -43,6 +43,11 @@ from apps.verification.api_journal import (
     SignProtocolsView,
 )
 from apps.verification.api_field import WorkOrderVerificationsView
+from apps.verification.api_photos import (
+    VerificationPhotoDetailView,
+    VerificationPhotoImageView,
+    VerificationPhotosView,
+)
 from apps.verification.api_scan import (
     ScanApplyView,
     ScanDetailView,
@@ -101,6 +106,19 @@ urlpatterns = [
     path(
         "api/verifications/<int:pk>/measurements/confirm/",
         VerificationConfirmRowsView.as_view(), name="verification_confirm_rows",
+    ),
+    # Фото поверяемого СИ (по одной поверке — сколько угодно)
+    path(
+        "api/verifications/<int:pk>/photos/",
+        VerificationPhotosView.as_view(), name="verification_photos",
+    ),
+    path(
+        "api/verification-photos/<int:pk>/",
+        VerificationPhotoDetailView.as_view(), name="verification_photo_detail",
+    ),
+    path(
+        "api/verification-photos/<int:pk>/image/",
+        VerificationPhotoImageView.as_view(), name="verification_photo_image",
     ),
     # Заявки (EI_Hub)
     path("api/hub/address-suggest/", AddressSuggestView.as_view(), name="address_suggest"),

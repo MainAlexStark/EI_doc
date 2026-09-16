@@ -91,7 +91,11 @@ class WorkOrderStatusView(APIView):
 
     Обычно статус пересчитывается сам сигналом при закрытии поверок
     (apps.verification.signals); эта ручка — для отмены наряда и для
-    возврата из отмены, чего сигнал не делает.
+    возврата из отмены, чего сигнал не делает. Оба случая — ручная отмена и
+    ручной возврат — дальше отражаются на связанной заявке через
+    ``sync_request_status()`` (см. WorkOrder.refresh_status() docstring):
+    без этого вызова заявка при отменённом наряде так и оставалась бы
+    «Подтверждена», хотя по факту работа не состоится.
     """
 
     @extend_schema(request=WorkOrderStatusSerializer, responses={200: WorkOrderSerializer})
@@ -102,4 +106,5 @@ class WorkOrderStatusView(APIView):
         obj.status = payload.validated_data["status"]
         obj.closed_at = None if obj.status != WorkOrderStatus.DONE else obj.closed_at
         obj.save(update_fields=["status", "closed_at"])
+        obj.sync_request_status()
         return Response(WorkOrderSerializer(obj).data)

@@ -13,9 +13,16 @@ from apps.verification.models import (
     ScanUpload,
     Site,
     Verification,
+    VerificationPhoto,
     WorkOrder,
     WorkOrderStatus,
 )
+
+
+class VerificationPhotoInline(admin.TabularInline):
+    model = VerificationPhoto
+    extra = 0
+    readonly_fields = ["created_at"]
 
 
 @admin.register(Client)
@@ -46,6 +53,7 @@ class VerificationAdmin(SimpleHistoryAdmin):
     search_fields = ["instrument__serial_number"]
     date_hierarchy = "verified_at"
     filter_horizontal = ["standards"]
+    inlines = [VerificationPhotoInline]
 
     @admin.display(description="Условия")
     def conditions(self, obj: Verification):

@@ -152,11 +152,25 @@ class RequestCreateSerializer(serializers.Serializer):
     is_priority_slot = serializers.BooleanField(default=False)
     comment = serializers.CharField(required=False, allow_blank=True)
 
+    # Согласие на обработку персональных данных — обязательный чекбокс на
+    # форме (ст. 9 152-ФЗ «О персональных данных»); без него заявку не
+    # принять, поэтому это не default=False, а обязательное поле, которое
+    # ещё и проверяется на истинность в validate() ниже — не только на
+    # присутствие в теле запроса.
+    consent_given = serializers.BooleanField()
+
     # Honeypot: обычному человеку это поле не видно и незачем заполнять.
     website = serializers.CharField(required=False, allow_blank=True, default="")
     # Токен виджета Yandex SmartCaptcha — пусто, если капча не настроена
     # (apps.hub.captcha.is_configured()) или заявитель без JS.
     captcha_token = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_consent_given(self, value: bool) -> bool:
+        if not value:
+            raise serializers.ValidationError(
+                "Нужно согласие на обработку персональных данных, чтобы принять заявку"
+            )
+        return value
 
     def validate(self, data):
         if not (data.get("contact_phone") or data.get("contact_email")):
@@ -278,6 +292,7 @@ class RequestSerializer(serializers.Serializer):
     assigned_employee_id = serializers.IntegerField(allow_null=True)
     reject_reason = serializers.CharField()
     is_address_confirmed = serializers.BooleanField()
+    consent_given = serializers.BooleanField()
     created_at = serializers.DateTimeField()
 
 

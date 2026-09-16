@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest import mock
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -18,6 +19,10 @@ from apps.verification.models import WorkOrder
 class RequestCreateTestCase(TestCase):
     def setUp(self) -> None:
         self.api = APIClient()
+        # AnonRateThrottle (scope "anon", 20/час) считает по LocMemCache, который
+        # тесты не откатывают вместе с БД — без очистки бюджет утекает между
+        # файлами по порядку запуска, и не связанный с этим тест мог бы поймать 429.
+        cache.clear()
 
     def payload(self, **overrides):
         data = {
@@ -26,6 +31,7 @@ class RequestCreateTestCase(TestCase):
             "address": "г. Киров, ул. Ленина, 1",
             "district": "Ленинский район",
             "si_description": "Счётчик воды",
+            "consent_given": True,
         }
         data.update(overrides)
         return data
@@ -36,6 +42,20 @@ class RequestCreateTestCase(TestCase):
         obj = Request.objects.get(pk=response.data["id"])
         assert obj.status == RequestStatus.ROUTED  # роутинг срабатывает сразу
         assert obj.district.name == "Ленинский район"
+        assert obj.consent_given is True
+
+    def test_missing_consent_is_rejected(self):
+        response = self.api.post(
+            reverse("request_create"), self.payload(consent_given=False), format="json"
+        )
+        assert response.status_code == 400
+        assert "consent_given" in response.data
+
+    def test_absent_consent_field_is_rejected(self):
+        payload = self.payload()
+        del payload["consent_given"]
+        response = self.api.post(reverse("request_create"), payload, format="json")
+        assert response.status_code == 400
 
     def test_missing_contact_is_rejected(self):
         response = self.api.post(

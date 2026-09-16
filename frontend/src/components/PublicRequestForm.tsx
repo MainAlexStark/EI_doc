@@ -38,12 +38,23 @@ const EMPTY: ContactState = {
   website: "",
 };
 
+const CONSENT_TEXT =
+  "Я даю ООО «Единица Измерения» согласие на обработку указанных в этой форме " +
+  "персональных данных (имя или наименование организации, телефон, email, адрес " +
+  "объекта поверки) в целях обработки настоящей заявки и связи со мной по вопросам " +
+  "поверки средств измерений — сбор, систематизацию, хранение, использование, " +
+  "уточнение и удаление, в том числе с использованием средств автоматизации, " +
+  "в соответствии с Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных " +
+  "данных». Согласие действует до его отзыва по запросу, направленному любым " +
+  "удобным способом.";
+
 const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
 
 /** Публичная форма заявки — /zayavka/. Без авторизации, без вкладок EI_doc. */
 export default function PublicRequestForm() {
   const [form, setForm] = useState<ContactState>(EMPTY);
+  const [consentGiven, setConsentGiven] = useState(false);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [addressConfirmed, setAddressConfirmed] = useState(false);
   const [suggestConfigured, setSuggestConfigured] = useState(true);
@@ -274,6 +285,10 @@ export default function PublicRequestForm() {
       setError("Подтвердите, что вы не робот");
       return;
     }
+    if (!consentGiven) {
+      setError("Нужно согласие на обработку персональных данных, чтобы отправить заявку");
+      return;
+    }
 
     const desiredDate = chosenDate || null;
     const desiredTime = needsTime && chosenDate ? chosenTime || null : null;
@@ -285,6 +300,7 @@ export default function PublicRequestForm() {
       desired_time: desiredTime,
       is_priority_slot: chosenPriority && Boolean(desiredDate),
       is_address_confirmed: addressConfirmed,
+      consent_given: consentGiven,
       captcha_token: captchaToken || undefined,
     };
 
@@ -515,6 +531,21 @@ export default function PublicRequestForm() {
             onChange={(event) => update({ comment: event.target.value })}
             placeholder="Что-то уточнить об адресе, доступе, приборах..."
           />
+        </div>
+
+        <div className="field">
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={consentGiven}
+              onChange={(event) => setConsentGiven(event.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span className="sub">
+              {CONSENT_TEXT}
+              <span className="req"> *</span>
+            </span>
+          </label>
         </div>
 
         <div className="field captcha-field" style={{ display: captchaConfigured ? "block" : "none" }}>

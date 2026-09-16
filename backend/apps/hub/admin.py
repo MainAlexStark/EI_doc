@@ -52,6 +52,8 @@ class RequestAdmin(admin.ModelAdmin):
             RequestStatus.NEW: "#6E7A7E",
             RequestStatus.ROUTED: "#0E6E75",
             RequestStatus.CONFIRMED: "#2C6B4C",
+            RequestStatus.DONE: "#2C6B4C",
+            RequestStatus.CANCELLED: "#9E362E",
             RequestStatus.REJECTED: "#9E362E",
             RequestStatus.SPAM: "#9E362E",
         }

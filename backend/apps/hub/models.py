@@ -26,6 +26,8 @@ class RequestStatus(models.TextChoices):
     NEW = "new", "Новая"
     ROUTED = "routed", "Подобран исполнитель"
     CONFIRMED = "confirmed", "Подтверждена"  # наряд создан
+    DONE = "done", "Выполнена"  # наряд закрыт — см. WorkOrder.sync_request_status()
+    CANCELLED = "cancelled", "Отменена"  # наряд отменён — см. WorkOrder.sync_request_status()
     REJECTED = "rejected", "Отклонена"
     SPAM = "spam", "Спам / дубль"
 
@@ -185,6 +187,11 @@ class Request(models.Model):
         help_text="Снимок PricingSettings.priority_discount_percent на момент отправки",
     )
     comment = models.TextField("комментарий", blank=True)
+
+    consent_given = models.BooleanField(
+        "согласие на обработку персональных данных", default=False,
+        help_text="Отметка чекбокса на публичной форме — обязательна для отправки (ст. 9 152-ФЗ)",
+    )
 
     suggested_employee = models.ForeignKey(
         "core.Employee", on_delete=models.SET_NULL, null=True, blank=True,

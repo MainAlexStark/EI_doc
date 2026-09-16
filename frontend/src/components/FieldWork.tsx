@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  deleteVerificationPhoto,
   downloadBlank,
+  fetchVerificationPhotoUrl,
+  fetchVerificationPhotos,
   fetchWorkOrderScans,
   fetchWorkOrders,
   suggestSiTypes,
   uploadScan,
+  uploadVerificationPhoto,
   type FieldVerification,
   type LayoutsResponse,
   type Me,
@@ -13,6 +17,7 @@ import {
   type MeasurementsResult,
   type ScanUploadResult,
   type SiTypeSuggestion,
+  type VerificationPhoto,
   type WorkOrder,
 } from "../api";
 import ScanReview from "./ScanReview";
@@ -41,6 +46,124 @@ function StatusBadge({ v }: { v: CachedVerification }) {
   if (v.status === "ready") return <span className="pill ok">готова</span>;
   if (v.status === "accepted") return <span className="pill ok">принята</span>;
   return <span className="pill muted">черновик</span>;
+}
+
+/** Фото конкретного СИ — табличка, повреждение, место установки и т. п.
+ * В отличие от измерений это НЕ идёт в офлайн-очередь (см. models.py
+ * VerificationPhoto): требует, чтобы поверка уже была на сервере, т. е.
+ * server_id — до синхронизации кнопка просто объясняет, почему фото пока
+ * приложить нельзя. */
+function PhotosPanel({ verification }: { verification: CachedVerification }) {
+  const serverId = verification.server_id;
+  const [photos, setPhotos] = useState<VerificationPhoto[]>([]);
+  const [urls, setUrls] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const reload = useCallback(async () => {
+    if (serverId == null) return;
+    try {
+      setPhotos(await fetchVerificationPhotos(serverId));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось загрузить фото");
+    }
+  }, [serverId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const next: Record<number, string> = {};
+      for (const photo of photos) {
+        try {
+          next[photo.id] = await fetchVerificationPhotoUrl(photo.id);
+        } catch {
+          /* одно неудачное фото не должно ломать остальные */
+        }
+      }
+      if (!cancelled) setUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [photos]);
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || serverId == null) return;
+    setBusy(true);
+    setError("");
+    try {
+      await uploadVerificationPhoto(serverId, file);
+      await reload();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось загрузить фото");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (photoId: number) => {
+    setBusy(true);
+    setError("");
+    try {
+      await deleteVerificationPhoto(photoId);
+      await reload();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось удалить фото");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (serverId == null) {
+    return (
+      <div className="field">
+        <h4>Фото прибора</h4>
+        <p className="hint">Появится после отправки СИ на сервер — сейчас оно ещё в очереди.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="field">
+      <h4>Фото прибора</h4>
+      {photos.length === 0 && <p className="sub">Пока фото нет</p>}
+      {photos.length > 0 && (
+        <div className="photo-grid">
+          {photos.map((photo) => (
+            <div className="photo-thumb" key={photo.id}>
+              {urls[photo.id] ? (
+                <img src={urls[photo.id]} alt={photo.caption || "фото СИ"} />
+              ) : (
+                <span className="sub">загрузка…</span>
+              )}
+              <button type="button" onClick={() => void handleDelete(photo.id)} disabled={busy}>
+                Удалить
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>
+        {busy ? "Загружаю…" : "Добавить фото"}
+      </button>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={(event) => void handleUpload(event)}
+      />
+      {error && <div className="error">{error}</div>}
+    </div>
+  );
 }
 
 function AddInstrumentForm({
@@ -695,6 +818,7 @@ export default function FieldWork({ me }: { me: Me | null }) {
           {activeVerification && layoutsInfo && (
             <MeasurementForm verification={activeVerification} layoutsInfo={layoutsInfo} onSaved={() => void reloadVerifications()} />
           )}
+          {activeVerification && <PhotosPanel verification={activeVerification} />}
         </>
       )}
     </>

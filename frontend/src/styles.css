@@ -261,6 +261,15 @@ textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--acce
 }
 .item-list li .name { flex: 1; }
 .item-list li input[type="number"] { width: 56px; }
+
+.photo-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
+.photo-thumb {
+  width: 120px; display: flex; flex-direction: column; gap: 4px; align-items: stretch;
+}
+.photo-thumb img {
+  width: 120px; height: 120px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line);
+  background: var(--surface-2);
+}
 .item-list li .price { font-variant-numeric: tabular-nums; min-width: 80px; text-align: right; }
 
 .price-box {

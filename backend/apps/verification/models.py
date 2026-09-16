@@ -435,6 +435,49 @@ class ScanUpload(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Фото прибора при поверке
+# ---------------------------------------------------------------------------
+class VerificationPhoto(models.Model):
+    """Рабочее фото конкретного СИ, привязанное к поверке.
+
+    Не путать со ``ScanUpload`` — тот один на бланк целиком и существует ради
+    OCR/VLM-распознавания показаний (второй срез офлайна, см.
+    ``claude/scans.md``). Здесь же — просто фото прибора (табличка,
+    повреждение, место установки), без какого-либо распознавания, любое их
+    число на одну поверку.
+
+    Как и ``ScanUpload``, привязка к поверке, а не напрямую к экземпляру СИ
+    (``Instrument``): один и тот же прибор поверяется многократно, и фото с
+    конкретного выезда должно остаться при конкретном акте, а не расплыться
+    по всей истории прибора.
+
+    Загрузка — только при наличии связи (см. FieldWork.tsx): в отличие от
+    самих измерений (``offline/sync.ts``), фото в офлайн-очередь пока не
+    ставятся — большие файлы в IndexedDB и без того ограниченной офлайн-базы
+    того не стоили на этом этапе.
+    """
+
+    verification = models.ForeignKey(
+        Verification, on_delete=models.CASCADE, related_name="photos", verbose_name="поверка",
+    )
+    uploaded_by = models.ForeignKey(
+        "core.Employee", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="verification_photos", verbose_name="загрузил",
+    )
+    image = models.ImageField("фото", upload_to="verification_photos/%Y/%m/")
+    caption = models.CharField("подпись", max_length=200, blank=True)
+    created_at = models.DateTimeField("создано", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "фото СИ"
+        verbose_name_plural = "фото СИ"
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"Фото поверки №{self.verification_id} от {self.created_at:%d.%m.%Y %H:%M}"
+
+
+# ---------------------------------------------------------------------------
 # Наряды
 # ---------------------------------------------------------------------------
 class WorkOrderStatus(models.TextChoices):
@@ -511,10 +554,51 @@ class WorkOrder(models.Model):
             self.status = WorkOrderStatus.DONE
             self.closed_at = timezone.now()
             self.save(update_fields=["status", "closed_at"])
+            self.sync_request_status()
         elif not all_accepted and self.status in (WorkOrderStatus.PLANNED, WorkOrderStatus.DONE):
             # DONE -> IN_PROGRESS: нормоконтроль вернул один из протоколов на
             # доработку уже после закрытия наряда — наряд открывается снова.
             self.status = WorkOrderStatus.IN_PROGRESS
             self.closed_at = None
             self.save(update_fields=["status", "closed_at"])
+            self.sync_request_status()
+
+    def sync_request_status(self) -> None:
+        """Отразить свой статус на заявке, из которой заведён (если заведён).
+
+        До этого метода наряд можно было отменить (или вернуть из отмены)
+        вручную (``WorkOrderStatusView``), а заявка так и оставалась
+        «Подтверждена» — работник не мог увидеть по заявке, что с ней
+        случилось дальше. Теперь наряд — источник истины для судьбы заявки:
+
+        * DONE      -> заявка DONE
+        * CANCELLED -> заявка CANCELLED
+        * иначе     -> заявка CONFIRMED (в т. ч. возврат из DONE/CANCELLED,
+          если наряд открыли заново)
+
+        Заявку, которую диспетчер уже отклонил или пометил спамом
+        (REJECTED/SPAM), а также ещё не подтверждённую (NEW/ROUTED), наряд не
+        трогает — таких сочетаний в обычном пути не бывает (наряд заводится
+        только при подтверждении заявки), но это защита от неожиданностей,
+        а не часть сценария.
+
+        Вызывается и из ``refresh_status()`` (автопересчёт по поверкам), и из
+        ``WorkOrderStatusView`` (ручная отмена/возврат — при CANCELLED
+        ``refresh_status()`` выходит на первой строке и сюда не доходит).
+        """
+        if self.request_id is None:
+            return
+        from apps.hub.models import RequestStatus  # локально — без цикла на уровне модулей
+
+        request = self.request
+        if request.status not in (RequestStatus.CONFIRMED, RequestStatus.DONE, RequestStatus.CANCELLED):
+            return
+        mapping = {
+            WorkOrderStatus.DONE: RequestStatus.DONE,
+            WorkOrderStatus.CANCELLED: RequestStatus.CANCELLED,
+        }
+        new_status = mapping.get(self.status, RequestStatus.CONFIRMED)
+        if request.status != new_status:
+            request.status = new_status
+            request.save(update_fields=["status"])
 

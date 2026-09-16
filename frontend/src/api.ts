@@ -254,6 +254,7 @@ export type RequestPayload = {
   desired_time?: string | null;
   is_priority_slot?: boolean;
   comment?: string;
+  consent_given: boolean;
   website?: string; // honeypot — держать пустым
   captcha_token?: string;
 };
@@ -307,6 +308,7 @@ export type HubRequest = {
   assigned_employee_id: number | null;
   reject_reason: string;
   is_address_confirmed: boolean;
+  consent_given: boolean;
   created_at: string;
 };
 
@@ -719,3 +721,41 @@ export const applyScan = (scanId: number, payload: ScanApplyPayload) =>
     method: "POST",
     body: JSON.stringify(payload),
   });
+
+// ---------------------------------------------------------------------------
+// Фото поверяемого СИ (по одной поверке — сколько угодно)
+// ---------------------------------------------------------------------------
+export type VerificationPhoto = {
+  id: number;
+  verification: number;
+  caption: string;
+  uploaded_by: string;
+  created_at: string;
+  image_url: string;
+};
+
+export const fetchVerificationPhotos = (verificationId: number) =>
+  json<VerificationPhoto[]>(`/api/verifications/${verificationId}/photos/`);
+
+/** Требует, чтобы поверка уже была на сервере — офлайн-черновик (без server_id) фото пока не принимает. */
+export async function uploadVerificationPhoto(
+  verificationId: number,
+  file: File,
+  caption = "",
+): Promise<VerificationPhoto> {
+  const body = new FormData();
+  body.append("photo", file);
+  if (caption) body.append("caption", caption);
+  return json<VerificationPhoto>(`/api/verifications/${verificationId}/photos/`, { method: "POST", body });
+}
+
+export const deleteVerificationPhoto = (photoId: number) =>
+  json<void>(`/api/verification-photos/${photoId}/`, { method: "DELETE" });
+
+/** Фото как blob-URL — эндпоинт защищён токеном, обычный <img src> его не подставит. */
+export async function fetchVerificationPhotoUrl(photoId: number): Promise<string> {
+  const response = await call(`/api/verification-photos/${photoId}/image/`);
+  if (!response.ok) throw new ApiError(`Не удалось загрузить фото (${response.status})`, response.status);
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
