@@ -26,15 +26,19 @@ USAGE_EXTRA='
 именно это доступ (см. docs/architecture.md).
 
 Капча (CAPTCHA_CLIENT_KEY/CAPTCHA_SERVER_KEY, Yandex SmartCaptcha), подсказка
-адреса (DADATA_API_KEY) и уведомления в Telegram (TELEGRAM_BOT_TOKEN,
-необязательно TELEGRAM_BOT_USERNAME) — тоже необязательны: если их ещё нет,
+адреса (DADATA_API_KEY), уведомления в Telegram (TELEGRAM_BOT_TOKEN,
+необязательно TELEGRAM_BOT_USERNAME) и распознавание бумажных бланков
+(YANDEX_VISION_API_KEY/YANDEX_VISION_FOLDER_ID, Yandex AI Studio,
+необязательно YANDEX_VISION_MODEL) — тоже необязательны: если их ещё нет,
 ./deploy.sh спрашивает при каждом запуске и обновлении (Enter — пропустить
 вопрос, спросит снова в следующий раз). Пока не заданы, деградирует мягко:
 форма заявки защищена только honeypot-полем без виджета капчи, показывает
 обычное текстовое поле адреса вместо подсказки с районом, уведомления только
-пишутся в лог. TELEGRAM_WEBHOOK_SECRET генерируется сам, как SECRET_KEY, —
-как только появится TELEGRAM_BOT_TOKEN, вебхук регистрируется сам при каждом
-запуске контейнера (см. claude/hub.md).'
+пишутся в лог, фото бланка со скана заводится без распознавания — поверитель
+заполняет поля вручную, глядя на то же фото (см. claude/scans.md).
+TELEGRAM_WEBHOOK_SECRET генерируется сам, как SECRET_KEY, — как только
+появится TELEGRAM_BOT_TOKEN, вебхук регистрируется сам при каждом запуске
+контейнера (см. claude/hub.md).'
 
 set -euo pipefail
 
@@ -285,6 +289,9 @@ cmd_install() {
   prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
   prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
   prompt_secret "TELEGRAM_BOT_USERNAME" "Имя Telegram-бота без @ — для подсказки в профиле сотрудника (необязательно)"
+  prompt_secret "YANDEX_VISION_API_KEY" "API-ключ Yandex AI Studio — распознавание бумажных бланков со сканов (https://yandex.cloud/docs/ai-studio/)"
+  prompt_secret "YANDEX_VISION_FOLDER_ID" "ID каталога Yandex Cloud для того же ключа"
+  prompt_secret "YANDEX_VISION_MODEL" "Код модели в AI Studio (необязательно — по умолчанию qwen3.6-35b-a3b)"
 
   step "инфраструктура"
   ensure_network
@@ -326,6 +333,9 @@ cmd_update() {
   prompt_secret "DADATA_API_KEY" "Ключ DaData — подсказка адреса на форме заявки (https://dadata.ru)"
   prompt_secret "TELEGRAM_BOT_TOKEN" "Токен Telegram-бота — уведомления о нарядах и задачах (@BotFather)"
   prompt_secret "TELEGRAM_BOT_USERNAME" "Имя Telegram-бота без @ — для подсказки в профиле сотрудника (необязательно)"
+  prompt_secret "YANDEX_VISION_API_KEY" "API-ключ Yandex AI Studio — распознавание бумажных бланков со сканов (https://yandex.cloud/docs/ai-studio/)"
+  prompt_secret "YANDEX_VISION_FOLDER_ID" "ID каталога Yandex Cloud для того же ключа"
+  prompt_secret "YANDEX_VISION_MODEL" "Код модели в AI Studio (необязательно — по умолчанию qwen3.6-35b-a3b)"
 
   local before
   before="$(git rev-parse HEAD)"
