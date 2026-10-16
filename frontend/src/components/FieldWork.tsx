@@ -6,7 +6,6 @@ import {
   fetchVerificationPhotos,
   fetchWorkOrderScans,
   fetchWorkOrders,
-  suggestSiTypes,
   uploadScan,
   uploadVerificationPhoto,
   type FieldVerification,
@@ -16,11 +15,11 @@ import {
   type MeasurementsPayload,
   type MeasurementsResult,
   type ScanUploadResult,
-  type SiTypeSuggestion,
   type VerificationPhoto,
   type WorkOrder,
 } from "../api";
 import ScanReview from "./ScanReview";
+import SiTypePicker, { type PickedType } from "./SiTypePicker";
 import {
   addVerification,
   flush,
@@ -29,23 +28,40 @@ import {
   loadLayouts,
   outboxErrors,
   pendingCount,
+  refreshSiTypeCache,
   removeOutboxItem,
   saveMeasurements,
   subscribe,
 } from "../offline/sync";
 import type { CachedVerification, OutboxItem } from "../offline/db";
 
-/** Экран поверителя: наряд → приборы по нему → ввод измерений — рассчитан на
- * работу без связи (см. src/offline/sync.ts). Раскладка измерений сейчас
- * только для счётчиков воды (apps.verification.calculators.water_meter —
- * единственный подключённый калькулятор на бэкенде). */
+/** Экран поверителя: наряд → счётчики по нему → измерения. Рассчитан на
+ * телефон и на работу без связи (см. src/offline/sync.ts). Раскладка
+ * измерений сейчас только для счётчиков воды
+ * (apps.verification.calculators.water_meter — единственный калькулятор).
+ *
+ * Устроен как три шага с крупными кнопками вместо одной длинной страницы:
+ * сначала карточки нарядов, потом список счётчиков наряда, потом измерения
+ * одного счётчика. Бумажный бланк для режимных объектов убран в
+ * раскрывающийся блок — он нужен редко. */
 
 function StatusBadge({ v }: { v: CachedVerification }) {
   if (v.sync_state === "pending") return <span className="pill warn">не отправлено</span>;
   if (v.needs_review) return <span className="pill warn">на сверку</span>;
   if (v.status === "ready") return <span className="pill ok">готова</span>;
   if (v.status === "accepted") return <span className="pill ok">принята</span>;
-  return <span className="pill muted">черновик</span>;
+  return <span className="pill muted">нет измерений</span>;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "без даты";
+  const date = new Date(value);
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  if (date.toDateString() === today.toDateString()) return "сегодня";
+  if (date.toDateString() === tomorrow.toDateString()) return "завтра";
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
 }
 
 /** Фото конкретного СИ — табличка, повреждение, место установки и т. п.
@@ -123,17 +139,17 @@ function PhotosPanel({ verification }: { verification: CachedVerification }) {
 
   if (serverId == null) {
     return (
-      <div className="field">
+      <div className="card">
         <h4>Фото прибора</h4>
-        <p className="hint">Появится после отправки СИ на сервер — сейчас оно ещё в очереди.</p>
+        <p className="hint">Можно будет добавить, когда счётчик отправится на сервер — сейчас он ещё в очереди.</p>
       </div>
     );
   }
 
   return (
-    <div className="field">
+    <div className="card">
       <h4>Фото прибора</h4>
-      {photos.length === 0 && <p className="sub">Пока фото нет</p>}
+      {photos.length === 0 && <p className="sub">Пока фото нет — сфотографируйте табличку или повреждение, если нужно</p>}
       {photos.length > 0 && (
         <div className="photo-grid">
           {photos.map((photo) => (
@@ -150,8 +166,8 @@ function PhotosPanel({ verification }: { verification: CachedVerification }) {
           ))}
         </div>
       )}
-      <button type="button" onClick={() => fileInput.current?.click()} disabled={busy}>
-        {busy ? "Загружаю…" : "Добавить фото"}
+      <button type="button" className="big" onClick={() => fileInput.current?.click()} disabled={busy}>
+        {busy ? "Загружаю…" : "📷 Сфотографировать"}
       </button>
       <input
         ref={fileInput}
@@ -169,119 +185,91 @@ function PhotosPanel({ verification }: { verification: CachedVerification }) {
 function AddInstrumentForm({
   workOrderId,
   onAdded,
+  onCancel,
 }: {
   workOrderId: number;
   onAdded: (v: CachedVerification) => void;
+  onCancel: () => void;
 }) {
-  const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<SiTypeSuggestion[]>([]);
-  const [showList, setShowList] = useState(false);
-  const [siTypeId, setSiTypeId] = useState<number | null>(null);
+  const [siType, setSiType] = useState<PickedType | null>(null);
+  const [drafting, setDrafting] = useState(false);
   const [serial, setSerial] = useState("");
   const [year, setYear] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const debounce = useRef<ReturnType<typeof setTimeout>>();
-
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    if (siTypeId || query.trim().length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    debounce.current = setTimeout(async () => {
-      const response = await suggestSiTypes(query);
-      // Полевой экран работает только с уже заведёнными типами СИ — карточка
-      // из ФИФ (si_type_id === null) требует отдельного шага заведения типа,
-      // это вне этого экрана и вне офлайн-режима (нужна связь с ФИФ).
-      setSuggestions(response.results.filter((item) => item.si_type_id !== null));
-      setShowList(true);
-    }, 300);
-    return () => clearTimeout(debounce.current);
-  }, [query, siTypeId]);
-
-  const pick = (item: SiTypeSuggestion) => {
-    setSiTypeId(item.si_type_id);
-    setQuery(item.label);
-    setShowList(false);
-  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!siTypeId) {
-      setError("Выберите тип СИ из списка подсказок");
+    if (!siType) {
+      setError("Сначала выберите тип счётчика");
       return;
     }
     if (!serial.trim()) {
-      setError("Укажите заводской номер");
+      setError("Впишите заводской номер");
       return;
     }
     setBusy(true);
     setError("");
     try {
       const created = await addVerification(workOrderId, {
-        si_type_id: siTypeId,
+        si_type_id: siType.id,
         serial_number: serial.trim(),
         manufacture_year: year ? Number(year) : null,
       });
       onAdded(created);
-      setSiTypeId(null);
-      setQuery("");
-      setSerial("");
-      setYear("");
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Не удалось добавить СИ");
+      setError(exc instanceof Error ? exc.message : "Не удалось добавить счётчик");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <form className="new-slot-form" onSubmit={submit}>
-      <div className="field-row">
-        <div className="field suggest-field">
-          <label htmlFor="fw-si-type">Тип СИ</label>
-          <input
-            id="fw-si-type"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setSiTypeId(null);
-            }}
-            onFocus={() => setShowList(suggestions.length > 0)}
-            onBlur={() => setTimeout(() => setShowList(false), 150)}
-            placeholder="номер в Госреестре или наименование"
-            autoComplete="off"
-          />
-          {showList && (
-            <ul className="suggestions">
-              {suggestions.length === 0 && <li className="sub">Совпадений в системе нет — заведите тип через админку</li>}
-              {suggestions.map((item) => (
-                <li key={`${item.registry_number}-${item.manufacturer}`} onMouseDown={() => pick(item)}>
-                  <span>{item.label}</span>
-                </li>
-              ))}
-            </ul>
+    <form className="card" onSubmit={submit}>
+      <h3>Новый счётчик</h3>
+      <SiTypePicker value={siType} onChange={setSiType} inputId="fw-si-type" onDraftChange={setDrafting} />
+
+      {siType && (
+        <>
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="fw-serial">Заводской номер<span className="req">*</span></label>
+              <input
+                id="fw-serial"
+                className="big-input"
+                value={serial}
+                onChange={(event) => setSerial(event.target.value)}
+                placeholder="с корпуса счётчика"
+                autoFocus
+              />
+            </div>
+            <div className="field" style={{ maxWidth: 160 }}>
+              <label htmlFor="fw-year">Год выпуска</label>
+              <input
+                id="fw-year"
+                className="big-input"
+                inputMode="numeric"
+                value={year}
+                onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder="если есть"
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {!drafting && (
+        <div className="actions">
+          {siType && (
+            <button className="primary big" type="submit" disabled={busy}>
+              {busy ? "Добавляю…" : "Добавить и перейти к измерениям"}
+            </button>
           )}
+          <button type="button" onClick={onCancel} disabled={busy}>
+            Отмена
+          </button>
         </div>
-        <div className="field">
-          <label htmlFor="fw-serial">Зав. номер</label>
-          <input id="fw-serial" value={serial} onChange={(event) => setSerial(event.target.value)} placeholder="№" />
-        </div>
-        <div className="field">
-          <label htmlFor="fw-year">Год выпуска</label>
-          <input
-            id="fw-year"
-            value={year}
-            onChange={(event) => setYear(event.target.value.replace(/\D/g, ""))}
-            placeholder="необязательно"
-            style={{ width: 100 }}
-          />
-        </div>
-      </div>
-      <button className="primary" type="submit" disabled={busy}>
-        {busy ? "Добавляю…" : "Добавить СИ"}
-      </button>
+      )}
       {error && <div className="error">{error}</div>}
     </form>
   );
@@ -296,9 +284,60 @@ type RowState = {
   volume_meter: string;
 };
 
+type VolumeMethod = "readings" | "pulses" | "direct";
+
 const emptyRow = (): RowState => ({
   flow_rate: "", volume_standard: "", reading_start: "", reading_end: "", pulses: "", volume_meter: "",
 });
+
+const LAYOUT_LABELS: Record<string, string> = {
+  compact3: "3 пролива (обычная)",
+  extended9: "9 проливов (полная)",
+};
+
+function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="segmented">
+      {options.map((option) => (
+        <button
+          type="button"
+          key={option.value}
+          className={value === option.value ? "active" : ""}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function NumberInput({
+  label,
+  value,
+  onChange,
+  id,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  id: string;
+}) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input id={id} inputMode="decimal" className="big-input" value={value} onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
 
 function MeasurementForm({
   verification,
@@ -315,6 +354,7 @@ function MeasurementForm({
   const [pulseWeight, setPulseWeight] = useState("");
   const [unitType, setUnitType] = useState("");
   const [waterTemp, setWaterTemp] = useState("");
+  const [method, setMethod] = useState<VolumeMethod>("readings");
   const [checks, setChecks] = useState<Record<string, boolean>>(
     Object.fromEntries(Object.keys(layoutsInfo.checks).map((key) => [key, true])),
   );
@@ -327,7 +367,19 @@ function MeasurementForm({
   }, [layout]);
 
   const updateRow = (index: number, patch: Partial<RowState>) =>
-    setRows((current) => current.map((row, idx) => (idx === index ? { ...row, ...patch } : row)));
+    setRows((current) => {
+      const next = current.map((row, idx) => (idx === index ? { ...row, ...patch } : row));
+      // Показания в конце пролива — это показания в начале следующего:
+      // подставляем, если поверитель туда ещё ничего не вписал.
+      if (patch.reading_end !== undefined && next[index + 1]) {
+        const following = next[index + 1];
+        const previousEnd = current[index]?.reading_end ?? "";
+        if (!following.reading_start || following.reading_start === previousEnd) {
+          next[index + 1] = { ...following, reading_start: patch.reading_end };
+        }
+      }
+      return next;
+    });
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -339,7 +391,13 @@ function MeasurementForm({
   // нельзя). См. apps.verification.measurements.apply().
   const [manualUnsuitable, setManualUnsuitable] = useState(false);
   const [manualReason, setManualReason] = useState("");
-  const [reasonPreset, setReasonPreset] = useState("");
+
+  const volumeFilled = (row: RowState) =>
+    method === "readings"
+      ? Boolean(row.reading_start.trim() && row.reading_end.trim())
+      : method === "pulses"
+        ? Boolean(row.pulses.trim())
+        : Boolean(row.volume_meter.trim());
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -348,12 +406,19 @@ function MeasurementForm({
     setQueuedNotice(false);
 
     const allRowsEmpty = rows.every((row) => !row.flow_rate.trim() && !row.volume_standard.trim());
-    const allRowsFilled = rows.every((row) => row.flow_rate.trim() && row.volume_standard.trim());
-    if (!allRowsFilled && !(manualUnsuitable && allRowsEmpty)) {
+    const incomplete = rows.findIndex(
+      (row) => !(row.flow_rate.trim() && row.volume_standard.trim() && volumeFilled(row)),
+    );
+    if (incomplete >= 0 && !(manualUnsuitable && allRowsEmpty)) {
       setError(
-        "Заполните расход и объём по эталону во всех строках — либо, если прибор физически " +
-          "не проверить (разбит, заклинило), отметьте «Непригоден» и оставьте таблицу пустой",
+        `Не заполнен пролив ${incomplete + 1}: нужны расход, объём по эталону и ` +
+          (method === "readings" ? "показания счётчика в начале и в конце" : method === "pulses" ? "импульсы" : "объём по счётчику") +
+          ". Если прибор физически не проверить — отметьте «Непригоден» ниже и оставьте проливы пустыми.",
       );
+      return;
+    }
+    if (method === "pulses" && !pulseWeight.trim() && !(manualUnsuitable && allRowsEmpty)) {
+      setError("Для подсчёта по импульсам укажите коэффициент K (литров на импульс)");
       return;
     }
     if (manualUnsuitable && !manualReason.trim()) {
@@ -377,10 +442,14 @@ function MeasurementForm({
             ? []
             : rows.map((row): MeasurementRowPayload => {
                 const built: MeasurementRowPayload = { flow_rate: row.flow_rate, volume_standard: row.volume_standard };
-                if (row.reading_start) built.reading_start = row.reading_start;
-                if (row.reading_end) built.reading_end = row.reading_end;
-                if (row.pulses) built.pulses = Number(row.pulses);
-                if (row.volume_meter) built.volume_meter = row.volume_meter;
+                if (method === "readings") {
+                  built.reading_start = row.reading_start;
+                  built.reading_end = row.reading_end;
+                } else if (method === "pulses") {
+                  built.pulses = Number(row.pulses);
+                } else {
+                  built.volume_meter = row.volume_meter;
+                }
                 return built;
               }),
       };
@@ -396,167 +465,210 @@ function MeasurementForm({
   };
 
   return (
-    <form className="new-slot-form" onSubmit={submit}>
-      <h4>
-        {verification.si_type_name || "СИ"} № {verification.serial_number}
-      </h4>
-      <div className="field-row">
-        <div className="field">
-          <label htmlFor="fw-layout">Раскладка</label>
-          <select id="fw-layout" value={layout} onChange={(event) => setLayout(event.target.value)}>
-            {layoutKeys.map((key) => (
-              <option key={key} value={key}>
-                {key === "compact3" ? "короткая (3 пролива)" : key === "extended9" ? "полная (9 проливов)" : key}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="fw-class">Класс</label>
-          <select id="fw-class" value={meterClass} onChange={(event) => setMeterClass(event.target.value)}>
-            {layoutsInfo.classes.map((item) => (
-              <option key={item} value={item}>{item}</option>
-            ))}
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="fw-unit">Тип счётчика</label>
-          <select id="fw-unit" value={unitType} onChange={(event) => setUnitType(event.target.value)}>
-            <option value="">—</option>
-            <option value="г/в">горячая вода</option>
-            <option value="х/в">холодная вода</option>
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="fw-pulse">Коэфф. импульсов K</label>
-          <input
-            id="fw-pulse"
-            value={pulseWeight}
-            onChange={(event) => setPulseWeight(event.target.value)}
-            placeholder="необязательно"
-            style={{ width: 110 }}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="fw-water-temp">Темп. воды, °C</label>
-          <input
-            id="fw-water-temp"
-            value={waterTemp}
-            onChange={(event) => setWaterTemp(event.target.value)}
-            placeholder="необязательно"
-            style={{ width: 110 }}
-          />
-        </div>
-      </div>
+    <form className="card" onSubmit={submit}>
+      <h3>Измерения</h3>
 
-      <div className="filters">
-        {Object.entries(layoutsInfo.checks).map(([key, label]) => (
-          <label key={key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="checkbox"
-              checked={checks[key] ?? true}
-              onChange={(event) => setChecks((current) => ({ ...current, [key]: event.target.checked }))}
+      <div className="form-grid">
+        <div className="field">
+          <label>Вода</label>
+          <Segmented
+            value={unitType}
+            onChange={setUnitType}
+            options={[
+              { value: "х/в", label: "Холодная" },
+              { value: "г/в", label: "Горячая" },
+            ]}
+          />
+        </div>
+        <div className="field">
+          <label>Класс</label>
+          <Segmented
+            value={meterClass}
+            onChange={setMeterClass}
+            options={layoutsInfo.classes.map((item) => ({ value: item, label: item }))}
+          />
+        </div>
+        {layoutKeys.length > 1 && (
+          <div className="field">
+            <label>Сколько проливов</label>
+            <Segmented
+              value={layout}
+              onChange={setLayout}
+              options={layoutKeys.map((key) => ({ value: key, label: LAYOUT_LABELS[key] ?? key }))}
             />
-            {label}
-          </label>
-        ))}
+          </div>
+        )}
       </div>
 
-      <div className="field" style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 10 }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div className="field">
+        <label>Объём по счётчику считаю</label>
+        <Segmented
+          value={method}
+          onChange={setMethod}
+          options={[
+            { value: "readings", label: "по показаниям" },
+            { value: "pulses", label: "по импульсам" },
+            { value: "direct", label: "вписываю сам" },
+          ]}
+        />
+      </div>
+      {method === "pulses" && (
+        <div className="field" style={{ maxWidth: 260 }}>
+          <label htmlFor="fw-pulse">Коэффициент K, л/имп.<span className="req">*</span></label>
+          <input id="fw-pulse" className="big-input" inputMode="decimal" value={pulseWeight} onChange={(e) => setPulseWeight(e.target.value)} />
+        </div>
+      )}
+
+      <div className="runs">
+        {modes.map((mode, index) => {
+          const row = rows[index] ?? emptyRow();
+          return (
+            <fieldset className="run" key={index}>
+              <legend>
+                Пролив {index + 1} · {mode.label} <span className="sub">{mode.seconds} с</span>
+              </legend>
+              <div className="run-grid">
+                <NumberInput id={`r${index}-q`} label="Расход Q, м³/ч" value={row.flow_rate} onChange={(v) => updateRow(index, { flow_rate: v })} />
+                <NumberInput id={`r${index}-ve`} label="Объём по эталону, м³" value={row.volume_standard} onChange={(v) => updateRow(index, { volume_standard: v })} />
+                {method === "readings" && (
+                  <>
+                    <NumberInput id={`r${index}-rs`} label="Показания в начале" value={row.reading_start} onChange={(v) => updateRow(index, { reading_start: v })} />
+                    <NumberInput id={`r${index}-re`} label="Показания в конце" value={row.reading_end} onChange={(v) => updateRow(index, { reading_end: v })} />
+                  </>
+                )}
+                {method === "pulses" && (
+                  <NumberInput id={`r${index}-p`} label="Импульсы" value={row.pulses} onChange={(v) => updateRow(index, { pulses: v.replace(/\D/g, "") })} />
+                )}
+                {method === "direct" && (
+                  <NumberInput id={`r${index}-vm`} label="Объём по счётчику, м³" value={row.volume_meter} onChange={(v) => updateRow(index, { volume_meter: v })} />
+                )}
+              </div>
+            </fieldset>
+          );
+        })}
+      </div>
+
+      <div className="field">
+        <label>Проверки пройдены</label>
+        <div className="check-row">
+          {Object.entries(layoutsInfo.checks).map(([key, label]) => (
+            <label key={key} className={`check-chip ${checks[key] ?? true ? "on" : "off"}`}>
+              <input
+                type="checkbox"
+                checked={checks[key] ?? true}
+                onChange={(event) => setChecks((current) => ({ ...current, [key]: event.target.checked }))}
+              />
+              {label.replace(/\s*\(.*\)$/, "")}
+            </label>
+          ))}
+        </div>
+        <p className="hint">Снимите галочку, если проверка не пройдена — счётчик будет признан непригодным.</p>
+      </div>
+
+      <details className="more">
+        <summary>Дополнительно: температура воды</summary>
+        <div className="field" style={{ maxWidth: 260, marginTop: 8 }}>
+          <label htmlFor="fw-water-temp">Температура воды, °C</label>
+          <input id="fw-water-temp" className="big-input" inputMode="decimal" value={waterTemp} onChange={(e) => setWaterTemp(e.target.value)} placeholder="если измеряли" />
+        </div>
+      </details>
+
+      <div className={`unsuitable ${manualUnsuitable ? "on" : ""}`}>
+        <label className="toggle">
           <input type="checkbox" checked={manualUnsuitable} onChange={(event) => setManualUnsuitable(event.target.checked)} />
-          НЕПРИГОДЕН (по другой причине, не по погрешности)
+          Счётчик непригоден по другой причине (разбит, заклинило, нет пломбы…)
         </label>
         {manualUnsuitable && (
-          <div className="field-row" style={{ marginTop: 8 }}>
-            <div className="field">
-              <label htmlFor="fw-reason-preset">Частая причина</label>
-              <select
-                id="fw-reason-preset"
-                value={reasonPreset}
-                onChange={(event) => {
-                  setReasonPreset(event.target.value);
-                  if (event.target.value) setManualReason(event.target.value);
-                }}
-              >
-                <option value="">выберите или впишите свою ниже…</option>
-                {layoutsInfo.common_unsuitability_reasons.map((reason) => (
-                  <option key={reason} value={reason}>{reason}</option>
-                ))}
-              </select>
+          <>
+            <div className="chip-row">
+              {layoutsInfo.common_unsuitability_reasons.map((reason) => (
+                <button
+                  type="button"
+                  key={reason}
+                  className={`chip ${manualReason === reason ? "active" : ""}`}
+                  onClick={() => setManualReason(reason)}
+                >
+                  {reason}
+                </button>
+              ))}
             </div>
-            <div className="field" style={{ flex: 2 }}>
+            <div className="field">
               <label htmlFor="fw-reason-text">Причина<span className="req">*</span></label>
               <input
                 id="fw-reason-text"
+                className="big-input"
                 value={manualReason}
                 onChange={(event) => setManualReason(event.target.value)}
-                placeholder="например: разбито стекло корпуса"
+                placeholder="выберите выше или впишите свою"
               />
             </div>
-          </div>
+            <p className="hint">Если снять измерения невозможно — оставьте проливы пустыми.</p>
+          </>
         )}
-        <p className="hint">
-          Если прибор физически не проверить (заклинило, разбит) — оставьте таблицу измерений пустой,
-          отправлять будет нечего.
-        </p>
       </div>
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Режим</th>
-              <th>Q, м³/ч</th>
-              <th>Vэтал, м³</th>
-              <th>Показания начало</th>
-              <th>Показания конец</th>
-              <th>Импульсы</th>
-              <th>V счётчика</th>
-            </tr>
-          </thead>
-          <tbody>
-            {modes.map((mode, index) => (
-              <tr key={index}>
-                <td>
-                  {mode.label} <span className="sub">{mode.seconds} с</span>
-                </td>
-                <td>
-                  <input value={rows[index]?.flow_rate ?? ""} onChange={(e) => updateRow(index, { flow_rate: e.target.value })} style={{ width: 70 }} />
-                </td>
-                <td>
-                  <input value={rows[index]?.volume_standard ?? ""} onChange={(e) => updateRow(index, { volume_standard: e.target.value })} style={{ width: 80 }} />
-                </td>
-                <td>
-                  <input value={rows[index]?.reading_start ?? ""} onChange={(e) => updateRow(index, { reading_start: e.target.value })} style={{ width: 90 }} />
-                </td>
-                <td>
-                  <input value={rows[index]?.reading_end ?? ""} onChange={(e) => updateRow(index, { reading_end: e.target.value })} style={{ width: 90 }} />
-                </td>
-                <td>
-                  <input value={rows[index]?.pulses ?? ""} onChange={(e) => updateRow(index, { pulses: e.target.value })} style={{ width: 70 }} />
-                </td>
-                <td>
-                  <input value={rows[index]?.volume_meter ?? ""} onChange={(e) => updateRow(index, { volume_meter: e.target.value })} style={{ width: 80 }} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <button className="primary" type="submit" disabled={busy}>
-        {busy ? "Сохраняю…" : "Сохранить измерения"}
+      <button className="primary big wide" type="submit" disabled={busy}>
+        {busy ? "Сохраняю…" : "Сохранить и посчитать"}
       </button>
       {error && <div className="error">{error}</div>}
-      {queuedNotice && <div className="hint">Связи нет — сохранено на устройстве, отправится само при её появлении.</div>}
+      {queuedNotice && (
+        <div className="verdict queued">Связи нет — сохранено в телефоне. Отправится само, когда появится связь.</div>
+      )}
       {result && (
-        <div className={result.suitable ? "hint ok" : "error"}>
-          {result.suitable ? "Годен" : `Не годен: ${result.reasons.join("; ")}`}
-          {result.needs_review && " · есть строки на сверку"}
+        <div className={`verdict ${result.suitable ? "ok" : "bad"}`}>
+          <b>{result.suitable ? "ГОДЕН" : "НЕ ГОДЕН"}</b>
+          {!result.suitable && <span>{result.reasons.join("; ")}</span>}
+          {result.needs_review && <span>есть строки на сверку у метролога</span>}
         </div>
       )}
     </form>
+  );
+}
+
+function SyncBar({
+  online,
+  queued,
+  problems,
+  onRemove,
+}: {
+  online: boolean;
+  queued: number;
+  problems: OutboxItem[];
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <>
+      <div className={`sync-bar ${online ? "ok" : "off"}`}>
+        <span>{online ? "● На связи" : "● Нет связи — всё сохраняется в телефоне"}</span>
+        {queued > 0 && <span>Ждут отправки: {queued}</span>}
+        {queued > 0 && (
+          // Не завязано на online — статус связи браузера ненадёжен, а сама
+          // попытка отправки сама разберётся, есть сеть или нет (см. flush()).
+          <button type="button" onClick={() => void flush()}>
+            Отправить сейчас
+          </button>
+        )}
+      </div>
+      {problems.length > 0 && (
+        <div className="card warn-card">
+          <b>Не удалось отправить</b>
+          <ul className="item-list">
+            {problems.map((item) => (
+              <li key={item.id}>
+                <span className="name">
+                  {item.kind === "create_verification" ? "Новый счётчик" : "Измерения"}
+                  {" — "}
+                  <span className="sub">{item.last_error || "не удалось отправить"}</span>
+                </span>
+                <button type="button" onClick={() => onRemove(item.id)}>
+                  Убрать
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -565,6 +677,7 @@ export default function FieldWork({ me }: { me: Me | null }) {
   const [selectedOrder, setSelectedOrder] = useState<number | null>(null);
   const [verifications, setVerifications] = useState<CachedVerification[]>([]);
   const [selectedVerification, setSelectedVerification] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [layoutsInfo, setLayoutsInfo] = useState<LayoutsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -590,6 +703,11 @@ export default function FieldWork({ me }: { me: Me | null }) {
       window.removeEventListener("online", update);
       window.removeEventListener("offline", update);
     };
+  }, []);
+
+  // Справочник типов — в телефон заранее, чтобы искать счётчик и без связи.
+  useEffect(() => {
+    void refreshSiTypeCache();
   }, []);
 
   const refreshQueueCount = useCallback(() => {
@@ -677,150 +795,194 @@ export default function FieldWork({ me }: { me: Me | null }) {
     void reloadVerifications();
   }, [reloadVerifications]);
 
+  // Прокрутка наверх при смене шага — на телефоне иначе остаёшься внизу.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [selectedOrder, selectedVerification]);
+
   if (!me?.employee) {
     return <div className="empty">Экран доступен только сотрудникам с привязанной учётной записью</div>;
   }
 
+  const order = orders.find((o) => o.id === selectedOrder) ?? null;
   const activeVerification = verifications.find((v) => v.client_id === selectedVerification) ?? null;
 
+  const syncBar = (
+    <SyncBar
+      online={online}
+      queued={queued}
+      problems={outboxProblems}
+      onRemove={(id) => void removeOutboxItem(id).then(refreshQueueCount)}
+    />
+  );
+
+  // --- Шаг 1: наряды ---------------------------------------------------
+  if (selectedOrder == null) {
+    return (
+      <div className="narrow">
+        {syncBar}
+        <h2>Мои наряды</h2>
+        {error && <div className="error">{error}</div>}
+        {loading && <div className="loading">Загружаю…</div>}
+        {!loading && orders.length === 0 && <div className="empty">Открытых нарядов на вас нет</div>}
+        <div className="card-list">
+          {orders.map((o) => (
+            <button type="button" className="card tap" key={o.id} onClick={() => setSelectedOrder(o.id)}>
+              <div className="card-head">
+                <div className="grow">
+                  <b>{o.site || "Адрес не указан"}</b>
+                  <div className="sub">{o.client}</div>
+                </div>
+                <div className="when">
+                  <b>{formatDate(o.scheduled_date)}</b>
+                  {o.scheduled_time && <div className="sub">{o.scheduled_time.slice(0, 5)}</div>}
+                </div>
+              </div>
+              <div className="sub">
+                Наряд №{o.id} · счётчиков: {o.verifications_total}
+                {o.note && ` · ${o.note}`}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // --- Шаг 3: измерения одного счётчика --------------------------------
+  if (activeVerification) {
+    return (
+      <div className="narrow">
+        {syncBar}
+        <button type="button" className="back" onClick={() => setSelectedVerification(null)}>
+          ← Все счётчики наряда
+        </button>
+        <div className="card">
+          <div className="card-head">
+            <div className="grow">
+              <b>{activeVerification.si_type_name || "Счётчик"}</b>
+              <div className="sub">Заводской № {activeVerification.serial_number}</div>
+            </div>
+            <StatusBadge v={activeVerification} />
+          </div>
+        </div>
+        {layoutsInfo ? (
+          <MeasurementForm
+            key={activeVerification.client_id}
+            verification={activeVerification}
+            layoutsInfo={layoutsInfo}
+            onSaved={() => void reloadVerifications()}
+          />
+        ) : (
+          <div className="loading">Загружаю форму измерений…</div>
+        )}
+        <PhotosPanel verification={activeVerification} />
+        <button type="button" className="big wide" onClick={() => { setSelectedVerification(null); setAdding(true); }}>
+          + Следующий счётчик
+        </button>
+      </div>
+    );
+  }
+
+  // --- Шаг 2: счётчики наряда -------------------------------------------
   return (
-    <>
-      <div className="filters">
-        <span className={online ? "pill ok" : "pill warn"}>{online ? "связь есть" : "офлайн"}</span>
-        {queued > 0 && <span className="pill warn">в очереди на отправку: {queued}</span>}
-        {queued > 0 && (
-          // Не завязано на online — статус связи браузера ненадёжен, а сама
-          // попытка отправки сама разберётся, есть сеть или нет (см. flush()).
-          <button type="button" onClick={() => void flush()}>
-            Синхронизировать сейчас
-          </button>
+    <div className="narrow">
+      {syncBar}
+      <button type="button" className="back" onClick={() => { setSelectedOrder(null); setAdding(false); }}>
+        ← Все наряды
+      </button>
+      <div className="card">
+        <b>{order?.site ?? `Наряд №${selectedOrder}`}</b>
+        {order && (
+          <div className="sub">
+            {order.client} · {formatDate(order.scheduled_date)} · наряд №{order.id}
+          </div>
         )}
       </div>
-
-      {outboxProblems.length > 0 && (
-        <ul className="item-list">
-          {outboxProblems.map((item) => (
-            <li key={item.id}>
-              <span className="name">
-                {item.kind === "create_verification" ? "Заведение СИ" : "Измерения"}
-                {" — "}
-                <span className="sub">{item.last_error || "не удалось отправить"}</span>
-              </span>
-              <button type="button" onClick={() => void removeOutboxItem(item.id).then(refreshQueueCount)}>
-                Убрать из очереди
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
       {error && <div className="error">{error}</div>}
-      {loading && <div className="loading">Загружаю…</div>}
 
-      <div className="field">
-        <label htmlFor="fw-order">Наряд</label>
-        <select
-          id="fw-order"
-          value={selectedOrder ?? ""}
-          onChange={(event) => {
-            setSelectedOrder(event.target.value ? Number(event.target.value) : null);
-            setSelectedVerification(null);
-          }}
-        >
-          <option value="">выберите наряд…</option>
-          {orders.map((order) => (
-            <option key={order.id} value={order.id}>
-              №{order.id} · {order.site} · {order.scheduled_date ? new Date(order.scheduled_date).toLocaleDateString("ru-RU") : "без даты"}
-            </option>
-          ))}
-        </select>
+      <h2>Счётчики ({verifications.length})</h2>
+      {verifications.length === 0 && !adding && <div className="empty">Пока ни одного — добавьте первый</div>}
+      <div className="card-list">
+        {verifications.map((v) => (
+          <button type="button" className="card tap" key={v.client_id} onClick={() => setSelectedVerification(v.client_id)}>
+            <div className="card-head">
+              <div className="grow">
+                <b>{v.si_type_name || "Счётчик"}</b>
+                <div className="sub">№ {v.serial_number}</div>
+              </div>
+              <StatusBadge v={v} />
+            </div>
+          </button>
+        ))}
       </div>
 
-      {selectedOrder != null && (
-        <>
-          <h3>Бланк и сканы</h3>
-          <p className="hint">
-            Для режимных объектов (телефон нельзя пронести) — распечатайте бланк, заполните от руки
-            на месте, а вернувшись со связью, сфотографируйте и сверьте распознанное.
-          </p>
-          <div className="field-row">
-            <button type="button" onClick={handlePrintBlank}>Распечатать бланк</button>
-            <button type="button" onClick={() => fileInput.current?.click()} disabled={scanBusy}>
-              {scanBusy ? "Загружаю…" : "Загрузить фото бланка"}
-            </button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{ display: "none" }}
-              onChange={(event) => void handleUploadScan(event)}
-            />
-          </div>
-          {scanError && <div className="error">{scanError}</div>}
+      {adding ? (
+        <AddInstrumentForm
+          workOrderId={selectedOrder}
+          onAdded={(v) => {
+            setVerifications((current) => [v, ...current]);
+            setAdding(false);
+            setSelectedVerification(v.client_id);
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        <button type="button" className="primary big wide" onClick={() => setAdding(true)}>
+          + Добавить счётчик
+        </button>
+      )}
 
-          {scans.length > 0 && (
-            <ul className="item-list">
-              {scans.map((s) => (
-                <li key={s.id}>
-                  <span className="name">
-                    Скан №{s.id} от {new Date(s.created_at).toLocaleString("ru-RU")}
-                    {s.verification != null && <span className="pill ok"> поверка заведена</span>}
-                    {s.verification == null && s.error && <span className="pill warn"> {s.error}</span>}
-                  </span>
-                  {s.verification == null && (
-                    <button type="button" onClick={() => setReviewScanId(s.id === reviewScanId ? null : s.id)}>
-                      {s.id === reviewScanId ? "Свернуть" : "Сверить"}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
+      <details className="more card" open={scans.some((s) => s.verification == null) || reviewScanId != null}>
+        <summary>Режимный объект, телефон нельзя — бумажный бланк</summary>
+        <p className="hint">
+          Распечатайте бланк, заполните от руки на месте, а вернувшись на связь, сфотографируйте его —
+          система распознает цифры, вы только сверите.
+        </p>
+        <div className="actions">
+          <button type="button" onClick={handlePrintBlank}>Распечатать бланк</button>
+          <button type="button" onClick={() => fileInput.current?.click()} disabled={scanBusy}>
+            {scanBusy ? "Загружаю…" : "Сфотографировать заполненный бланк"}
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: "none" }}
+            onChange={(event) => void handleUploadScan(event)}
+          />
+        </div>
+        {scanError && <div className="error">{scanError}</div>}
 
-          {reviewScanId != null && layoutsInfo && (
-            <ScanReview
-              scan={scans.find((s) => s.id === reviewScanId)!}
-              layoutsInfo={layoutsInfo}
-              onApplied={handleScanApplied}
-              onDismiss={() => setReviewScanId(null)}
-            />
-          )}
-
-          <h3>Приборы по наряду</h3>
-          {verifications.length === 0 && <div className="empty">Пока ничего не заведено</div>}
+        {scans.length > 0 && (
           <ul className="item-list">
-            {verifications.map((v) => (
-              <li key={v.client_id}>
+            {scans.map((s) => (
+              <li key={s.id}>
                 <span className="name">
-                  {v.si_type_name || "СИ"} № {v.serial_number}
+                  Бланк от {new Date(s.created_at).toLocaleString("ru-RU")}
+                  {s.verification != null && <span className="pill ok"> внесён</span>}
+                  {s.verification == null && s.error && <span className="pill warn"> {s.error}</span>}
                 </span>
-                <StatusBadge v={v} />
-                <button
-                  type="button"
-                  onClick={() => setSelectedVerification(v.client_id === selectedVerification ? null : v.client_id)}
-                >
-                  {v.client_id === selectedVerification ? "Свернуть" : "Измерения"}
-                </button>
+                {s.verification == null && (
+                  <button type="button" onClick={() => setReviewScanId(s.id === reviewScanId ? null : s.id)}>
+                    {s.id === reviewScanId ? "Свернуть" : "Сверить"}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+        )}
 
-          <h4>Добавить СИ</h4>
-          <AddInstrumentForm
-            workOrderId={selectedOrder}
-            onAdded={(v) => {
-              setVerifications((current) => [v, ...current]);
-              setSelectedVerification(v.client_id);
-            }}
+        {reviewScanId != null && layoutsInfo && (
+          <ScanReview
+            scan={scans.find((s) => s.id === reviewScanId)!}
+            layoutsInfo={layoutsInfo}
+            onApplied={handleScanApplied}
+            onDismiss={() => setReviewScanId(null)}
           />
-
-          {activeVerification && layoutsInfo && (
-            <MeasurementForm verification={activeVerification} layoutsInfo={layoutsInfo} onSaved={() => void reloadVerifications()} />
-          )}
-          {activeVerification && <PhotosPanel verification={activeVerification} />}
-        </>
-      )}
-    </>
+        )}
+      </details>
+    </div>
   );
 }

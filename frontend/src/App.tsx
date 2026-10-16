@@ -6,10 +6,11 @@ import Journal from "./components/Journal";
 import Login from "./components/Login";
 import Normocontrol from "./components/Normocontrol";
 import RequestsInbox from "./components/RequestsInbox";
+import SiTypes from "./components/SiTypes";
 import Tasks from "./components/Tasks";
 import WorkOrders from "./components/WorkOrders";
 
-type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability";
+type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability" | "si-types";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "journal", label: "Журнал" },
@@ -19,7 +20,19 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "field-work", label: "Поверки" },
   { key: "tasks", label: "Задачи" },
   { key: "availability", label: "Мой график" },
+  { key: "si-types", label: "Типы СИ" },
 ];
+
+/** Поверителю первым — его рабочий экран, остальное дальше. */
+const FIELD_FIRST: Tab[] = ["field-work", "availability", "tasks", "si-types"];
+
+function tabsFor(role: string | undefined) {
+  if (role !== "verifier") return TABS;
+  return [
+    ...FIELD_FIRST.map((key) => TABS.find((t) => t.key === key)!),
+    ...TABS.filter((t) => !FIELD_FIRST.includes(t.key)),
+  ];
+}
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(isAuthenticated());
@@ -31,7 +44,12 @@ export default function App() {
       setMe(null);
       return;
     }
-    void fetchMe().then(setMe).catch(() => setMe(null));
+    void fetchMe()
+      .then((data) => {
+        setMe(data);
+        if (data.role === "verifier") setTab((current) => (current === "journal" ? "field-work" : current));
+      })
+      .catch(() => setMe(null));
   }, [authenticated]);
 
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
@@ -43,7 +61,7 @@ export default function App() {
       <header className="topbar">
         <h1>EI_doc</h1>
         <nav>
-          {TABS.map((item) => (
+          {tabsFor(me?.role).map((item) => (
             <button
               key={item.key}
               className={tab === item.key ? "active" : ""}
@@ -67,12 +85,13 @@ export default function App() {
 
       <main>
         {tab === "journal" && <Journal />}
-        {tab === "normocontrol" && <Normocontrol />}
+        {tab === "normocontrol" && <Normocontrol onOpenTypes={() => setTab("si-types")} />}
         {tab === "requests" && <RequestsInbox />}
         {tab === "work-orders" && <WorkOrders />}
         {tab === "field-work" && <FieldWork me={me} />}
         {tab === "tasks" && <Tasks />}
         {tab === "availability" && <Availability />}
+        {tab === "si-types" && <SiTypes me={me} />}
       </main>
     </div>
   );

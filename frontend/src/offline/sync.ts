@@ -16,13 +16,17 @@
 import {
   createVerification,
   fetchLayouts,
+  fetchSiTypes,
   fetchWorkOrderVerifications,
+  suggestSiTypes,
   submitMeasurements,
   type FieldVerification,
   type FieldVerificationPayload,
   type LayoutsResponse,
   type MeasurementsPayload,
   type MeasurementsResult,
+  type SiType,
+  type SiTypeSuggestion,
 } from "../api";
 import { db, type CachedVerification } from "./db";
 
@@ -127,7 +131,7 @@ export async function addVerification(
     work_order_id: workOrderId,
     server_id: null,
     si_type_id: payload.si_type_id,
-    si_type_name: "",
+    si_type_name: await cachedSiTypeName(payload.si_type_id),
     serial_number: payload.serial_number,
     manufacture_year: payload.manufacture_year ?? null,
     verified_at: payload.verified_at ?? new Date().toISOString(),
@@ -209,6 +213,70 @@ export async function loadLayouts(): Promise<LayoutsResponse> {
   const cached = await db.meta.get("layouts");
   if (cached) return cached.data as LayoutsResponse;
   throw new Error("Раскладки измерений недоступны офлайн — откройте этот экран хотя бы раз при связи");
+}
+
+// ---------------------------------------------------------------------------
+// Типы СИ: поиск работает и без связи — по справочнику, скачанному заранее
+// ---------------------------------------------------------------------------
+async function cachedSiTypes(): Promise<SiType[]> {
+  const cached = await db.meta.get("si_types");
+  return (cached?.data as SiType[] | undefined) ?? [];
+}
+
+/** Обновить локальную копию справочника типов. Тихо — без связи просто ничего не делаем. */
+export async function refreshSiTypeCache(): Promise<void> {
+  try {
+    const fresh = await fetchSiTypes();
+    await db.meta.put({ key: "si_types", data: fresh, cached_at: Date.now() });
+  } catch {
+    /* офлайн — остаётся прежняя копия */
+  }
+}
+
+/** Добавить только что заведённый тип в локальную копию, не дожидаясь полного обновления. */
+export async function rememberSiType(siType: SiType): Promise<void> {
+  const list = (await cachedSiTypes()).filter((item) => item.id !== siType.id);
+  await db.meta.put({ key: "si_types", data: [siType, ...list], cached_at: Date.now() });
+}
+
+async function cachedSiTypeName(id: number): Promise<string> {
+  const found = (await cachedSiTypes()).find((item) => item.id === id);
+  return found ? found.name : "";
+}
+
+function toSuggestion(item: SiType): SiTypeSuggestion {
+  return {
+    source: "local",
+    si_type_id: item.id,
+    registry_number: item.registry_number,
+    name: item.name,
+    manufacturer: item.manufacturer,
+    notation: "",
+    interval_months: item.verification_interval_months,
+    label: item.label,
+    ambiguous: false,
+    needs_review: item.needs_review,
+  };
+}
+
+export type SiTypeSearch = { results: SiTypeSuggestion[]; offline: boolean; fifUnavailable: boolean };
+
+/** Поиск типа: при связи — свой справочник + реестр ФИФ, без связи — только локальная копия. */
+export async function searchSiTypes(query: string): Promise<SiTypeSearch> {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return { results: [], offline: false, fifUnavailable: false };
+  try {
+    const response = await suggestSiTypes(query, { throwOnError: true });
+    return { results: response.results, offline: false, fifUnavailable: Boolean(response.warning) };
+  } catch {
+    const local = (await cachedSiTypes())
+      .filter((item) =>
+        [item.name, item.registry_number, item.manufacturer].some((field) => field.toLowerCase().includes(q)),
+      )
+      .slice(0, 20)
+      .map(toSuggestion);
+    return { results: local, offline: true, fifUnavailable: true };
+  }
 }
 
 // ---------------------------------------------------------------------------

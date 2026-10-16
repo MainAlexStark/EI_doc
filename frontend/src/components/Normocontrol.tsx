@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { applyNumbering, fetchScopes, previewNumbering, type Preview, type Scope } from "../api";
+import { applyNumbering, fetchScopes, fetchSiTypes, previewNumbering, type Preview, type Scope } from "../api";
 
 /**
  * Экран нормоконтроля.
@@ -7,12 +7,21 @@ import { applyNumbering, fetchScopes, previewNumbering, type Preview, type Scope
  * Главное правило: метролог сначала видит, что даст пересчёт, и только потом
  * применяет. Поэтому кнопка «Пересчитать» появляется лишь после предпросмотра.
  */
-export default function Normocontrol() {
+export default function Normocontrol({ onOpenTypes }: { onOpenTypes?: () => void }) {
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [previews, setPreviews] = useState<Record<number, Preview>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [pendingTypes, setPendingTypes] = useState(0);
+
+  // Типы, заведённые поверителями: пока метролог их не проверит, протоколы
+  // по ним не подписываются (apps.verification.numbering.seal).
+  useEffect(() => {
+    fetchSiTypes({ needs_review: true })
+      .then((list) => setPendingTypes(list.length))
+      .catch(() => setPendingTypes(0));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,6 +74,18 @@ export default function Normocontrol() {
 
   return (
     <>
+      {pendingTypes > 0 && (
+        <div className="notice">
+          <span>
+            Новых типов СИ ждут проверки: <b>{pendingTypes}</b>. Пока тип не проверен, протоколы по нему не подписываются.
+          </span>
+          {onOpenTypes && (
+            <button type="button" className="primary" onClick={onOpenTypes}>
+              Проверить
+            </button>
+          )}
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
 
       {scopes.length === 0 && (

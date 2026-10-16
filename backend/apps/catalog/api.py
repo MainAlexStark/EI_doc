@@ -30,6 +30,7 @@ class SiTypeSuggestionSerializer(serializers.Serializer):
     ambiguous = serializers.BooleanField(
         help_text="Наименование совпадает с другим кандидатом — выбирать только по изготовителю"
     )
+    needs_review = serializers.BooleanField(help_text="Тип заведён поверителем и ждёт проверки метролога")
 
 
 class SiTypeSuggestView(APIView):
@@ -63,7 +64,7 @@ class SiTypeSuggestView(APIView):
                     if key in seen:
                         continue
                     seen.add(key)
-                    suggestions.append({"source": "fif", "si_type_id": None, **item})
+                    suggestions.append({"source": "fif", "si_type_id": None, "needs_review": False, **item})
 
         suggestions = self._flag_duplicates(suggestions)
         payload = {"results": suggestions}
@@ -98,6 +99,7 @@ class SiTypeSuggestView(APIView):
                     ) if part
                 ),
                 "ambiguous": False,
+                "needs_review": si_type.needs_review,
             }
             for si_type in found
         ]

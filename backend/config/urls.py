@@ -4,6 +4,12 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.catalog.api import FamilyOptionsView, SiTypeSuggestView
+from apps.catalog.api_types import (
+    SiTypeConfirmView,
+    SiTypeDetailView,
+    SiTypeListCreateView,
+    SiTypePresetsView,
+)
 from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, frontend_root_file, healthz
@@ -75,6 +81,10 @@ urlpatterns = [
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
+    path("api/catalog/si-types/", SiTypeListCreateView.as_view(), name="si_type_list"),
+    path("api/catalog/si-types/presets/", SiTypePresetsView.as_view(), name="si_type_presets"),
+    path("api/catalog/si-types/<int:pk>/", SiTypeDetailView.as_view(), name="si_type_detail"),
+    path("api/catalog/si-types/<int:pk>/confirm/", SiTypeConfirmView.as_view(), name="si_type_confirm"),
     path("api/catalog/families/", FamilyOptionsView.as_view(), name="family_options"),
     path("api/core/employees/", EmployeeListView.as_view(), name="employee_list"),
     path("api/core/employees/me/", MeView.as_view(), name="me"),

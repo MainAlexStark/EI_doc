@@ -220,6 +220,12 @@ def seal(protocol: Protocol, *, signed_by, at=None) -> Protocol:
         raise NumberingError(f"Протокол {protocol.full_number} уже запечатан ({protocol.get_status_display()}).")
 
     verification = protocol.verification
+    si_type = verification.instrument.si_type
+    if si_type.needs_review:
+        raise NumberingError(
+            f"Тип СИ «{si_type}» заведён поверителем и ещё не проверен метрологом — "
+            "сверьте характеристики на вкладке «Типы СИ» и подтвердите тип."
+        )
     if not signed_by.can_sign(verification.family, verification.verified_at.date()):
         raise NumberingError(
             f"У {signed_by.full_name} нет действующей аттестации на "

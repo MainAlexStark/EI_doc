@@ -1,15 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   applyScan,
   fetchScanImageUrl,
-  suggestSiTypes,
   type FieldVerification,
   type LayoutsResponse,
   type MeasurementRowPayload,
   type ScanRecognizedRow,
   type ScanUploadResult,
-  type SiTypeSuggestion,
 } from "../api";
+import SiTypePicker, { type PickedType } from "./SiTypePicker";
 
 /** Экран сверки распознанного бланка (второй срез офлайна — claude/scans.md).
  *
@@ -61,10 +60,8 @@ export default function ScanReview({
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageError, setImageError] = useState("");
 
-  const [query, setQuery] = useState(r.si_type_query ?? "");
-  const [suggestions, setSuggestions] = useState<SiTypeSuggestion[]>([]);
-  const [showList, setShowList] = useState(false);
-  const [siTypeId, setSiTypeId] = useState<number | null>(null);
+  const [siType, setSiType] = useState<PickedType | null>(null);
+  const siTypeId = siType?.id ?? null;
   const [serial, setSerial] = useState(r.serial_number ?? "");
   const [year, setYear] = useState(r.manufacture_year ? String(r.manufacture_year) : "");
   const [meterClass, setMeterClass] = useState(CLASS_LABEL[r.meter_class ?? ""] ?? layoutsInfo.classes[0] ?? "В");
@@ -88,7 +85,6 @@ export default function ScanReview({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const debounce = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     let revoke: string | null = null;
@@ -102,26 +98,6 @@ export default function ScanReview({
       if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [scan.id]);
-
-  useEffect(() => {
-    clearTimeout(debounce.current);
-    if (siTypeId || query.trim().length < 2) {
-      setSuggestions([]);
-      return;
-    }
-    debounce.current = setTimeout(async () => {
-      const response = await suggestSiTypes(query);
-      setSuggestions(response.results.filter((item) => item.si_type_id !== null));
-      setShowList(true);
-    }, 300);
-    return () => clearTimeout(debounce.current);
-  }, [query, siTypeId]);
-
-  const pick = (item: SiTypeSuggestion) => {
-    setSiTypeId(item.si_type_id);
-    setQuery(item.label);
-    setShowList(false);
-  };
 
   const updateRow = (index: number, patch: Partial<RowState>) =>
     setRows((current) => current.map((row, idx) => (idx === index ? { ...row, ...patch } : row)));
@@ -198,32 +174,8 @@ export default function ScanReview({
         </div>
 
         <form className="new-slot-form" onSubmit={submit}>
+          <SiTypePicker value={siType} onChange={setSiType} initialQuery={r.si_type_query ?? ""} inputId="sr-si-type" />
           <div className="field-row">
-            <div className="field suggest-field">
-              <label htmlFor="sr-si-type">Тип СИ</label>
-              <input
-                id="sr-si-type"
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setSiTypeId(null);
-                }}
-                onFocus={() => setShowList(suggestions.length > 0)}
-                onBlur={() => setTimeout(() => setShowList(false), 150)}
-                placeholder="номер в Госреестре или наименование"
-                autoComplete="off"
-              />
-              {showList && (
-                <ul className="suggestions">
-                  {suggestions.length === 0 && <li className="sub">Совпадений в системе нет — заведите тип через админку</li>}
-                  {suggestions.map((item) => (
-                    <li key={`${item.registry_number}-${item.manufacturer}`} onMouseDown={() => pick(item)}>
-                      <span>{item.label}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
             <div className="field">
               <label htmlFor="sr-serial">Зав. номер</label>
               <input id="sr-serial" value={serial} onChange={(event) => setSerial(event.target.value)} />

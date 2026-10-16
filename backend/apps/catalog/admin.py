@@ -47,8 +47,8 @@ class PricingSettingsAdmin(admin.ModelAdmin):
 
 @admin.register(SiType)
 class SiTypeAdmin(SimpleHistoryAdmin):
-    list_display = ["name", "registry_number", "family", "verification_interval_months", "is_active"]
-    list_filter = ["family", "is_active"]
+    list_display = ["name", "registry_number", "manufacturer", "family", "verification_interval_months", "needs_review", "is_active"]
+    list_filter = ["needs_review", "family", "is_active"]
     search_fields = ["name", "registry_number", "manufacturer"]
 
 

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
@@ -127,6 +128,24 @@ class SiType(models.Model):
     fif_url = models.URLField("ссылка на ФИФ", blank=True)
     fif_raw = models.JSONField("ответ ФИФ как есть", default=dict, blank=True)
     is_active = models.BooleanField("используется", default=True)
+
+    # Тип может завести любой поверитель прямо с экрана поверок (карточка из
+    # ФИФ + характеристики по шаблону Ду). Пока метролог его не проверил,
+    # поверки с ним работают, но протокол не подписывается — см.
+    # apps.verification.numbering.seal().
+    needs_review = models.BooleanField(
+        "ждёт проверки метролога", default=False,
+        help_text="Тип заведён поверителем; характеристики ещё не сверены метрологом",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="кто завёл",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="кто проверил",
+    )
+    reviewed_at = models.DateTimeField("проверен", null=True, blank=True)
 
     history = HistoricalRecords()
 

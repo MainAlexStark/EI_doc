@@ -111,13 +111,27 @@ async function call(path: string, init: RequestInit = {}, retry = true): Promise
   return response;
 }
 
+/** Ошибку DRF ({"поле": ["текст"]} / {"detail": "…"}) — в одну понятную строку,
+ * без JSON-скобок на экране у поверителя. */
+function humanError(body: unknown): string {
+  if (body == null) return "";
+  if (typeof body === "string") return body;
+  if (Array.isArray(body)) return body.map(humanError).filter(Boolean).join("; ");
+  if (typeof body === "object") {
+    const record = body as Record<string, unknown>;
+    if (record.detail != null) return humanError(record.detail);
+    return Object.values(record).map(humanError).filter(Boolean).join("; ");
+  }
+  return String(body);
+}
+
 async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await call(path, init);
   if (!response.ok) {
     let detail = `Ошибка ${response.status}`;
     try {
       const body = await response.json();
-      detail = body.detail ?? JSON.stringify(body);
+      detail = humanError(body) || detail;
     } catch {
       /* тело не разобралось — оставим код */
     }
@@ -565,16 +579,21 @@ export type SiTypeSuggestion = {
   interval_months: number | null;
   label: string;
   ambiguous: boolean;
+  needs_review?: boolean;
 };
 
 export type SiTypeSuggestResponse = { results: SiTypeSuggestion[]; warning?: string };
 
 /** Подсказка типов СИ — авторизованный эндпоинт, поэтому через json(), не суём в public-хелперы. */
-export async function suggestSiTypes(query: string): Promise<SiTypeSuggestResponse> {
+export async function suggestSiTypes(
+  query: string,
+  options: { throwOnError?: boolean } = {},
+): Promise<SiTypeSuggestResponse> {
   if (query.trim().length < 2) return { results: [] };
   try {
     return await json<SiTypeSuggestResponse>(`/api/catalog/si-types/suggest/?${queryString({ q: query })}`);
-  } catch {
+  } catch (exc) {
+    if (options.throwOnError) throw exc;
     return { results: [] };
   }
 }
@@ -759,3 +778,73 @@ export async function fetchVerificationPhotoUrl(photoId: number): Promise<string
   const blob = await response.blob();
   return URL.createObjectURL(blob);
 }
+
+// ---------------------------------------------------------------------------
+// Справочник типов СИ без админки (apps/catalog/api_types.py)
+// ---------------------------------------------------------------------------
+export type WaterLimits = Record<string, number | string>;
+
+export type SiType = {
+  id: number;
+  family: number;
+  family_name: string;
+  calculator_key: string;
+  registry_number: string;
+  name: string;
+  manufacturer: string;
+  verification_interval_months: number;
+  limits: WaterLimits;
+  fif_url: string;
+  needs_review: boolean;
+  created_by_name: string;
+  reviewed_by_name: string;
+  reviewed_at: string | null;
+  label: string;
+  existing?: boolean;
+};
+
+export type SiTypeInput = {
+  family?: number | null;
+  registry_number: string;
+  name: string;
+  manufacturer: string;
+  verification_interval_months?: number | null;
+  limits?: WaterLimits;
+};
+
+export type LimitPreset = {
+  key: string;
+  dn: number | null;
+  label: string;
+  detail: string;
+  count: number;
+  examples: string[];
+  limits: Record<string, number>;
+};
+
+export type SiTypePresets = {
+  fields: { key: string; label: string }[];
+  presets: LimitPreset[];
+  families: { id: number; name: string; calculator_key: string }[];
+  default_family: number | null;
+  can_review: boolean;
+};
+
+export const fetchSiTypes = (params: { needs_review?: boolean; q?: string } = {}) =>
+  json<SiType[]>(
+    `/api/catalog/si-types/?${queryString({
+      needs_review: params.needs_review ? "1" : undefined,
+      q: params.q || undefined,
+    })}`,
+  );
+
+export const fetchSiTypePresets = () => json<SiTypePresets>("/api/catalog/si-types/presets/");
+
+export const createSiType = (payload: SiTypeInput) =>
+  json<SiType>("/api/catalog/si-types/", { method: "POST", body: JSON.stringify(payload) });
+
+export const updateSiType = (id: number, payload: Partial<SiTypeInput>) =>
+  json<SiType>(`/api/catalog/si-types/${id}/`, { method: "PATCH", body: JSON.stringify(payload) });
+
+export const confirmSiType = (id: number) =>
+  json<SiType>(`/api/catalog/si-types/${id}/confirm/`, { method: "POST" });

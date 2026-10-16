@@ -267,3 +267,32 @@ class NumberingTestCase(TestCase):
         f.draft(self.family, self.employee, day=2)
         numbering.assign_numbers(self.scope())
         assert numbering.chronology_breaks(self.scope()) == []
+
+
+class UnreviewedTypeTestCase(TestCase):
+    """Тип, заведённый поверителем, не даёт подписать протокол до проверки метролога."""
+
+    def setUp(self) -> None:
+        self.family = f.make_family()
+        self.employee = f.make_employee()
+        f.attest(self.employee, self.family)
+
+    def test_seal_refused_until_type_reviewed(self):
+        protocol = f.draft(self.family, self.employee, day=1)
+        scope = numbering.NumberingScope.objects.get(
+            series=self.family.series, employee=self.employee, year=2026
+        )
+        numbering.assign_numbers(scope)
+        protocol.refresh_from_db()
+        si_type = protocol.verification.instrument.si_type
+        si_type.needs_review = True
+        si_type.save()
+
+        with pytest.raises(NumberingError, match="не проверен метрологом"):
+            numbering.seal(protocol, signed_by=self.employee)
+
+        si_type.needs_review = False
+        si_type.save()
+        numbering.seal(protocol, signed_by=self.employee)
+        protocol.refresh_from_db()
+        assert protocol.is_sealed
