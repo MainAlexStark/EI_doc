@@ -69,6 +69,16 @@ services:
     <<: *backend
     command: ["celery", "-A", "config", "beat", "-l", "info"]
 
+  # Ассистент-метролог: агентные прогоны (минуты поиска по ФГИС и вебу) —
+  # отдельная очередь, чтобы не задерживать распознавание бланков. В
+  # mcp-network — чтобы ходить к RSTMetrology_MCP по имени контейнера.
+  assistant-worker:
+    <<: *backend
+    command: ["celery", "-A", "config", "worker", "-Q", "assistant", "-l", "info", "--concurrency", "4", "-n", "assistant@%h"]
+    networks:
+      - default
+      - mcp-network
+
 volumes:
   pgdata:
   redisdata:

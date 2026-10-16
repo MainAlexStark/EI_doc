@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -182,6 +182,8 @@ urlpatterns = [
     path("api/tasks/board/", TaskBoardView.as_view(), name="task_board"),
     path("api/tasks/calendar/", TaskCalendarView.as_view(), name="task_calendar"),
     path("api/tasks/workload/", TaskWorkloadView.as_view(), name="task_workload"),
+    # Ассистент-метролог
+    path("api/assistant/", include("apps.assistant.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     # Публичная форма заявки — тот же SPA-бандл, main.tsx решает по пути,

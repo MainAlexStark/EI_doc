@@ -58,9 +58,11 @@
   line(length: 100%, stroke: 0.4pt)
   v(0.8em)
 
-  text(weight: "bold")[Наряд №#d.work_order_number] от #d.date \
-  Клиент: #d.client \
-  Объект: #d.site
+  [
+    #text(weight: "bold")[Наряд №#d.work_order_number] от #d.date \
+    Клиент: #d.client \
+    Объект: #d.site
+  ]
 
   v(1.0em)
   centered(weight: "bold")[ДАННЫЕ СЧЁТЧИКА — заполняется от руки]

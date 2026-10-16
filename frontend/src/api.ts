@@ -94,7 +94,7 @@ async function refreshTokens(): Promise<boolean> {
   return true;
 }
 
-async function call(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
+export async function call(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
   const headers = new Headers(init.headers);
   const access = tokens.access();
   if (access) headers.set("Authorization", `Bearer ${access}`);
@@ -125,7 +125,7 @@ function humanError(body: unknown): string {
   return String(body);
 }
 
-async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await call(path, init);
   if (!response.ok) {
     let detail = `Ошибка ${response.status}`;

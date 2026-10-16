@@ -12,3 +12,7 @@ CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 FIF_DOCUMENTS_AUTO_DOWNLOAD = False
+
+ASSISTANT_RUN_MODE = "sync"
+OPENROUTER_API_KEY = "test-key"
+RST_MCP_URL = ""

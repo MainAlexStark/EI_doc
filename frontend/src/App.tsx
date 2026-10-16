@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { fetchMe, isAuthenticated, logout, type Me } from "./api";
 import Availability from "./components/Availability";
 import FieldWork from "./components/FieldWork";
@@ -10,7 +10,10 @@ import SiTypes from "./components/SiTypes";
 import Tasks from "./components/Tasks";
 import WorkOrders from "./components/WorkOrders";
 
-type Tab = "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability" | "si-types";
+// Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
+const Assistant = lazy(() => import("./assistant/Assistant"));
+
+type Tab = "assistant" | "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability" | "si-types";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "journal", label: "Журнал" },
@@ -21,10 +24,11 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "tasks", label: "Задачи" },
   { key: "availability", label: "Мой график" },
   { key: "si-types", label: "Типы СИ" },
+  { key: "assistant", label: "Ассистент" },
 ];
 
 /** Поверителю первым — его рабочий экран, остальное дальше. */
-const FIELD_FIRST: Tab[] = ["field-work", "availability", "tasks", "si-types"];
+const FIELD_FIRST: Tab[] = ["field-work", "availability", "tasks", "si-types", "assistant"];
 
 function tabsFor(role: string | undefined) {
   if (role !== "verifier") return TABS;
@@ -92,6 +96,11 @@ export default function App() {
         {tab === "tasks" && <Tasks />}
         {tab === "availability" && <Availability />}
         {tab === "si-types" && <SiTypes me={me} />}
+        {tab === "assistant" && (
+          <Suspense fallback={<div className="muted">Загрузка ассистента…</div>}>
+            <Assistant />
+          </Suspense>
+        )}
       </main>
     </div>
   );

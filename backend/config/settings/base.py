@@ -55,6 +55,7 @@ LOCAL_APPS = [
     "apps.logistics",
     "apps.sync",
     "apps.arshin",
+    "apps.assistant",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -248,6 +249,30 @@ TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
 TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 
 # --------------------------------------------------------------------------
+# Ассистент-метролог (чат с LLM, см. apps/assistant и claude/assistant.md)
+# --------------------------------------------------------------------------
+# OpenRouter — каталог сильных моделей (Claude, GPT, Gemini…). Пусто — в выборе
+# остаются только модели Yandex AI Studio (ключи YANDEX_VISION_* выше).
+OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
+# Модель по умолчанию «провайдер:модель»; правится и на экране «Контекст → Настройки».
+ASSISTANT_DEFAULT_MODEL = env("ASSISTANT_DEFAULT_MODEL", default="")
+# Модели Yandex AI Studio, которые показывать в выборе (через запятую).
+ASSISTANT_YANDEX_MODELS = env.list(
+    "ASSISTANT_YANDEX_MODELS", default=["qwen3-235b-a22b-fp8/latest", "yandexgpt/latest"]
+)
+# Адрес сайта — OpenRouter показывает его в своей статистике (HTTP-Referer).
+ASSISTANT_PUBLIC_URL = env("ASSISTANT_PUBLIC_URL", default="")
+# Веб-поиск: Yandex Search API v2. Пусто — берётся YANDEX_VISION_API_KEY (тот же
+# сервисный аккаунт, ему нужна роль search-api.webSearch.user).
+YANDEX_SEARCH_API_KEY = env("YANDEX_SEARCH_API_KEY", default="")
+# RSTMetrology_MCP — заводится сам при migrate, если адрес задан.
+RST_MCP_URL = env("RST_MCP_URL", default="")
+RST_MCP_TOKEN = env("RST_MCP_TOKEN", default="")
+# celery — прогон агента в воркере (очередь assistant); thread — в потоке веб-процесса
+# (для локального запуска без Celery); sync — прямо в запросе (тесты).
+ASSISTANT_RUN_MODE = env("ASSISTANT_RUN_MODE", default="celery")
+
+# --------------------------------------------------------------------------
 # Celery
 # --------------------------------------------------------------------------
 CELERY_BROKER_URL = env("REDIS_URL", default="redis://localhost:6379/0")
@@ -255,6 +280,9 @@ CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_TIMEZONE = TIME_ZONE
+# Ассистент — своя очередь и свой воркер: долгий поиск по ФГИС не должен
+# задерживать распознавание бланков и повторяющиеся задачи.
+CELERY_TASK_ROUTES = {"apps.assistant.tasks.*": {"queue": "assistant"}}
 
 CACHES = {
     "default": {

@@ -36,6 +36,13 @@ USAGE_EXTRA='
 обычное текстовое поле адреса вместо подсказки с районом, уведомления только
 пишутся в лог, фото бланка со скана заводится без распознавания — поверитель
 заполняет поля вручную, глядя на то же фото (см. claude/scans.md).
+
+Ассистент-метролог (вкладка «Ассистент», см. claude/assistant.md):
+OPENROUTER_API_KEY — модели OpenRouter; без него в выборе только модели Yandex
+AI Studio (те же YANDEX_VISION_*). RST_MCP_URL/RST_MCP_TOKEN — RSTMetrology_MCP
+по имени контейнера в mcp-network; веб-поиск — Yandex Search API (тот же
+сервисный аккаунт, роль search-api.webSearch.user). Прогоны агента выполняет
+отдельный контейнер assistant-worker (очередь Celery «assistant»).
 TELEGRAM_WEBHOOK_SECRET генерируется сам, как SECRET_KEY, — как только
 появится TELEGRAM_BOT_TOKEN, вебхук регистрируется сам при каждом запуске
 контейнера (см. claude/hub.md).'
@@ -292,6 +299,10 @@ cmd_install() {
   prompt_secret "YANDEX_VISION_API_KEY" "API-ключ Yandex AI Studio — распознавание бумажных бланков со сканов (https://yandex.cloud/docs/ai-studio/)"
   prompt_secret "YANDEX_VISION_FOLDER_ID" "ID каталога Yandex Cloud для того же ключа"
   prompt_secret "YANDEX_VISION_MODEL" "Код модели в AI Studio (необязательно — по умолчанию qwen3.6-35b-a3b)"
+  prompt_secret "OPENROUTER_API_KEY" "Ключ OpenRouter — модели для ассистента-метролога (https://openrouter.ai/keys); без него — только модели Yandex"
+  prompt_secret "RST_MCP_URL" "Адрес RSTMetrology_MCP для ассистента, внутри mcp-network: http://<контейнер>:<порт>/mcp"
+  prompt_secret "RST_MCP_TOKEN" "Токен доступа к RSTMetrology_MCP (если сервер его требует)"
+  prompt_secret "YANDEX_SEARCH_API_KEY" "Ключ Yandex Search API для веб-поиска ассистента (необязательно — по умолчанию YANDEX_VISION_API_KEY, нужна роль search-api.webSearch.user)"
 
   step "инфраструктура"
   ensure_network
@@ -336,6 +347,10 @@ cmd_update() {
   prompt_secret "YANDEX_VISION_API_KEY" "API-ключ Yandex AI Studio — распознавание бумажных бланков со сканов (https://yandex.cloud/docs/ai-studio/)"
   prompt_secret "YANDEX_VISION_FOLDER_ID" "ID каталога Yandex Cloud для того же ключа"
   prompt_secret "YANDEX_VISION_MODEL" "Код модели в AI Studio (необязательно — по умолчанию qwen3.6-35b-a3b)"
+  prompt_secret "OPENROUTER_API_KEY" "Ключ OpenRouter — модели для ассистента-метролога (https://openrouter.ai/keys); без него — только модели Yandex"
+  prompt_secret "RST_MCP_URL" "Адрес RSTMetrology_MCP для ассистента, внутри mcp-network: http://<контейнер>:<порт>/mcp"
+  prompt_secret "RST_MCP_TOKEN" "Токен доступа к RSTMetrology_MCP (если сервер его требует)"
+  prompt_secret "YANDEX_SEARCH_API_KEY" "Ключ Yandex Search API для веб-поиска ассистента (необязательно — по умолчанию YANDEX_VISION_API_KEY, нужна роль search-api.webSearch.user)"
 
   local before
   before="$(git rev-parse HEAD)"
