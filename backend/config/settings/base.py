@@ -201,12 +201,16 @@ TYPST_BINARY = env("TYPST_BINARY", default="")
 YANDEX_VISION_API_KEY = env("YANDEX_VISION_API_KEY", default="")
 YANDEX_VISION_FOLDER_ID = env("YANDEX_VISION_FOLDER_ID", default="")
 YANDEX_VISION_MODEL = env("YANDEX_VISION_MODEL", default="qwen3.6-35b-a3b")
+# Свой адрес chat/completions — для прокси или проверки на заглушке; пусто — облако Yandex.
+YANDEX_AI_CHAT_URL = env("YANDEX_AI_CHAT_URL", default="")
 
 # --------------------------------------------------------------------------
 # ФГИС «Аршин»
 # --------------------------------------------------------------------------
 # Открытый реестр ФИФ ОЕИ — читаем справочники и подсказываем типы СИ.
 ARSHIN_BASE_URL = env("ARSHIN_BASE_URL", default="https://fgis.gost.ru/fundmetrology/eapi")
+# Скачивать методику и описание типа в фоне (Celery), когда заводится тип из ФИФ.
+FIF_DOCUMENTS_AUTO_DOWNLOAD = env.bool("FIF_DOCUMENTS_AUTO_DOWNLOAD", default=True)
 # Ключи из старого config.yaml. Что именно они открывают — надо выяснить
 # перед реализацией выгрузки сведений о поверке.
 ARSHIN_PUBLIC_KEY = env("ARSHIN_PUBLIC_KEY", default="")

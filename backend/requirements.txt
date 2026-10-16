@@ -18,3 +18,4 @@ Pillow==11.1.0
 croniter==5.0.1
 opencv-python-headless==4.10.0.84
 qrcode[pil]==7.4.2
+pypdfium2==4.30.0

@@ -153,10 +153,13 @@ export default function SiTypePicker({
                   registry_number: item.registry_number,
                   manufacturer: item.manufacturer,
                   interval_months: item.interval_months,
+                  fif_uuid: item.fif_uuid,
+                  query,
                 })
               }
             >
-              <b>+ {item.name || item.notation}</b>
+              <b>+ {item.notation || item.name}</b>
+              {item.title && <span className="sub">{item.title}</span>}
               <span className="sub">
                 № {item.registry_number} · {item.manufacturer || "изготовитель не указан"}
               </span>

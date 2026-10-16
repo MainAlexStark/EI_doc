@@ -580,6 +580,8 @@ export type SiTypeSuggestion = {
   label: string;
   ambiguous: boolean;
   needs_review?: boolean;
+  title?: string;
+  fif_uuid?: string;
 };
 
 export type SiTypeSuggestResponse = { results: SiTypeSuggestion[]; warning?: string };
@@ -795,6 +797,9 @@ export type SiType = {
   verification_interval_months: number;
   limits: WaterLimits;
   fif_url: string;
+  fif_uuid: string;
+  type_title: string;
+  certificate_valid_to: string | null;
   needs_review: boolean;
   created_by_name: string;
   reviewed_by_name: string;
@@ -810,6 +815,9 @@ export type SiTypeInput = {
   manufacturer: string;
   verification_interval_months?: number | null;
   limits?: WaterLimits;
+  fif_uuid?: string;
+  type_title?: string;
+  certificate_valid_to?: string | null;
 };
 
 export type LimitPreset = {
@@ -848,3 +856,84 @@ export const updateSiType = (id: number, payload: Partial<SiTypeInput>) =>
 
 export const confirmSiType = (id: number) =>
   json<SiType>(`/api/catalog/si-types/${id}/confirm/`, { method: "POST" });
+
+// ---------------------------------------------------------------------------
+// Реестр ФИФ (РСТ, ФГИС «Аршин»): карточка типа, документы, чтение описания
+// (apps/catalog/api_fif.py)
+// ---------------------------------------------------------------------------
+export type FifDocument = {
+  id: number;
+  kind: "meth" | "spec";
+  kind_display: string;
+  title: string;
+  url: string;
+  downloaded: boolean;
+  size: number | null;
+  error: string;
+  file_url: string;
+};
+
+export type FifCard = {
+  uuid: string;
+  registry_number: string;
+  title: string;
+  notation: string;
+  variants: string[];
+  manufacturer: string;
+  valid_to: string | null;
+  is_valid: boolean | null;
+  mpi: { parameter: string; months: number; valid_from: string }[];
+  documents: FifDocument[];
+  already_added: { id: number; name: string; needs_review: boolean }[];
+  limits_reader: boolean;
+};
+
+export type FifLimitsResult = {
+  found: boolean;
+  limits: Record<string, number>;
+  missing: string[];
+  dn: number | null;
+  variant_matched: string | null;
+  quote: string;
+  comment: string;
+  mode: "text" | "images";
+};
+
+export const fetchFifCard = (ident: string) =>
+  json<FifCard>(`/api/catalog/fif/types/${encodeURIComponent(ident)}/`);
+
+export const readFifLimits = (ident: string, variant: string) =>
+  json<FifLimitsResult>(`/api/catalog/fif/types/${encodeURIComponent(ident)}/limits/`, {
+    method: "POST",
+    body: JSON.stringify({ variant }),
+  });
+
+export const fetchSiTypeDocuments = (siTypeId: number) =>
+  json<FifDocument[]>(`/api/catalog/si-types/${siTypeId}/documents/`);
+
+/** Открыть документ типа в новой вкладке: свой файл — с авторизацией,
+ * а если скачать к себе не вышло — ссылкой в ФГИС. Вкладку открываем сразу,
+ * синхронно с нажатием, иначе мобильный браузер её заблокирует. */
+export async function openFifDocument(doc: FifDocument): Promise<void> {
+  const tab = window.open("", "_blank");
+  try {
+    const response = await call(doc.file_url);
+    if (response.ok) {
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      else window.location.href = url;
+      return;
+    }
+    let target = doc.url;
+    try {
+      target = (await response.json()).url || doc.url;
+    } catch {
+      /* тело не JSON — остаётся ссылка из карточки */
+    }
+    if (tab) tab.location.href = target;
+  } catch (exc) {
+    tab?.close();
+    throw exc;
+  }
+}

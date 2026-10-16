@@ -1,0 +1,42 @@
+{
+  "_source": "Живые ответы ФГИС «Аршин» через MCP-сервер РСТ, 16.10.2026",
+  "search_svk": {"result": {"count": 55, "items": [
+    {"manufacturers": "ООО «Норма ИС», РОССИЯ, г. Санкт-Петербург", "mit_uuid": "428d77c1-1a1c-6a52-0729-c152d1f7fb56", "notation": "НОРМА СВК", "number": "97984-26", "title": "Счетчики холодной и горячей воды крыльчатые"},
+    {"manufacturers": "Индивидуальный предприниматель Карпов Андрей Николаевич (ИП Карпов А.Н.), г. Альметьевск\n", "mit_uuid": "65dd276c-9d79-77a2-2ddf-4fea05e00c87", "notation": "СВК-15У", "number": "90502-23", "title": "Счетчики воды крыльчатые универсальные"},
+    {"manufacturers": "ООО \"ТД \"Экватэл\", РОССИЯ, г. Набережные Челны", "mit_uuid": "38b77280-fe7d-f535-7873-5778f0ce22e4", "notation": "ЭКВАТЭЛ СВК-15У", "number": "81271-21", "title": "Счетчики воды крыльчатые универсальные"},
+    {"manufacturers": "ООО ПКФ «ГЕРРИДА», РОССИЯ, г. Краснодар", "mit_uuid": "dccc2373-0134-3a3f-6515-89a3c1a3a194", "notation": "СВК, СВКМ", "number": "75657-19", "title": "Счетчики воды крыльчатые"},
+    {"manufacturers": "АО \"АПЗ\", г. Арзамас", "mit_uuid": "79ca313c-b94a-2229-e41a-573ba91c005d", "notation": "типа СВК", "number": "13869-13", "title": "Счетчики холодной и горячей воды крыльчатые"}
+  ]}},
+  "card_puls": {"result": {
+    "general": {"mit_uuid": "c362cd27-6d3c-7887-f820-cb2a86b6d34e", "number": "68501-17", "title": "Счетчики воды", "notation": ["ПУЛЬС"], "valid_to": "2027-09-05", "ident_code": "ОС", "production_type": "1"},
+    "mpi": [
+      {"parameter": "Для исп. У при учете холодной воды", "mpi": 72, "valid_from": "2017-01-09"},
+      {"parameter": "Для исп. У при учете горячей воды", "mpi": 48, "valid_from": "2017-01-09"},
+      {"parameter": "Для исп. Х", "mpi": 72, "valid_from": "2017-01-09"},
+      {"parameter": "Для исп. Г", "mpi": 48, "valid_from": "2017-01-09"}
+    ],
+    "meth": [{"title": "Методики поверки", "doc_url": "https://fgis.gost.ru/fundmetrology/eapi/doc/5ba71ac5-5c43-6b91-582b-6f55667c3034"}],
+    "spec": [{"doc_url": "https://fgis.gost.ru/fundmetrology/eapi/doc/61161e44-2bfa-297f-919f-68641d8e90d2"}],
+    "manufacturer": [{"title": "ООО \"Аква-С\", г.Реутов"}]
+  }},
+  "card_svk": {"result": {
+    "general": {"mit_uuid": "79ca313c-b94a-2229-e41a-573ba91c005d", "number": "13869-13", "title": "Счетчики холодной и горячей воды крыльчатые", "notation": ["типа СВК"], "valid_to": "2028-08-10", "production_type": "1"},
+    "mpi": [
+      {"parameter": "Для гор. воды", "mpi": 48, "valid_from": "2013-01-01"},
+      {"parameter": "Для хол. воды", "mpi": 72, "valid_from": "2013-01-01"},
+      {"parameter": "С 01.04.2015 все", "mpi": 72, "valid_from": "2015-04-01"}
+    ],
+    "meth": [{"title": "Методики поверки", "doc_url": "https://fgis.gost.ru/fundmetrology/eapi/doc/82ec5f4e-acaf-7ac4-3413-1e170ca08ba6"}],
+    "spec": [{"doc_url": "https://fgis.gost.ru/fundmetrology/eapi/doc/bc04dd0c-72e3-fa54-8432-d4e7f1b09cca"}],
+    "manufacturer": [{"title": "Акционерное общество \"Арзамасский приборостроительный завод имени П.И. Пландина\" (АО \"АПЗ\"), Нижегородская обл., г. Арзамас"}]
+  }},
+  "card_betar_old": {"result": {
+    "general": {"mit_uuid": "c8f14494-2d57-8e48-f78c-097e77ab1ca1", "number": "16078-05", "title": "Счетчики холодной и горячей воды", "notation": ["СХВ (СХВ-15, СХВ-15Д, СХВ-20, СХВ-20Д), СГВ (СГВ-15, СГВ-15Д, СГВ-20, СГВ-20Д)"], "valid_to": "2015-01-01", "production_type": "1"},
+    "mpi": [
+      {"parameter": "для гор. воды", "mpi": 48, "valid_from": "2005-01-01"},
+      {"parameter": "для хол. воды", "mpi": 72, "valid_from": "2005-01-01"}
+    ],
+    "spec": [{"doc_url": "https://fgis.gost.ru/fundmetrology/eapi/doc/7ab7c63e-7cff-c2e0-6b0c-e0bee1c0dcdf"}],
+    "manufacturer": [{"title": "ООО ПКФ \"Бетар\"", "country": "РОССИЯ", "address": "г.Чистополь"}]
+  }}
+}

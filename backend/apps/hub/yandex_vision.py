@@ -130,38 +130,56 @@ class YandexVisionClient:
 
     def recognize_blank(self, image_bytes: bytes, *, mime_type: str = "image/jpeg") -> dict:
         """Строгий JSON по RESPONSE_SCHEMA. Кидает RecognitionUnavailable, если не вышло."""
+        return self.complete_json(
+            [
+                {"type": "text", "text": PROMPT},
+                {"type": "image_bytes", "data": image_bytes, "mime": mime_type},
+            ],
+            RESPONSE_SCHEMA,
+            name="blank_recognition",
+        )
+
+    def complete_json(
+        self, parts: list[dict], schema: dict, *, name: str, timeout: float | None = None,
+    ) -> dict:
+        """Один запрос к модели с жёсткой JSON-схемой ответа.
+
+        parts — {"type": "text", "text": ...} и {"type": "image_bytes",
+        "data": bytes, "mime": ...}; картинки уходят data-URL. Используется
+        и для бланков, и для чтения описаний типа (apps.arshin.limits).
+        """
         if not self.is_configured:
             raise RecognitionUnavailable("YANDEX_VISION_API_KEY/YANDEX_VISION_FOLDER_ID не заданы")
 
-        encoded = base64.b64encode(image_bytes).decode("ascii")
+        content = []
+        for part in parts:
+            if part.get("type") == "image_bytes":
+                encoded = base64.b64encode(part["data"]).decode("ascii")
+                mime = part.get("mime") or "image/jpeg"
+                content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}})
+            else:
+                content.append({"type": "text", "text": part.get("text", "")})
+
         body = {
             "model": f"gpt://{self.folder_id}/{self.model}",
             "temperature": 0.1,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": PROMPT},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
-                    ],
-                }
-            ],
+            "messages": [{"role": "user", "content": content}],
             "response_format": {
                 "type": "json_schema",
-                "json_schema": {"name": "blank_recognition", "schema": RESPONSE_SCHEMA},
+                "json_schema": {"name": name, "schema": schema},
             },
         }
 
         try:
             response = requests.post(
-                CHAT_URL,
+                getattr(settings, "YANDEX_AI_CHAT_URL", "") or CHAT_URL,
                 json=body,
                 headers={
                     "Content-Type": "application/json",
                     "Authorization": f"Api-Key {self.api_key}",
                     "OpenAI-Project": self.folder_id,
                 },
-                timeout=self.timeout,
+                timeout=timeout or self.timeout,
             )
             response.raise_for_status()
             payload = response.json()
@@ -171,8 +189,8 @@ class YandexVisionClient:
             raise RecognitionUnavailable("Распознавание вернуло не JSON") from exc
 
         try:
-            content = payload["choices"][0]["message"]["content"]
-            data = json.loads(content) if isinstance(content, str) else content
+            message = payload["choices"][0]["message"]["content"]
+            data = json.loads(message) if isinstance(message, str) else message
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise RecognitionUnavailable(f"Неожиданный формат ответа модели: {exc}") from exc
 

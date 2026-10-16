@@ -52,8 +52,8 @@ class ParseTestCase(SimpleTestCase):
         assert "без наименования" in parsed.label
 
     def test_label_always_names_the_manufacturer(self):
-        known = FifType(registry_number="1-06", name="СВК-15", manufacturer="Тепловодомер")
-        unknown = FifType(registry_number="1-06", name="СВК-15")
+        known = FifType(registry_number="1-06", notation="СВК-15", manufacturer="Тепловодомер")
+        unknown = FifType(registry_number="1-06", notation="СВК-15")
         assert "Тепловодомер" in known.label
         assert "изготовитель не указан" in unknown.label
 
@@ -62,9 +62,9 @@ class AmbiguityTestCase(SimpleTestCase):
     def test_same_name_from_different_manufacturers_is_flagged(self):
         """Тот самый случай: «СВК-15» у трёх изготовителей."""
         candidates = [
-            FifType(registry_number="1-06", name="СВК-15", manufacturer="Тепловодомер"),
-            FifType(registry_number="2-09", name="СВК-15", manufacturer="Бетар"),
-            FifType(registry_number="3-11", name="ВСХ-15", manufacturer="Метер"),
+            FifType(registry_number="1-06", notation="СВК-15", manufacturer="Тепловодомер"),
+            FifType(registry_number="2-09", notation="СВК-15", manufacturer="Бетар"),
+            FifType(registry_number="3-11", notation="ВСХ-15", manufacturer="Метер"),
         ]
         result = mark_ambiguous(candidates)
 
@@ -73,7 +73,7 @@ class AmbiguityTestCase(SimpleTestCase):
 
     def test_case_and_spacing_do_not_hide_a_duplicate(self):
         candidates = [
-            FifType(registry_number="1-06", name="СВК-15", manufacturer="А"),
-            FifType(registry_number="2-09", name=" свк-15 ", manufacturer="Б"),
+            FifType(registry_number="1-06", notation="СВК-15", manufacturer="А"),
+            FifType(registry_number="2-09", notation=" свк-15 ", manufacturer="Б"),
         ]
         assert [item["ambiguous"] for item in mark_ambiguous(candidates)] == [True, True]

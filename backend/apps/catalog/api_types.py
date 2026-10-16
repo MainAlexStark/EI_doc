@@ -156,6 +156,7 @@ class SiTypeSerializer(serializers.ModelSerializer):
         fields = [
             "id", "family", "family_name", "calculator_key", "registry_number", "name",
             "manufacturer", "verification_interval_months", "limits", "fif_url",
+            "fif_uuid", "type_title", "certificate_valid_to",
             "needs_review", "created_by_name", "reviewed_by_name", "reviewed_at", "label",
         ]
         read_only_fields = ["needs_review", "reviewed_at"]
@@ -187,6 +188,9 @@ class SiTypeWriteSerializer(serializers.Serializer):
     limits = serializers.JSONField(required=False)
     fif_url = serializers.URLField(required=False, allow_blank=True, default="")
     fif_raw = serializers.JSONField(required=False)
+    fif_uuid = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    type_title = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    certificate_valid_to = serializers.DateField(required=False, allow_null=True)
 
     def validate_registry_number(self, value: str) -> str:
         value = value.strip()
@@ -270,6 +274,9 @@ class SiTypeListCreateView(APIView):
             limits=data.get("limits") or {},
             fif_url=data.get("fif_url", ""),
             fif_raw=data.get("fif_raw") or {},
+            fif_uuid=data.get("fif_uuid", "").strip(),
+            type_title=data.get("type_title", "").strip(),
+            certificate_valid_to=data.get("certificate_valid_to"),
             created_by=request.user,
             needs_review=not reviewer,
             reviewed_by=request.user if reviewer else None,
@@ -285,6 +292,10 @@ class SiTypeListCreateView(APIView):
             body = SiTypeSerializer(si_type).data
             body["existing"] = True
             return Response(body, status=status.HTTP_200_OK)
+        if si_type.fif_uuid:
+            from apps.catalog.api_fif import schedule_documents
+
+            transaction.on_commit(lambda: schedule_documents(si_type.fif_uuid))
         return Response(SiTypeSerializer(si_type).data, status=status.HTTP_201_CREATED)
 
 

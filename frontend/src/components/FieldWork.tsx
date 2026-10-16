@@ -19,6 +19,7 @@ import {
   type WorkOrder,
 } from "../api";
 import ScanReview from "./ScanReview";
+import SiTypeDocuments from "./FifDocuments";
 import SiTypePicker, { type PickedType } from "./SiTypePicker";
 import {
   addVerification,
@@ -865,6 +866,7 @@ export default function FieldWork({ me }: { me: Me | null }) {
             </div>
             <StatusBadge v={activeVerification} />
           </div>
+          {online && activeVerification.si_type_id ? <SiTypeDocuments siTypeId={activeVerification.si_type_id} /> : null}
         </div>
         {layoutsInfo ? (
           <MeasurementForm

@@ -46,7 +46,7 @@ class SuggestTestCase(TestCase):
     def test_same_name_from_another_manufacturer_is_flagged(self, fif):
         """Локальный СВК-15 и такой же из ФИФ от другого изготовителя."""
         fif.return_value.search_types.return_value = [
-            FifType(registry_number="98765-22", name="СВК-15", manufacturer="Бетар")
+            FifType(registry_number="98765-22", notation="СВК-15", manufacturer="Бетар")
         ]
         results = self.get("СВК").data["results"]
 
@@ -57,7 +57,7 @@ class SuggestTestCase(TestCase):
     @mock.patch("apps.catalog.api.FifClient")
     def test_duplicate_from_fif_is_not_shown_twice(self, fif):
         fif.return_value.search_types.return_value = [
-            FifType(registry_number="12345-06", name="СВК-15", manufacturer="Тепловодомер")
+            FifType(registry_number="12345-06", notation="СВК-15", manufacturer="Тепловодомер")
         ]
         results = self.get("СВК").data["results"]
 

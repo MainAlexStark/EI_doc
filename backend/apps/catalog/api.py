@@ -31,6 +31,8 @@ class SiTypeSuggestionSerializer(serializers.Serializer):
         help_text="Наименование совпадает с другим кандидатом — выбирать только по изготовителю"
     )
     needs_review = serializers.BooleanField(help_text="Тип заведён поверителем и ждёт проверки метролога")
+    title = serializers.CharField(allow_blank=True, help_text="Наименование типа в Госреестре")
+    fif_uuid = serializers.CharField(allow_blank=True, help_text="mit_uuid карточки в ФИФ")
 
 
 class SiTypeSuggestView(APIView):
@@ -100,6 +102,8 @@ class SiTypeSuggestView(APIView):
                 ),
                 "ambiguous": False,
                 "needs_review": si_type.needs_review,
+                "title": si_type.type_title,
+                "fif_uuid": si_type.fif_uuid,
             }
             for si_type in found
         ]

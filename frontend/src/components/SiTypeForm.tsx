@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createSiType,
+  fetchFifCard,
   fetchSiTypePresets,
+  readFifLimits,
   updateSiType,
+  type FifCard,
+  type FifLimitsResult,
   type LimitPreset,
   type SiType,
   type SiTypeInput,
   type SiTypePresets,
 } from "../api";
+import SiTypeDocuments, { FifDocumentButtons } from "./FifDocuments";
 
 /**
  * Форма типа СИ — вместо Django-админки и ручного JSON с характеристиками.
@@ -44,7 +49,30 @@ function sameLimits(a: Record<string, string>, b: Record<string, number>): boole
   return Object.keys(b).every((key) => Number(String(a[key] ?? "").replace(",", ".")) === b[key]);
 }
 
-export type SiTypeDraft = Partial<SiTypeInput> & { interval_months?: number | null };
+export type SiTypeDraft = Partial<SiTypeInput> & {
+  interval_months?: number | null;
+  /** Что поверитель вводил в поиске — по нему выбираем модификацию из карточки ФИФ. */
+  query?: string;
+};
+
+function formatDate(value: string | null): string {
+  return value ? new Date(value).toLocaleDateString("ru-RU") : "";
+}
+
+/** Модификация из карточки, больше всего похожая на то, что искали. */
+function bestVariant(variants: string[], query: string): string | null {
+  const q = query.trim().toLowerCase().replace(/[\s-]/g, "");
+  if (!q) return null;
+  const norm = (v: string) => v.toLowerCase().replace(/[\s-]/g, "");
+  const exact = variants.find((v) => norm(v) === q) ?? variants.find((v) => norm(v).includes(q));
+  if (exact) return exact;
+  // Ввели конкретную модификацию, которой в реестре нет («СВК 15-3-2» при «типа СВК») —
+  // берём как ввели.
+  if (variants.some((v) => q.startsWith(norm(v)))) return query.trim();
+  return null;
+}
+
+type AiState = "idle" | "reading" | "done" | "failed";
 
 export default function SiTypeForm({
   initial,
@@ -79,6 +107,77 @@ export default function SiTypeForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // --- Госреестр (ФИФ): карточка типа и чтение описания типа ------------
+  const [fifUuid, setFifUuid] = useState(existing?.fif_uuid || initial?.fif_uuid || "");
+  const [card, setCard] = useState<FifCard | null>(null);
+  const [cardState, setCardState] = useState<"idle" | "loading" | "failed">("idle");
+  const [cardError, setCardError] = useState("");
+  const [ai, setAi] = useState<AiState>("idle");
+  const [aiResult, setAiResult] = useState<FifLimitsResult | null>(null);
+  const [aiError, setAiError] = useState("");
+  // Ref, а не state: ответ модели приходит позже, и проверять надо
+  // актуальное значение, а не то, что было при запуске чтения.
+  const limitsTouched = useRef(false);
+  const setLimitsTouched = (value: boolean) => {
+    limitsTouched.current = value;
+  };
+  const [readFor, setReadFor] = useState("");
+
+  const readLimits = async (uuid: string, variant: string) => {
+    setAi("reading");
+    setAiError("");
+    setReadFor(variant);
+    try {
+      const result = await readFifLimits(uuid, variant);
+      setAiResult(result);
+      setAi("done");
+      if (result.found && !limitsTouched.current) {
+        setLimits((current) => ({
+          ...current,
+          ...Object.fromEntries(Object.entries(result.limits).map(([k, v]) => [k, toText(v)])),
+        }));
+        setPresetKey(null);
+        setGuessed(false);
+        setShowLimits(true);
+      }
+    } catch (exc) {
+      setAi("failed");
+      setAiError(exc instanceof Error ? exc.message : "Не удалось прочитать описание типа");
+    }
+  };
+
+  const loadCard = async (ident: string, { fillForm }: { fillForm: boolean }) => {
+    setCardState("loading");
+    setCardError("");
+    try {
+      const data = await fetchFifCard(ident);
+      setCard(data);
+      setFifUuid(data.uuid);
+      setCardState("idle");
+      if (!fillForm) return;
+      const variant = bestVariant(data.variants, initial?.query ?? "") ?? bestVariant(data.variants, name);
+      const chosenName = variant ?? (name.trim() || data.variants[0] || data.title);
+      setName(chosenName);
+      setRegistry((current) => current || data.registry_number);
+      setManufacturer((current) => current || data.manufacturer);
+      const months = Array.from(new Set(data.mpi.map((m) => m.months)));
+      if (months.length === 1) setIntervalMonths(String(months[0]));
+      if (data.limits_reader) void readLimits(data.uuid, chosenName);
+    } catch (exc) {
+      setCardState("failed");
+      setCardError(exc instanceof Error ? exc.message : "Реестр ФИФ не ответил");
+    }
+  };
+
+  const cardRequested = useRef(false);
+  useEffect(() => {
+    // Ref — чтобы в dev (StrictMode) не читать описание типа дважды.
+    if (cardRequested.current) return;
+    cardRequested.current = true;
+    if (!existing && initial?.fif_uuid) void loadCard(initial.fif_uuid, { fillForm: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     loadPresets()
       .then((data) => {
@@ -93,7 +192,7 @@ export default function SiTypeForm({
         const dn = guessDn(`${source.name ?? ""} ${initial?.registry_number ?? ""}`);
         const preset = dn ? data.presets.find((p) => p.dn === dn) : undefined;
         if (preset) {
-          applyPreset(preset);
+          applyPreset(preset, false);
           setGuessed(true);
         } else {
           setShowLimits(false);
@@ -109,9 +208,10 @@ export default function SiTypeForm({
   );
   const needsLimits = calculatorKey === "water_meter";
 
-  function applyPreset(preset: LimitPreset) {
+  function applyPreset(preset: LimitPreset, byUser = true) {
     setPresetKey(preset.key);
     setGuessed(false);
+    if (byUser) setLimitsTouched(true);
     setLimits(Object.fromEntries(Object.entries(preset.limits).map(([k, v]) => [k, toText(v)])));
   }
 
@@ -134,6 +234,11 @@ export default function SiTypeForm({
       manufacturer: manufacturer.trim(),
       verification_interval_months: intervalMonths ? Number(intervalMonths) : null,
     };
+    if (fifUuid) payload.fif_uuid = fifUuid;
+    if (card) {
+      payload.type_title = card.title;
+      payload.certificate_valid_to = card.valid_to;
+    }
     if (needsLimits) payload.limits = limits;
     setBusy(true);
     try {
@@ -158,6 +263,78 @@ export default function SiTypeForm({
     >
       {title && <h3>{title}</h3>}
       {loadError && <div className="error">{loadError}</div>}
+
+      {cardState === "loading" && <div className="fif-panel"><span className="sub">Загружаю карточку из Госреестра…</span></div>}
+      {cardState === "failed" && (
+        <div className="hint warn-text">
+          Госреестр не ответил ({cardError}). Заполните поля вручную — или попробуйте ещё раз позже.
+        </div>
+      )}
+      {card && (
+        <div className="fif-panel">
+          <div>
+            <b>Госреестр № {card.registry_number}</b> · {card.title}
+          </div>
+          {card.manufacturer && <div className="sub">{card.manufacturer}</div>}
+          {card.valid_to && (
+            <div className="sub">
+              {card.is_valid === false ? (
+                <span className="pill warn">
+                  свидетельство истекло {formatDate(card.valid_to)} — поверять можно приборы, выпущенные до этой даты
+                </span>
+              ) : (
+                <>Свидетельство об утверждении типа действует до {formatDate(card.valid_to)}</>
+              )}
+            </div>
+          )}
+          {card.already_added.length > 0 && (
+            <div className="sub">
+              По этому номеру уже заведены: {card.already_added.map((t) => t.name).join(", ")}
+            </div>
+          )}
+          {!existing && card.already_added.some((t) => t.name.trim().toLowerCase() === name.trim().toLowerCase()) && (
+            <div className="ai-note ok">«{name.trim()}» уже есть в справочнике — нажмите «Завести тип», и будет выбран существующий.</div>
+          )}
+
+          {card.variants.length > 1 && (
+            <div className="field">
+              <label>Модификация — нажмите, чтобы подставить в наименование</label>
+              <div className="chip-row">
+                {card.variants.map((variant) => (
+                  <button
+                    type="button"
+                    key={variant}
+                    className={`chip ${name === variant ? "active" : ""}`}
+                    onClick={() => setName(variant)}
+                  >
+                    {variant}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {new Set(card.mpi.map((m) => m.months)).size > 1 && (
+            <div className="field">
+              <label>Межповерочный интервал по реестру</label>
+              <div className="chip-row">
+                {card.mpi.map((m) => (
+                  <button
+                    type="button"
+                    key={`${m.parameter}-${m.months}`}
+                    className={`chip ${intervalMonths === String(m.months) ? "active" : ""}`}
+                    onClick={() => setIntervalMonths(String(m.months))}
+                  >
+                    {m.months} мес. · {m.parameter || "все"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <FifDocumentButtons documents={card.documents} />
+        </div>
+      )}
 
       <div className="field-row">
         <div className="field" style={{ flex: 2 }}>
@@ -204,6 +381,28 @@ export default function SiTypeForm({
 
       {needsLimits && info && (
         <>
+          {ai === "reading" && (
+            <div className="ai-note reading">Читаю описание типа — ищу расходы и погрешности для «{readFor}»… Это до минуты.</div>
+          )}
+          {ai === "done" && aiResult?.found && (
+            <div className="ai-note ok">
+              <b>Значения взяты из описания типа{aiResult.variant_matched ? ` (${aiResult.variant_matched})` : ""} — сверьте.</b>
+              {aiResult.missing.length > 0 && <div>Не нашёл часть полей — дозаполните вручную.</div>}
+              {aiResult.quote && <blockquote>{aiResult.quote}</blockquote>}
+              {aiResult.comment && <div className="sub">{aiResult.comment}</div>}
+            </div>
+          )}
+          {ai === "done" && aiResult && !aiResult.found && (
+            <div className="ai-note warn">
+              В описании типа расходы не нашлись{aiResult.comment ? `: ${aiResult.comment}` : ""}. Выберите шаблон по Ду.
+            </div>
+          )}
+          {ai === "failed" && <div className="ai-note warn">Описание типа прочитать не вышло ({aiError}). Выберите шаблон по Ду.</div>}
+          {card && card.limits_reader && ai !== "reading" && name.trim() && name.trim() !== readFor && (
+            <button type="button" className="link" onClick={() => void readLimits(card.uuid, name.trim())}>
+              Прочитать характеристики для «{name.trim()}» из описания типа
+            </button>
+          )}
           <div className="field">
             <label>Характеристики — выберите шаблон по Ду</label>
             <div className="preset-grid">
@@ -240,6 +439,7 @@ export default function SiTypeForm({
                       const value = e.target.value;
                       setLimits((current) => ({ ...current, [f.key]: value }));
                       setPresetKey(null);
+                      setLimitsTouched(true);
                     }}
                   />
                 </div>
@@ -248,6 +448,18 @@ export default function SiTypeForm({
             </div>
           )}
         </>
+      )}
+
+      {existing && existing.fif_uuid && !card && (
+        <div className="field">
+          <label>Документы из Госреестра</label>
+          <SiTypeDocuments siTypeId={existing.id} />
+        </div>
+      )}
+      {existing && !fifUuid && cardState !== "loading" && registry.trim() && (
+        <button type="button" className="link" onClick={() => void loadCard(registry.trim(), { fillForm: false })}>
+          Найти № {registry.trim()} в Госреестре — подтянуть методику поверки и описание типа
+        </button>
       )}
 
       {!existing && !info?.can_review && (

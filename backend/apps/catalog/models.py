@@ -126,6 +126,15 @@ class SiType(models.Model):
                   "Читается apps.verification.calculators.water_meter.MeterLimits",
     )
     fif_url = models.URLField("ссылка на ФИФ", blank=True)
+    fif_uuid = models.CharField(
+        "тип в реестре ФИФ (mit_uuid)", max_length=64, blank=True, db_index=True,
+        help_text="По нему находятся методика поверки и описание типа (apps.arshin.FifDocument)",
+    )
+    type_title = models.CharField(
+        "наименование типа в Госреестре", max_length=255, blank=True,
+        help_text="Например «Счетчики холодной и горячей воды крыльчатые»",
+    )
+    certificate_valid_to = models.DateField("свидетельство об утверждении типа действует до", null=True, blank=True)
     fif_raw = models.JSONField("ответ ФИФ как есть", default=dict, blank=True)
     is_active = models.BooleanField("используется", default=True)
 
