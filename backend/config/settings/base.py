@@ -254,6 +254,10 @@ TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 # OpenRouter — каталог сильных моделей (Claude, GPT, Gemini…). Пусто — в выборе
 # остаются только модели Yandex AI Studio (ключи YANDEX_VISION_* выше).
 OPENROUTER_API_KEY = env("OPENROUTER_API_KEY", default="")
+# Прокси только для запросов к OpenRouter (с российских адресов он отвечает 403).
+# http://user:pass@host:port или socks5h://user:pass@host:port. Yandex, ФГИС и РСТ
+# ходят напрямую.
+OPENROUTER_PROXY = env("OPENROUTER_PROXY", default="")
 # Модель по умолчанию «провайдер:модель»; правится и на экране «Контекст → Настройки».
 ASSISTANT_DEFAULT_MODEL = env("ASSISTANT_DEFAULT_MODEL", default="")
 # Модели Yandex AI Studio, которые показывать в выборе (через запятую).

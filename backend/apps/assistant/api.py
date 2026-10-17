@@ -296,10 +296,12 @@ class AttachmentDownloadView(APIView):
 # ---------------------------------------------------------------------------
 class ModelsView(APIView):
     def get(self, request):
+        models = llm.available_models()
         return Response({
             "default": llm.default_model(),
             "providers": {p: llm.provider_configured(p) for p in ("openrouter", "yandex")},
-            "models": llm.available_models(),
+            "models": models,
+            "notice": llm.models_notice(),
         })
 
 

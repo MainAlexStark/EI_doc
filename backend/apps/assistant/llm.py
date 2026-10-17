@@ -92,6 +92,11 @@ def _endpoint(provider: str, name: str) -> tuple[str, dict, str]:
     return OPENROUTER_URL, headers, name
 
 
+def _proxies(provider: str) -> dict | None:
+    url = getattr(settings, "OPENROUTER_PROXY", "") if provider == "openrouter" else ""
+    return {"http": url, "https": url} if url else None
+
+
 def _iter_sse(response) -> Iterator[dict]:
     for raw in response.iter_lines(decode_unicode=False):
         if not raw:
@@ -142,6 +147,7 @@ def chat(
     try:
         response = requests.post(
             f"{base}/chat/completions", headers=headers, json=body, stream=True, timeout=(15, timeout),
+            proxies=_proxies(provider),
         )
     except requests.RequestException as exc:
         raise LLMError(f"Модель недоступна: {exc}") from exc
@@ -203,17 +209,23 @@ def chat(
 # ---------------------------------------------------------------------------
 # Каталог моделей для выбора в чате
 # ---------------------------------------------------------------------------
+_catalog_error: str = ""
+
+
 def _openrouter_models() -> list[dict]:
+    global _catalog_error
     cached = cache.get("assistant:openrouter-models")
-    if cached is not None:
+    if cached:
         return cached
     try:
-        response = requests.get(f"{OPENROUTER_URL}/models", timeout=15)
+        response = requests.get(f"{OPENROUTER_URL}/models", timeout=15, proxies=_proxies("openrouter"))
         response.raise_for_status()
         rows = response.json().get("data", [])
     except (requests.RequestException, ValueError) as exc:
+        _catalog_error = f"каталог OpenRouter недоступен с сервера: {exc}"
         logger.warning("Каталог OpenRouter недоступен: %s", exc)
         return []
+    _catalog_error = ""
     models = []
     for row in rows:
         params = row.get("supported_parameters") or []
@@ -232,8 +244,26 @@ def _openrouter_models() -> list[dict]:
             "created": row.get("created") or 0,
         })
     models.sort(key=lambda m: -m["created"])
-    cache.set("assistant:openrouter-models", models, 6 * 3600)
+    if models:
+        cache.set("assistant:openrouter-models", models, 6 * 3600)
     return models
+
+
+def normalize_model_id(model_id: str) -> str:
+    """«deepseek/x» → «openrouter:deepseek/x», чтобы id совпадал с каталогом."""
+    model_id = (model_id or "").strip()
+    if not model_id:
+        return ""
+    provider, name = split_model(model_id)
+    return f"{provider}:{name}"
+
+
+def _stub(model_id: str) -> dict:
+    provider, name = split_model(model_id)
+    return {
+        "id": f"{provider}:{name}", "name": name, "provider": provider,
+        "context_length": None, "vision": False, "price_in": None, "price_out": None,
+    }
 
 
 def _per_million(value) -> float | None:
@@ -252,8 +282,26 @@ def available_models() -> list[dict]:
                 "context_length": None, "vision": False, "price_in": None, "price_out": None,
             })
     if provider_configured("openrouter"):
-        models.extend(_openrouter_models())
+        catalog = _openrouter_models()
+        models.extend(catalog)
+        if not catalog:
+            # Каталог не скачался — оставляем в выборе хотя бы модель по умолчанию,
+            # чат с ней работает и без каталога.
+            fallback = default_model()
+            if fallback and split_model(fallback)[0] == "openrouter":
+                models.append(_stub(fallback))
     return models
+
+
+def models_notice() -> str:
+    """Почему список моделей пуст или неполон — для подсказки в интерфейсе."""
+    if not provider_configured("openrouter") and not provider_configured("yandex"):
+        return ("Сервер не видит ни OPENROUTER_API_KEY, ни YANDEX_VISION_API_KEY/YANDEX_VISION_FOLDER_ID. "
+                "Проверьте .env и пересоздайте контейнеры: docker compose up -d --force-recreate")
+    if provider_configured("openrouter") and _catalog_error:
+        hint = "" if settings.OPENROUTER_PROXY else " С российских серверов OpenRouter отвечает 403 — задайте OPENROUTER_PROXY в .env."
+        return f"Ключ OpenRouter задан, но {_catalog_error}. Доступна только модель по умолчанию.{hint}"
+    return ""
 
 
 def model_info(model_id: str) -> dict:
@@ -268,7 +316,7 @@ def default_model() -> str:
 
     configured = AssistantSettings.current().default_model or settings.ASSISTANT_DEFAULT_MODEL
     if configured:
-        return configured
+        return normalize_model_id(configured)
     if provider_configured("openrouter"):
         return "openrouter:anthropic/claude-sonnet-4.5"
     if provider_configured("yandex") and settings.ASSISTANT_YANDEX_MODELS:

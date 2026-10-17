@@ -300,6 +300,7 @@ cmd_install() {
   prompt_secret "YANDEX_VISION_FOLDER_ID" "ID каталога Yandex Cloud для того же ключа"
   prompt_secret "YANDEX_VISION_MODEL" "Код модели в AI Studio (необязательно — по умолчанию qwen3.6-35b-a3b)"
   prompt_secret "OPENROUTER_API_KEY" "Ключ OpenRouter — модели для ассистента-метролога (https://openrouter.ai/keys); без него — только модели Yandex"
+  prompt_secret "OPENROUTER_PROXY" "Прокси для OpenRouter — с российского сервера он отвечает 403: http://user:pass@host:port или socks5h://… (необязательно)"
   prompt_secret "RST_MCP_URL" "Адрес RSTMetrology_MCP для ассистента, внутри mcp-network: http://<контейнер>:<порт>/mcp"
   prompt_secret "RST_MCP_TOKEN" "Токен доступа к RSTMetrology_MCP (если сервер его требует)"
   prompt_secret "YANDEX_SEARCH_API_KEY" "Ключ Yandex Search API для веб-поиска ассистента (необязательно — по умолчанию YANDEX_VISION_API_KEY, нужна роль search-api.webSearch.user)"

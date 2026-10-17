@@ -105,7 +105,7 @@ export default function ModelPicker({ models, value, onChange, compact }: Props)
           <div className="mp-list">
             {models.length === 0 && (
               <div className="muted pad">
-                Нет доступных моделей. Задайте OPENROUTER_API_KEY или ключи Yandex AI Studio в .env.
+                Нет доступных моделей — причина показана над чатом.
               </div>
             )}
             {filtered.fav.length > 0 && <div className="mp-group">Избранное</div>}

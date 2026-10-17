@@ -169,7 +169,7 @@ export async function openFile(path: string, name: string, download = false): Pr
 export const attachmentPath = (id: number) => `/api/assistant/attachments/${id}/download/`;
 
 export const fetchModels = () =>
-  json<{ default: string; providers: Record<string, boolean>; models: ModelInfo[] }>("/api/assistant/models/");
+  json<{ default: string; providers: Record<string, boolean>; models: ModelInfo[]; notice?: string }>("/api/assistant/models/");
 
 // --- Контекст ---------------------------------------------------------------
 export type KnowledgeFile = {

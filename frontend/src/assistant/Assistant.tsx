@@ -48,6 +48,7 @@ export default function Assistant() {
   const [current, setCurrent] = useState<number | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
+  const [modelsNotice, setModelsNotice] = useState("");
   const [query, setQuery] = useState("");
   const [panelOpen, setPanelOpen] = useState(() => {
     try {
@@ -86,6 +87,7 @@ export default function Assistant() {
       .then((d) => {
         setModels(d.models);
         setDefaultModel(d.default);
+        setModelsNotice(d.notice || "");
       })
       .catch((e) => setError((e as Error).message));
   }, []);
@@ -169,6 +171,7 @@ export default function Assistant() {
           </button>
         </div>
         {error && <div className="chat-error bar">{error}</div>}
+        {modelsNotice && <div className="chat-error bar">{modelsNotice}</div>}
         {current ? (
           <ChatView
             key={current}
