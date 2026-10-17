@@ -854,8 +854,15 @@ def mcp_tools(servers=None) -> tuple[list[Tool], list[str]]:
     return tools, errors
 
 
+def builtin_tools() -> list[Tool]:
+    """Встроенные инструменты + личный кабинет (apps.assistant.cabinet импортирует этот модуль, поэтому лениво)."""
+    from apps.assistant.cabinet import TOOLS as cabinet_tools
+
+    return [*BUILTIN, *cabinet_tools]
+
+
 def all_tools(*, with_mcp: bool = True) -> tuple[dict[str, Tool], list[str]]:
-    tools = {tool.name: tool for tool in BUILTIN}
+    tools = {tool.name: tool for tool in builtin_tools()}
     errors: list[str] = []
     if not web.search_configured():
         tools.pop("web_search", None)

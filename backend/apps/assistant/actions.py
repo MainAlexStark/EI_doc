@@ -113,6 +113,13 @@ DONE_TEXT = {
 }
 
 
+def _registry() -> tuple[dict, dict]:
+    """Свои исполнители + личный кабинет (график, наряды, задачи, заявки) — cabinet импортирует этот модуль."""
+    from apps.assistant import cabinet
+
+    return {**EXECUTORS, **cabinet.EXECUTORS}, {**DONE_TEXT, **cabinet.DONE_TEXT}
+
+
 def decide(action: PendingAction, user, *, confirm: bool) -> PendingAction:
     if action.status != PendingAction.Status.PENDING:
         raise ActionError("Решение по этому действию уже принято")
@@ -125,13 +132,14 @@ def decide(action: PendingAction, user, *, confirm: bool) -> PendingAction:
         action.save()
         note = f"[Событие] Человек ОТКЛОНИЛ действие «{action.title}»."
     else:
-        executor = EXECUTORS.get(action.kind)
+        executors, done_text = _registry()
+        executor = executors.get(action.kind)
         if executor is None:
             raise ActionError(f"Неизвестное действие {action.kind}")
         try:
             action.result = executor(action, user)
             action.status = PendingAction.Status.DONE
-            note = f"[Событие] Человек подтвердил «{action.title}». {DONE_TEXT[action.kind](action.result)}"
+            note = f"[Событие] Человек подтвердил «{action.title}». {done_text[action.kind](action.result)}"
         except (ActionError, PermissionDenied) as exc:
             action.status = PendingAction.Status.FAILED
             action.error = str(getattr(exc, "detail", exc))

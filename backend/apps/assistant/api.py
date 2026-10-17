@@ -515,11 +515,11 @@ def mcp_json(s: McpServer) -> dict:
 
 class McpListView(APIView):
     def get(self, request):
-        from apps.assistant.tools import BUILTIN
+        from apps.assistant.tools import builtin_tools
 
         return Response({
             "servers": [mcp_json(s) for s in McpServer.objects.all()],
-            "builtin": [{"name": t.name, "label": t.label, "description": t.description} for t in BUILTIN],
+            "builtin": [{"name": t.name, "label": t.label, "description": t.description} for t in builtin_tools()],
             "web_search": web.search_configured(),
             "can_edit": is_editor(request.user),
         })

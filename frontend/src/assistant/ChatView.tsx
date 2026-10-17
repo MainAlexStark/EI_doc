@@ -375,8 +375,10 @@ function ActionCard({ action, onAction }: { action: Action; onAction: (a: Action
   };
   const payload = action.payload as Record<string, unknown>;
   const limits = (payload.limits ?? {}) as Record<string, unknown>;
-  const rows: [string, unknown][] =
-    action.kind === "si_type_create"
+  // payload.view — готовые строки [подпись, значение] от сервера (график, наряды, задачи, заявки)
+  const rows: [string, unknown][] = Array.isArray(payload.view)
+    ? (payload.view as [string, unknown][])
+    : action.kind === "si_type_create"
       ? [
           ["Номер в Госреестре", payload.registry_number],
           ["Наименование", payload.name],
@@ -397,8 +399,8 @@ function ActionCard({ action, onAction }: { action: Action; onAction: (a: Action
         </span>
       </div>
       <dl className="w-kv small">
-        {rows.filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => (
-          <div key={k}><dt>{k}</dt><dd>{typeof v === "object" ? JSON.stringify(v) : String(v)}</dd></div>
+        {rows.filter(([, v]) => v !== undefined && v !== "").map(([k, v], i) => (
+          <div key={`${i}-${k}`}><dt>{k}</dt><dd>{typeof v === "object" ? JSON.stringify(v) : String(v)}</dd></div>
         ))}
       </dl>
       {action.sources?.length > 0 && (

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers, status
@@ -19,11 +18,11 @@ from rest_framework.views import APIView
 
 from apps.catalog.models import MeasurementFamily
 from apps.core.models import Employee
-from apps.hub import captcha, routing
+from apps.hub import captcha, routing, service
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
 from apps.hub.models import Request, RequestItem, RequestStatus
 from apps.hub.pricing import estimate
-from apps.verification.models import Client, ClientKind, Site, WorkOrder
+from apps.verification.models import Client, Site, WorkOrder
 
 
 class AddressSuggestThrottle(AnonRateThrottle):
@@ -351,44 +350,12 @@ class RequestConfirmView(APIView):
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
         employee = get_object_or_404(Employee, pk=data["employee_id"])
-
-        with transaction.atomic():
-            if data.get("client_id"):
-                client = get_object_or_404(Client, pk=data["client_id"])
-            else:
-                client = Client.objects.create(
-                    kind=ClientKind.PERSON,
-                    name=obj.contact_name,
-                    phone=obj.contact_phone,
-                    email=obj.contact_email,
-                )
-
-            if data.get("site_id"):
-                site = get_object_or_404(Site, pk=data["site_id"])
-            else:
-                site = Site.objects.create(
-                    client=client,
-                    address=obj.address,
-                    postal_code=obj.postal_code,
-                    fias_id=obj.fias_id,
-                    district=obj.district,
-                    latitude=obj.latitude,
-                    longitude=obj.longitude,
-                )
-
-            work_order = WorkOrder.objects.create(
-                request=obj,
-                client=client,
-                site=site,
-                assigned_employee=employee,
-                scheduled_date=data.get("scheduled_date") or obj.desired_date,
-                scheduled_time=data.get("scheduled_time") or obj.desired_time,
-                note=data.get("note", ""),
-            )
-
-            obj.mark_confirmed(employee=employee)
-
-        _notify_work_order_assigned(work_order)
+        client = get_object_or_404(Client, pk=data["client_id"]) if data.get("client_id") else None
+        site = get_object_or_404(Site, pk=data["site_id"]) if data.get("site_id") else None
+        work_order = service.confirm_request(
+            obj, employee=employee, scheduled_date=data.get("scheduled_date"),
+            scheduled_time=data.get("scheduled_time"), client=client, site=site, note=data.get("note", ""),
+        )
         return Response({"work_order_id": work_order.id}, status=status.HTTP_201_CREATED)
 
 
@@ -405,22 +372,12 @@ class RequestRejectView(APIView):
         obj = get_object_or_404(Request, pk=pk)
         payload = RequestRejectSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
-        obj.status = RequestStatus.SPAM if payload.validated_data["spam"] else RequestStatus.REJECTED
-        obj.reject_reason = payload.validated_data.get("reason", "")
-        obj.save(update_fields=["status", "reject_reason"])
+        service.reject_request(
+            obj, reason=payload.validated_data.get("reason", ""), spam=payload.validated_data["spam"],
+        )
         return Response(RequestSerializer(obj).data)
 
 
 def _notify_work_order_assigned(work_order: WorkOrder) -> None:
-    from apps.core.telegram import send_message
-
-    employee = work_order.assigned_employee
-    if not employee.telegram_chat_id:
-        return
-    when = work_order.scheduled_date.strftime("%d.%m.%Y") if work_order.scheduled_date else "дата не указана"
-    if work_order.scheduled_time:
-        when += f", {work_order.scheduled_time:%H:%M}"
-    send_message(
-        employee.telegram_chat_id,
-        f"Новый наряд №{work_order.id}: {work_order.site.address}, {when}",
-    )
+    """Совместимость: уведомление теперь живёт в apps.hub.service."""
+    service.notify_work_order_assigned(work_order)
