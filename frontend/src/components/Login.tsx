@@ -23,6 +23,7 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
 
   return (
     <form className="login" onSubmit={submit}>
+      <div className="brand-mark" style={{ width: 44, height: 44, borderRadius: 12, fontSize: 16, marginBottom: 18 }}>ЕИ</div>
       <h1>EI_doc</h1>
       <p className="sub">Журнал учёта поверочных работ</p>
 

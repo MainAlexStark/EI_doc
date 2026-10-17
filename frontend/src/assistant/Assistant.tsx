@@ -216,7 +216,7 @@ export default function Assistant() {
                 />
                 <button className="primary" disabled={!draftPrompt.trim()}>Начать</button>
               </form>
-              <div className="suggestions">
+              <div className="prompt-examples">
                 {SUGGESTIONS.map((s) => (
                   <button key={s.title} onClick={() => setDraftPrompt(s.text)}>
                     <b>{s.title}</b>

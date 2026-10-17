@@ -6,6 +6,7 @@ import {
   fetchVerificationPhotos,
   fetchWorkOrderScans,
   fetchWorkOrders,
+  setWorkOrderStatus,
   uploadScan,
   uploadVerificationPhoto,
   type FieldVerification,
@@ -168,7 +169,7 @@ function PhotosPanel({ verification }: { verification: CachedVerification }) {
         </div>
       )}
       <button type="button" className="big" onClick={() => fileInput.current?.click()} disabled={busy}>
-        {busy ? "Загружаю…" : "📷 Сфотографировать"}
+        {busy ? "Загружаю…" : "Сфотографировать"}
       </button>
       <input
         ref={fileInput}
@@ -673,7 +674,50 @@ function SyncBar({
   );
 }
 
-export default function FieldWork({ me }: { me: Me | null }) {
+const OPEN_STATUSES = ["planned", "in_progress"];
+
+type Period = "active" | "closed";
+
+const dayKey = (value: string | null) => (value ? new Date(value).toDateString() : "");
+
+function sortOrders(list: WorkOrder[]): WorkOrder[] {
+  const key = (o: WorkOrder) => `${o.scheduled_date ?? "9999"}T${o.scheduled_time ?? "99"}`;
+  return [...list].sort((a, b) => key(a).localeCompare(key(b)));
+}
+
+/** Разбивка выездов на секции, как в списке «Почты»: сегодня, завтра, скоро. */
+function groupOrders(list: WorkOrder[], period: Period): { title: string; orders: WorkOrder[]; withDate: boolean }[] {
+  if (period === "closed") {
+    const sorted = sortOrders(list).reverse();
+    return [
+      { title: "Закрыты", orders: sorted.filter((o) => o.status === "done"), withDate: true },
+      { title: "Отменены", orders: sorted.filter((o) => o.status === "cancelled"), withDate: true },
+    ].filter((g) => g.orders.length > 0);
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const sorted = sortOrders(list);
+  const at = (o: WorkOrder) => (o.scheduled_date ? new Date(o.scheduled_date) : null);
+  return [
+    { title: "Просрочены", orders: sorted.filter((o) => { const d = at(o); return d != null && d < today && dayKey(o.scheduled_date) !== today.toDateString(); }), withDate: true },
+    { title: "Сегодня", orders: sorted.filter((o) => dayKey(o.scheduled_date) === today.toDateString()), withDate: false },
+    { title: "Завтра", orders: sorted.filter((o) => dayKey(o.scheduled_date) === tomorrow.toDateString()), withDate: false },
+    { title: "Скоро", orders: sorted.filter((o) => { const d = at(o); return d != null && d > tomorrow && dayKey(o.scheduled_date) !== tomorrow.toDateString(); }), withDate: true },
+    { title: "Без даты", orders: sorted.filter((o) => !o.scheduled_date), withDate: false },
+  ].filter((g) => g.orders.length > 0);
+}
+
+function orderLine(o: WorkOrder, isManager: boolean, withDate: boolean): string {
+  const when = [withDate ? formatDate(o.scheduled_date) : "", o.scheduled_time ? o.scheduled_time.slice(0, 5) : ""]
+    .filter(Boolean)
+    .join(", ");
+  return [when, o.client, isManager ? o.assigned_employee : "", o.note].filter(Boolean).join(" · ");
+}
+
+export default function FieldWork({ me, isManager = false }: { me: Me | null; isManager?: boolean }) {
+  const [period, setPeriod] = useState<Period>("active");
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<number | null>(null);
   const [verifications, setVerifications] = useState<CachedVerification[]>([]);
@@ -777,14 +821,26 @@ export default function FieldWork({ me }: { me: Me | null }) {
   }, [refreshQueueCount, reloadVerifications]);
 
   useEffect(() => {
+    // Менеджер видит выезды всей фирмы, поверитель — только свои.
     const employeeId = me?.employee?.id;
-    if (!employeeId) return;
+    if (!isManager && !employeeId) return;
     setLoading(true);
-    fetchWorkOrders({ assigned_employee: String(employeeId) })
-      .then((list) => setOrders(list.filter((o) => o.status === "planned" || o.status === "in_progress")))
-      .catch((exc) => setError(exc instanceof Error ? exc.message : "Не удалось загрузить наряды"))
+    fetchWorkOrders(isManager ? {} : { assigned_employee: String(employeeId) })
+      .then(setOrders)
+      .catch((exc) => setError(exc instanceof Error ? exc.message : "Не удалось загрузить выезды"))
       .finally(() => setLoading(false));
-  }, [me]);
+  }, [me, isManager]);
+
+  const cancelOrder = async (target: WorkOrder) => {
+    if (!window.confirm(`Отменить выезд «${target.site || `№${target.id}`}»?`)) return;
+    setError("");
+    try {
+      const updated = await setWorkOrderStatus(target.id, "cancelled");
+      setOrders((current) => current.map((o) => (o.id === target.id ? { ...o, ...updated } : o)));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось отменить выезд");
+    }
+  };
 
   useEffect(() => {
     loadLayouts()
@@ -801,7 +857,8 @@ export default function FieldWork({ me }: { me: Me | null }) {
     window.scrollTo({ top: 0 });
   }, [selectedOrder, selectedVerification]);
 
-  if (!me?.employee) {
+  if (!me) return <div className="loading">Загружаю…</div>;
+  if (!isManager && !me.employee) {
     return <div className="empty">Экран доступен только сотрудникам с привязанной учётной записью</div>;
   }
 
@@ -817,35 +874,54 @@ export default function FieldWork({ me }: { me: Me | null }) {
     />
   );
 
-  // --- Шаг 1: наряды ---------------------------------------------------
+  // --- Шаг 1: выезды ---------------------------------------------------
   if (selectedOrder == null) {
+    const shown = orders.filter((o) => OPEN_STATUSES.includes(o.status) === (period === "active"));
+    const sections = groupOrders(shown, period);
     return (
       <div className="narrow">
         {syncBar}
-        <h2>Мои наряды</h2>
+        <div className="toolbar">
+          <Segmented
+            value={period}
+            options={[
+              { value: "active", label: "Активные" },
+              { value: "closed", label: "Завершённые" },
+            ]}
+            onChange={setPeriod}
+          />
+        </div>
         {error && <div className="error">{error}</div>}
         {loading && <div className="loading">Загружаю…</div>}
-        {!loading && orders.length === 0 && <div className="empty">Открытых нарядов на вас нет</div>}
-        <div className="card-list">
-          {orders.map((o) => (
-            <button type="button" className="card tap" key={o.id} onClick={() => setSelectedOrder(o.id)}>
-              <div className="card-head">
-                <div className="grow">
-                  <b>{o.site || "Адрес не указан"}</b>
-                  <div className="sub">{o.client}</div>
-                </div>
-                <div className="when">
-                  <b>{formatDate(o.scheduled_date)}</b>
-                  {o.scheduled_time && <div className="sub">{o.scheduled_time.slice(0, 5)}</div>}
-                </div>
-              </div>
-              <div className="sub">
-                Наряд №{o.id} · счётчиков: {o.verifications_total}
-                {o.note && ` · ${o.note}`}
-              </div>
-            </button>
-          ))}
-        </div>
+        {!loading && shown.length === 0 && (
+          <div className="empty">
+            {period === "closed"
+              ? "Завершённых выездов пока нет"
+              : isManager
+                ? "Открытых выездов нет"
+                : "Открытых выездов на вас нет"}
+          </div>
+        )}
+        {sections.map((section) => (
+          <div key={section.title}>
+            <div className="list-section">{section.title}</div>
+            <div className="card-list">
+              {section.orders.map((o) => (
+                <button type="button" className="card tap" key={o.id} onClick={() => setSelectedOrder(o.id)}>
+                  <div className="card-head">
+                    <div className="grow">
+                      <b>{o.site || "Адрес не указан"}</b>
+                      <div className="sub">{orderLine(o, isManager, section.withDate)}</div>
+                    </div>
+                    <div className="when sub">
+                      {o.verifications_accepted} из {o.verifications_total}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -856,7 +932,7 @@ export default function FieldWork({ me }: { me: Me | null }) {
       <div className="narrow">
         {syncBar}
         <button type="button" className="back" onClick={() => setSelectedVerification(null)}>
-          ← Все счётчики наряда
+          ‹ {order?.site || "Все счётчики"}
         </button>
         <div className="card">
           <div className="card-head">
@@ -891,20 +967,42 @@ export default function FieldWork({ me }: { me: Me | null }) {
     <div className="narrow">
       {syncBar}
       <button type="button" className="back" onClick={() => { setSelectedOrder(null); setAdding(false); }}>
-        ← Все наряды
+        ‹ Поверки
       </button>
-      <div className="card">
-        <b>{order?.site ?? `Наряд №${selectedOrder}`}</b>
+      <div className="detail-title">
         {order && (
           <div className="sub">
-            {order.client} · {formatDate(order.scheduled_date)} · наряд №{order.id}
+            {[formatDate(order.scheduled_date), order.scheduled_time?.slice(0, 5)].filter(Boolean).join(", ")}
           </div>
         )}
+        <h2>{order?.site || "Адрес не указан"}</h2>
       </div>
+      {order && (
+        <div className="kv">
+          <div><span className="k">Клиент</span><span className="v">{order.client || "—"}</span></div>
+          <div><span className="k">Поверитель</span><span className="v">{order.assigned_employee || "—"}</span></div>
+          {order.request_id != null && (
+            <div><span className="k">Основание</span><span className="v">Заявка №{order.request_id}</span></div>
+          )}
+          {order.note && <div><span className="k">Примечание</span><span className="v">{order.note}</span></div>}
+          <div>
+            <span className="k">Состояние</span>
+            <span className="v">{order.status_display}</span>
+            {isManager && OPEN_STATUSES.includes(order.status) && (
+              <button type="button" className="link danger" onClick={() => void cancelOrder(order)}>
+                Отменить выезд
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
 
-      <h2>Счётчики ({verifications.length})</h2>
+      <h2>Счётчики · {verifications.length}</h2>
       {verifications.length === 0 && !adding && <div className="empty">Пока ни одного — добавьте первый</div>}
+      {verifications.length > 0 && (
+        <p className="hint" style={{ margin: "-8px 4px 14px" }}>Выезд закроется сам, когда все протоколы примут в журнале.</p>
+      )}
       <div className="card-list">
         {verifications.map((v) => (
           <button type="button" className="card tap" key={v.client_id} onClick={() => setSelectedVerification(v.client_id)}>

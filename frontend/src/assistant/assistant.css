@@ -2,7 +2,7 @@
 
 .assistant {
   --top: 57px;
-  margin: -18px -20px -40px;
+  margin: -8px -32px -48px;
   height: calc(100vh - var(--top));
   height: calc(100dvh - var(--top));
   display: grid;
@@ -264,9 +264,9 @@ a.src-chip:hover, button.src-chip:hover { border-color: var(--accent); color: va
 }
 .welcome h2 { margin: 0; }
 .welcome-input { width: 100%; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
-.suggestions { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; width: 100%; text-align: left; }
-.suggestions button { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 10px 12px; }
-.suggestions button span { color: var(--muted); font-size: 12px; }
+.prompt-examples { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; width: 100%; text-align: left; }
+.prompt-examples button { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 10px 12px; }
+.prompt-examples button span { color: var(--muted); font-size: 12px; }
 
 /* --- панель контекста --- */
 .ctx-panel { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--surface-2); }
@@ -363,3 +363,8 @@ a.src-chip:hover, button.src-chip:hover { border-color: var(--accent); color: va
   .assistant { margin: -14px -12px -32px; }
 }
 .assistant-bar button { white-space: nowrap; }
+
+/* новый каркас: на телефоне снизу плавающий таб-бар — ассистент не должен под ним прятаться */
+@media (max-width: 760px) {
+  .assistant { margin: -4px -16px 0; height: calc(100dvh - var(--top) - 96px); }
+}
