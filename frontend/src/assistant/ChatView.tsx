@@ -385,7 +385,9 @@ function ActionCard({ action, onAction }: { action: Action; onAction: (a: Action
           ["Ссылка ФГИС", payload.fif_url],
           ...Object.entries(limits).map(([k, v]) => [k, v] as [string, unknown]),
         ]
-      : Object.entries(payload);
+      : action.kind === "attestation_create"
+        ? attestationRows(payload)
+        : Object.entries(payload);
   return (
     <div className={`action-card st-${action.status}`}>
       <div className="action-head">
@@ -415,6 +417,39 @@ function ActionCard({ action, onAction }: { action: Action; onAction: (a: Action
       )}
     </div>
   );
+}
+
+/** Карточка аттестации ИО в чате: главное из плана, без JSON-простыни. */
+function attestationRows(payload: Record<string, unknown>): [string, unknown][] {
+  const e = (payload.equipment ?? {}) as Record<string, string>;
+  const plan = (payload.plan ?? {}) as {
+    program?: string; repeats?: number;
+    points?: { label: string; role: string }[];
+    modes?: { label: string; setpoint: string }[];
+    characteristics?: { label: string; expr: string; tolerance: { kind: string; min?: string; max?: string; limit?: string } }[];
+    layout?: unknown[];
+  };
+  const check = payload.plan_check as { ok: boolean; rows: { ok: boolean }[] } | null | undefined;
+  const commission = (payload.commission ?? []) as { role: string; name: string }[];
+  const instruments = (payload.instruments ?? []) as { name: string; serial_number: string; valid_until: string }[];
+  const tol = (t: { kind: string; min?: string; max?: string; limit?: string }) =>
+    t.kind === "range" ? `от ${t.min} до ${t.max}` : t.kind === "abs" ? `±${t.limit}` : "";
+  return [
+    ["Оборудование", [e.name, e.serial_number && `зав. № ${e.serial_number}`].filter(Boolean).join(", ")],
+    ["Изготовитель, год", [e.manufacturer, e.year].filter(Boolean).join(", ")],
+    ["Владелец", e.owner],
+    ["Программа", plan.program],
+    ["Режимы", (plan.modes ?? []).map((m) => m.label).join(", ")],
+    ["Точки × измерений", `${plan.points?.length ?? 0} × ${plan.repeats ?? 0}`],
+    ...(plan.characteristics ?? [])
+      .map((c) => [c.label, [c.expr, tol(c.tolerance) && `допуск ${tol(c.tolerance)}`].filter(Boolean).join(" · ")] as [string, unknown]),
+    ["Вид протокола", plan.layout?.length ? `по примеру (${plan.layout.length} блоков)` : "стандартный"],
+    ["Сверка с примером", !check ? "не проводилась"
+      : check.ok ? `сходится (${check.rows.length} значений)`
+      : `НЕ сходится: ${check.rows.filter((r) => !r.ok).length} из ${check.rows.length}`],
+    ["Комиссия", commission.map((m) => (m.role === "chair" ? `${m.name} (пред.)` : m.name)).join(", ")],
+    ["Средства измерений", instruments.map((r) => `${r.name} № ${r.serial_number}${r.valid_until ? ` до ${r.valid_until}` : ""}`).join("; ")],
+  ];
 }
 
 function argsSummary(args: Record<string, unknown> | undefined): string {

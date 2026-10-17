@@ -184,6 +184,7 @@ urlpatterns = [
     path("api/tasks/workload/", TaskWorkloadView.as_view(), name="task_workload"),
     # Ассистент-метролог
     path("api/assistant/", include("apps.assistant.urls")),
+    path("api/attestations/", include("apps.equipment.urls")),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     # Публичная форма заявки — тот же SPA-бандл, main.tsx решает по пути,

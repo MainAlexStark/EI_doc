@@ -56,6 +56,7 @@ LOCAL_APPS = [
     "apps.sync",
     "apps.arshin",
     "apps.assistant",
+    "apps.equipment",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

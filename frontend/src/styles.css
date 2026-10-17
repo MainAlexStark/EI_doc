@@ -505,3 +505,31 @@ details.more > summary { cursor: pointer; color: var(--accent); font-weight: 500
   margin: 6px 0 0; padding: 6px 10px; border-left: 3px solid var(--ok);
   background: var(--surface); font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap;
 }
+
+/* ---------- Аттестация ИО ---------- */
+.attestation.wide-narrow { max-width: 1040px; }
+.attestation .card { margin-bottom: 12px; }
+.attestation details.card > summary { cursor: pointer; }
+.attestation h4 { margin: 14px 0 8px; font-size: 13px; letter-spacing: 0.04em; color: var(--accent); }
+.attestation .pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.attestation .form-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.attestation .form-grid .wide { grid-column: 1 / -1; }
+.attestation .row-edit, .attestation .instrument { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
+.attestation .instrument { padding: 8px; border: 1px dashed var(--line); border-radius: 8px; }
+.attestation .instrument input { flex: 1 1 180px; }
+.attestation .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.attestation table.compact, .attestation table.grid { min-width: 0; }
+.attestation table.compact th, .attestation table.compact td { padding: 6px 8px; font-size: 13px; }
+.attestation table.grid th, .attestation table.grid td { padding: 2px; border-bottom: 1px solid var(--line); }
+.attestation table.grid tbody th { padding: 2px 8px; white-space: nowrap; font-weight: normal; }
+.attestation table.grid tr.control th { color: var(--accent); font-weight: 600; }
+.attestation input.cell { width: 64px; padding: 4px 6px; font-variant-numeric: tabular-nums; text-align: right; }
+.attestation textarea { width: 100%; }
+.attestation textarea.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.attestation .problems { margin: 6px 0; padding-left: 18px; color: var(--warn); }
+.attestation .mode { margin-top: 12px; }
+.attestation table th, .attestation table td { min-width: 0; }
+.attestation table.grid td { width: 1%; }
+.attestation .plan-check { margin-top: 10px; }
+.attestation .plan-check > summary { cursor: pointer; }
+.attestation code.sub { font-size: 11px; word-break: break-word; }

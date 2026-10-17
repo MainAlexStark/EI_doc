@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { fetchMe, isAuthenticated, logout, type Me } from "./api";
+import Attestations from "./components/Attestations";
 import Availability from "./components/Availability";
 import FieldWork from "./components/FieldWork";
 import Journal from "./components/Journal";
@@ -13,7 +14,7 @@ import WorkOrders from "./components/WorkOrders";
 // Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
 const Assistant = lazy(() => import("./assistant/Assistant"));
 
-type Tab = "assistant" | "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability" | "si-types";
+type Tab = "assistant" | "attestations" | "journal" | "normocontrol" | "requests" | "work-orders" | "field-work" | "tasks" | "availability" | "si-types";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "journal", label: "Журнал" },
@@ -24,6 +25,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "tasks", label: "Задачи" },
   { key: "availability", label: "Мой график" },
   { key: "si-types", label: "Типы СИ" },
+  { key: "attestations", label: "Аттестация ИО" },
   { key: "assistant", label: "Ассистент" },
 ];
 
@@ -96,6 +98,7 @@ export default function App() {
         {tab === "tasks" && <Tasks />}
         {tab === "availability" && <Availability />}
         {tab === "si-types" && <SiTypes me={me} />}
+        {tab === "attestations" && <Attestations me={me} />}
         {tab === "assistant" && (
           <Suspense fallback={<div className="muted">Загрузка ассистента…</div>}>
             <Assistant />

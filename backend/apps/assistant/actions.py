@@ -76,13 +76,33 @@ def _memory_company_delete(action: PendingAction, user) -> dict:
     return {"deleted": bool(deleted)}
 
 
+def _attestation_create(action: PendingAction, user) -> dict:
+    from apps.equipment import service
+    from apps.equipment.models import AttestationProgram
+
+    payload = dict(action.payload)
+    program = AttestationProgram.objects.filter(pk=payload.pop("program_id", None) or 0).first()
+    plan_check = payload.pop("plan_check", None)
+    try:
+        att = service.create(user, payload, via_assistant=True, sources=action.sources, program=program,
+                             plan_check=plan_check)
+    except service.AttestationError as exc:
+        raise ActionError(str(exc)) from exc
+    return {"id": att.pk, "plan_approved": att.plan_approved, "label": str(att)}
+
+
 EXECUTORS = {
+    "attestation_create": _attestation_create,
     "si_type_create": _si_type_create,
     "memory_company_save": _memory_company_save,
     "memory_company_delete": _memory_company_delete,
 }
 
 DONE_TEXT = {
+    "attestation_create": lambda r: (
+        f"Аттестация заведена (id {r['id']}): {r['label']}. Измерения и условия человек вносит на вкладке "
+        "«Аттестация ИО»" + ("." if r.get("plan_approved") else "; план ждёт проверки метролога.")
+    ),
     "si_type_create": lambda r: (
         f"Тип СИ уже был в справочнике (id {r['id']})." if r.get("existing") else
         f"Тип СИ заведён (id {r['id']}): {r['label']}."

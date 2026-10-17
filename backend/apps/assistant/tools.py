@@ -30,6 +30,7 @@ from apps.assistant.models import (
     PendingAction,
     Scope,
 )
+from apps.equipment.calc import plan_help
 
 logger = logging.getLogger(__name__)
 
@@ -460,6 +461,140 @@ def ei_reference(ctx: ToolContext, args: dict) -> ToolResult:
 
 
 # ===========================================================================
+# Аттестация испытательного оборудования
+# ===========================================================================
+def ei_attestations(ctx: ToolContext, args: dict) -> ToolResult:
+    from apps.equipment.calc import PRESETS
+    from apps.equipment.expr import FUNCTIONS
+    from apps.equipment.models import AttestationProgram, EquipmentAttestation
+
+    what = args.get("what")
+    if what == "programs":
+        rows = [
+            {"id": p.pk, "title": p.title, "equipment_kind": p.equipment_kind, "note": p.note,
+             "needs_review": p.needs_review, "plan": p.plan}
+            for p in AttestationProgram.objects.filter(is_active=True)
+        ]
+        label = "Программы аттестации EI_doc"
+    elif what == "formulas":
+        rows = {
+            "functions": {name: desc for name, (_, _, _, desc) in FUNCTIONS.items()},
+            "presets": PRESETS,
+            "note": "Формулы не ограничены готовыми — пиши свои выражения из этих функций по методике/примеру.",
+        }
+        label = "Формулы аттестации EI_doc"
+    elif what == "attestations":
+        qs = EquipmentAttestation.objects.all()
+        for word in str(args.get("query") or "").split():
+            qs = qs.filter(
+                Q(equipment__name__icontains=word) | Q(equipment__serial_number__icontains=word)
+                | Q(equipment__owner__icontains=word)
+            )
+        rows = [
+            {"id": a.pk, "number": a.full_number, "status": a.status, "kind": a.kind,
+             "protocol_date": a.protocol_date, "suitable": a.suitable, "equipment": a.equipment,
+             "commission": a.commission, "instruments": a.instruments, "plan": a.plan, "texts": a.texts}
+            for a in qs[: min(int(args.get("limit") or 10), 30)]
+        ]
+        label = "Аттестации ИО в EI_doc"
+    else:
+        raise ToolFailure("what: programs | formulas | attestations")
+    return ToolResult(_dump(rows) if rows else "Ничего не найдено.", {"sources": [_source("ei", label)]})
+
+
+def _check_widget(report: dict) -> dict:
+    return {
+        "type": "table",
+        "title": "Сверка формул с примером" + (f" ({report['source']})" if report.get("source") else "")
+                 + (" — всё сходится" if report["ok"] else " — есть расхождения"),
+        "columns": ["Режим", "Характеристика", "Точка", "В примере", "Посчитано", "Сходится"],
+        "rows": [
+            [r["mode"], r["label"], r["point"], r["expected"], r["computed"], "да" if r["ok"] else "НЕТ"]
+            for r in report["rows"]
+        ] + [["", e, "", "", "", "ошибка"] for e in report["errors"]],
+    }
+
+
+def _run_check(plan: dict, example) -> dict:
+    from apps.equipment import calc
+
+    try:
+        return calc.check_example(plan, example)
+    except calc.PlanError as exc:
+        raise ToolFailure(f"Сверка не выполнена: {exc}") from exc
+
+
+def ei_attestation_check(ctx: ToolContext, args: dict) -> ToolResult:
+    """Ничего не сохраняет: прогоняет план на числах примера и сравнивает с результатами примера."""
+    from apps.equipment import calc
+
+    try:
+        plan = calc.clean_plan(args.get("plan"))
+    except calc.PlanError as exc:
+        raise ToolFailure(f"план: {exc}") from exc
+    report = _run_check(plan, args.get("example"))
+    lines = [
+        f"{r['mode']} / {r['key']}{' / ' + r['point'] if r['point'] else ''}: пример {r['expected']}, "
+        f"посчитано {r['computed']} (разница {r['diff']}) — {'сходится' if r['ok'] else 'НЕ сходится'}"
+        for r in report["rows"]
+    ] + [f"Ошибка: {e}" for e in report["errors"]]
+    if report["unchecked"]:
+        lines.append("Не с чем сверить (нет результата в примере): " + ", ".join(report["unchecked"]))
+    head = ("Все формулы сходятся с примером." if report["ok"] else
+            "Есть расхождения: перечитай методику/пример, поправь expr (порядок округлений, какие точки входят, "
+            "знак) и сверь снова. Не подгоняй формулу под число без объяснения из документа.")
+    return ToolResult(head + "\n" + "\n".join(lines), {"widgets": [_check_widget(report)]})
+
+
+def ei_attestation_propose(ctx: ToolContext, args: dict) -> ToolResult:
+    from apps.equipment import service
+    from apps.equipment.models import AttestationProgram
+
+    if "measurements" in args or "conditions" in args:
+        raise ToolFailure(
+            "Результаты измерений и условия проведения ассистент не передаёт — измерения вносит человек "
+            "на экране «Аттестация ИО». Убери measurements/conditions и предложи карточку с планом. "
+            "Числа из примера — только в example, для сверки формул."
+        )
+    if not service.can_edit(ctx.user):
+        raise ToolFailure("У этого пользователя нет права заводить аттестации (наблюдатель)")
+    try:
+        card = service.clean_card(args)
+    except service.AttestationError as exc:
+        raise ToolFailure(str(exc)) from exc
+    sources = [str(s) for s in (args.get("sources") or []) if str(s).strip()]
+    if not sources:
+        raise ToolFailure(
+            "Укажи sources — откуда взяты наименование, заводской номер, изготовитель, год, режимы, формулы и "
+            "допуски (пример протокола, РЭ, паспорт, шильдик, прошлый протокол, программа аттестации)"
+        )
+    program_id = args.get("program_id")
+    if program_id and not AttestationProgram.objects.filter(pk=program_id).exists():
+        raise ToolFailure(f"Программы аттестации с id {program_id} нет")
+    report = _run_check(card["plan"], args["example"]) if args.get("example") else None
+    e = card["equipment"]
+    action = PendingAction.objects.create(
+        conversation=ctx.conversation, kind="attestation_create",
+        title=f"Завести аттестацию: {e['name']} № {e['serial_number']}",
+        payload={**card, "program_id": program_id or None, "plan_check": report},
+        sources=sources,
+    )
+    note = (
+        "Карточка аттестации с планом показана человеку с кнопкой «Подтвердить». После подтверждения "
+        "аттестация появится на вкладке «Аттестация ИО»: там человек вносит измерения и условия, расчёт и "
+        "заключение делает EI_doc, план проверяет метролог."
+    )
+    if report is None:
+        note += " Сверки с примером нет — скажи человеку, что формулы метролог сверяет с методикой вручную."
+    elif not report["ok"]:
+        note += " ВНИМАНИЕ: сверка с примером не сошлась — перечисли человеку расхождения."
+    ui = {"action": action.pk}
+    if report:
+        ui["widgets"] = [_check_widget(report)]
+    return ToolResult(note, ui)
+
+
+# ===========================================================================
 # Виджеты
 # ===========================================================================
 WIDGET_TYPES = ("table", "cards", "kv", "chart", "steps", "choices", "callout", "html", "compare")
@@ -615,6 +750,46 @@ BUILTIN: list[Tool] = [
         "methods (методики поверки), employees (сотрудники).",
         _obj({"what": {"type": "string", "enum": ["families", "standards", "methods", "employees"]}}, ["what"]),
         ei_reference,
+    ),
+    Tool(
+        "ei_attestations", "Смотрю аттестации ИО",
+        "Аттестация испытательного оборудования в EI_doc: what=programs — заготовки планов по видам ИО; "
+        "formulas — функции для формул и готовые формулы-подсказки; attestations — уже заведённые аттестации "
+        "(query — наименование, заводской номер, владелец): прошлый протокол того же ИО — источник карточки, "
+        "комиссии, плана и каркаса.",
+        _obj({"what": {"type": "string", "enum": ["programs", "formulas", "attestations"]}, "query": STR, "limit": INT},
+             ["what"]),
+        ei_attestations,
+    ),
+    Tool(
+        "ei_attestation_check", "Сверяю формулы с примером",
+        "Прогнать план на числах из ПРИМЕРА протокола и сравнить с результатами, напечатанными в примере. Ничего "
+        "не сохраняет. example{source: «откуда пример», modes: {ключ_режима: {display?, readings: {ключ_точки: "
+        "[отсчёты как в примере]}, expected: {ключ_характеристики: «значение как напечатано» | {ключ_точки: …}}}}}. "
+        "Сходится в пределах единицы последнего напечатанного знака. Используй перед ei_attestation_propose всякий "
+        "раз, когда в примере есть и отсчёты, и результаты. " + plan_help(),
+        _obj({"plan": {"type": "object"}, "example": {"type": "object"}}, ["plan", "example"]),
+        ei_attestation_check,
+    ),
+    Tool(
+        "ei_attestation_propose", "Готовлю карточку аттестации ИО",
+        "Предложить завести аттестацию испытательного оборудования (карточка + план + каркас протокола). Человек "
+        "подтвердит кнопкой. Ты собираешь структуру: оборудование, комиссию, средства измерений, план (точки, "
+        "режимы, формулы, допуски с источниками, каркас протокола по примеру), тексты. Результаты измерений и "
+        "условия НЕ передаются — их вносит человек на экране; расчёт и заключение делает EI_doc. "
+        "equipment{name, serial_number, manufacturer, year, owner, location, inventory_number}; "
+        "kind: primary|periodic|repeat; commission[{role: chair|member, position, name}]; "
+        "instruments[{name, serial_number, registry_number, characteristics, verification, valid_until YYYY-MM-DD}] — "
+        "свидетельства и сроки найди во ФГИС; texts{documentation, inspection, testing, notes, recommendations}; "
+        "example — то же, что в ei_attestation_check (отчёт сверки сохранится в карточке для метролога). "
+        "sources — откуда каждое значение карточки, каждая формула и допуск.",
+        _obj({
+            "kind": STR, "equipment": {"type": "object"}, "commission": {"type": "array", "items": {"type": "object"}},
+            "instruments": {"type": "array", "items": {"type": "object"}}, "plan": {"type": "object"},
+            "texts": {"type": "object"}, "program_id": INT, "example": {"type": "object"},
+            "sources": {"type": "array", "items": STR},
+        }, ["equipment", "plan", "sources"]),
+        ei_attestation_propose,
     ),
     Tool(
         "ui_show", "Показываю виджет",
