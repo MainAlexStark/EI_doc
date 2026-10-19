@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   downloadJournal,
+  downloadVerificationProtocol,
   fetchJournal,
   type JournalFilters,
   type JournalRow,
@@ -127,6 +128,7 @@ export default function Journal() {
               <th>Годность</th>
               <th>Состояние</th>
               <th>След. поверка</th>
+              <th>Протокол</th>
             </tr>
           </thead>
           <tbody>
@@ -153,6 +155,22 @@ export default function Journal() {
                   <StatusPill row={row} />
                 </td>
                 <td className="num">{formatDate(row.next_verification_date)}</td>
+                <td>
+                  {row.protocol_formats.map((fmt) => (
+                    <button
+                      type="button"
+                      className="link"
+                      key={fmt}
+                      onClick={() =>
+                        void downloadVerificationProtocol(row.id, fmt).catch((exc) =>
+                          setError(exc instanceof Error ? exc.message : "Не удалось скачать протокол"),
+                        )
+                      }
+                    >
+                      {fmt === "pdf" ? "PDF" : "Word"}
+                    </button>
+                  ))}
+                </td>
               </tr>
             ))}
           </tbody>

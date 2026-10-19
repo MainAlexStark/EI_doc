@@ -356,6 +356,14 @@ def clean_plan(raw) -> dict:
         layout,  # каркас протокола — отдельный модуль, ссылается на план
     )
 
+    # Вид протокола: аттестация ИО (по умолчанию) или поверка СИ по шаблону (apps.verification.templates).
+    # У аттестации ключ не пишется — сохранённые планы и их снимки не меняются.
+    flavor = raw.get("flavor") or layout.ATTESTATION
+    if flavor not in layout.FLAVORS:
+        raise PlanError(f"flavor — {' | '.join(layout.FLAVORS)}")
+    if flavor != layout.ATTESTATION:
+        plan["flavor"] = flavor
+
     plan.update(layout.clean_document(raw, plan))
 
     _dry_run(plan)

@@ -55,6 +55,14 @@ from apps.verification.api_journal import (
     SignProtocolsView,
 )
 from apps.verification.api_field import WorkOrderVerificationsView
+from apps.verification.api_templates import (
+    TemplateApproveView,
+    TemplateDetailView,
+    TemplateListView,
+    TemplatePreviewView,
+    VerificationProtocolView,
+    VerificationTemplateView,
+)
 from apps.verification.api_photos import (
     VerificationPhotoDetailView,
     VerificationPhotoImageView,
@@ -122,6 +130,25 @@ urlpatterns = [
     path(
         "api/verifications/<int:pk>/measurements/",
         VerificationMeasurementsView.as_view(), name="verification_measurements",
+    ),
+    # Шаблоны поверки и протокол поверки (claude/templates.md)
+    path("api/verification-templates/", TemplateListView.as_view(), name="verification_templates"),
+    path("api/verification-templates/<int:pk>/", TemplateDetailView.as_view(), name="verification_template"),
+    path(
+        "api/verification-templates/<int:pk>/approve/",
+        TemplateApproveView.as_view(), name="verification_template_approve",
+    ),
+    path(
+        "api/verification-templates/<int:pk>/preview.<str:fmt>",
+        TemplatePreviewView.as_view(), name="verification_template_preview",
+    ),
+    path(
+        "api/verifications/<int:pk>/template/",
+        VerificationTemplateView.as_view(), name="verification_template_for",
+    ),
+    path(
+        "api/verifications/<int:pk>/protocol.<str:fmt>",
+        VerificationProtocolView.as_view(), name="verification_protocol",
     ),
     path(
         "api/verifications/<int:pk>/measurements/confirm/",

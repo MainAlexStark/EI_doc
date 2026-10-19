@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -602,3 +603,62 @@ class WorkOrder(models.Model):
             request.status = new_status
             request.save(update_fields=["status"])
 
+
+
+# ---------------------------------------------------------------------------
+# Шаблон поверки (claude/templates.md)
+# ---------------------------------------------------------------------------
+class VerificationTemplate(models.Model):
+    """Шаблон поверки для семейства или типа СИ: параметры прибора, операции поверки,
+    поверяемые точки, формулы, допуски и вид протокола (apps.verification.templates).
+
+    Готовит ассистент по методике поверки (или метролог), проверяет метролог. Поверитель по
+    шаблону только вносит параметры прибора, отметки по операциям и показания; расчёт,
+    годность и протокол делает EI_doc. В поверку кладётся снимок разрешённого плана —
+    правка шаблона не меняет уже проведённые поверки.
+    """
+
+    title = models.CharField("название", max_length=250, unique=True)
+    family = models.ForeignKey(
+        "catalog.MeasurementFamily", on_delete=models.PROTECT, related_name="verification_templates",
+        verbose_name="семейство СИ",
+    )
+    si_type = models.ForeignKey(
+        "catalog.SiType", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="verification_templates", verbose_name="тип СИ",
+        help_text="Пусто — для всех типов семейства, у которых нет своего шаблона",
+    )
+    plan = models.JSONField("шаблон", default=dict, help_text="Формат — apps.verification.templates.clean_template")
+    note = models.TextField("примечание", blank=True)
+    sources = models.JSONField("источники", default=list, blank=True)
+    plan_check = models.JSONField(
+        "сверка с примером", default=dict, blank=True,
+        help_text="Отчёт calc.check_example; числа примера здесь не хранятся",
+    )
+    needs_review = models.BooleanField(
+        "ждёт проверки метролога", default=True,
+        help_text="Протокол по непроверенному шаблону не подписывается",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="проверил",
+    )
+    reviewed_at = models.DateTimeField("проверен", null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="завёл",
+    )
+    created_via_assistant = models.BooleanField("заведён ассистентом", default=False)
+    is_active = models.BooleanField("используется", default=True)
+    created_at = models.DateTimeField("создан", auto_now_add=True)
+    updated_at = models.DateTimeField("изменён", auto_now=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "шаблон поверки"
+        verbose_name_plural = "шаблоны поверки"
+        ordering = ["family", "title"]
+
+    def __str__(self) -> str:
+        return self.title

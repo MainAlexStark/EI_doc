@@ -25,6 +25,7 @@ export type JournalRow = {
   status: string;
   needs_review: boolean;
   journal_note: string;
+  protocol_formats: ("pdf" | "docx")[];
 };
 
 export type Page<T> = { count: number; next: string | null; previous: string | null; results: T[] };
@@ -645,7 +646,123 @@ export type MeasurementsResult = {
   status: string;
 };
 
-export const submitMeasurements = (verificationId: number, payload: MeasurementsPayload) =>
+// ---------------------------------------------------------------------------
+// Поверка по шаблону (всё, кроме счётчиков воды) — claude/templates.md
+// ---------------------------------------------------------------------------
+export type TemplateParam = { key: string; label: string; unit: string; from_type: string; sample: string; source: string };
+export type TemplateOperation = { key: string; label: string; source: string };
+
+export type VerificationTemplate = {
+  id: number;
+  title: string;
+  family: number;
+  family_name: string;
+  si_type: number | null;
+  si_type_name: string;
+  needs_review: boolean;
+  is_active: boolean;
+  updated_at: string;
+  created_via_assistant: boolean;
+  note: string;
+  plan: {
+    si_kind: string;
+    method: string;
+    quantity: string;
+    unit: string;
+    repeats: number;
+    params: TemplateParam[];
+    operations: TemplateOperation[];
+    modes: { key: string; label: string; setpoint: string }[];
+    points: { key: string; label: string }[];
+    characteristics: { key: string; label: string; text: string; per: string }[];
+    extra_conditions: { key: string; label: string; unit: string }[];
+    uses_display: boolean;
+  };
+  sources?: string[];
+  created_by?: string;
+  reviewed_by?: string;
+};
+
+export type TemplateReadings = Record<string, { readings: Record<string, string[]>; display?: string }>;
+
+export type TemplateForVerification = {
+  engine: "template" | "water_meter";
+  template: VerificationTemplate | null;
+  params?: Record<string, string>;
+  params_from_type?: string[];
+  missing?: string[];
+  modes?: { key: string; label: string; setpoint: string }[];
+  saved?: {
+    kind?: string;
+    operations?: { key: string; label: string; passed: boolean | null }[];
+    readings?: TemplateReadings;
+    conditions?: Record<string, string>;
+    manual_unsuitable?: boolean;
+    manual_unsuitability_reason?: string;
+  } | null;
+};
+
+export type TemplateMeasurementsPayload = {
+  template_id?: number;
+  kind: "periodic" | "primary";
+  params: Record<string, string>;
+  operations: Record<string, boolean>;
+  readings: TemplateReadings;
+  conditions?: Record<string, string>;
+  manual_unsuitable?: boolean;
+  manual_unsuitability_reason?: string;
+};
+
+export const fetchVerificationTemplates = (all = false) =>
+  json<VerificationTemplate[]>(`/api/verification-templates/${all ? "?all=1" : ""}`);
+
+export const fetchVerificationTemplate = (id: number) =>
+  json<VerificationTemplate>(`/api/verification-templates/${id}/`);
+
+export const approveVerificationTemplate = (id: number) =>
+  json<VerificationTemplate>(`/api/verification-templates/${id}/approve/`, { method: "POST" });
+
+export const fetchTemplateForVerification = (verificationId: number, params?: Record<string, string>) =>
+  params
+    ? json<TemplateForVerification>(`/api/verifications/${verificationId}/template/`, {
+        method: "POST",
+        body: JSON.stringify({ params }),
+      })
+    : json<TemplateForVerification>(`/api/verifications/${verificationId}/template/`);
+
+/** Скачать файл с защищённого эндпоинта (токен — в заголовке, поэтому не голая ссылка). */
+async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const response = await call(path);
+  if (!response.ok) {
+    let detail = `Ошибка ${response.status}`;
+    try {
+      detail = humanError(await response.json()) || detail;
+    } catch {
+      /* не JSON */
+    }
+    throw new ApiError(detail, response.status);
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = match ? decodeURIComponent(match[1]) : fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Протокол поверки: черновик, пока не подписан; по шаблону — Word или PDF, счётчики воды — PDF. */
+export const downloadVerificationProtocol = (verificationId: number, fmt: "pdf" | "docx") =>
+  downloadFile(`/api/verifications/${verificationId}/protocol.${fmt}`, `Протокол.${fmt}`);
+
+export const downloadTemplatePreview = (templateId: number, fmt: "pdf" | "docx") =>
+  downloadFile(`/api/verification-templates/${templateId}/preview.${fmt}`, `Шаблон протокола.${fmt}`);
+
+export const submitMeasurements = (verificationId: number, payload: MeasurementsPayload | TemplateMeasurementsPayload) =>
   json<MeasurementsResult>(`/api/verifications/${verificationId}/measurements/`, {
     method: "POST",
     body: JSON.stringify(payload),

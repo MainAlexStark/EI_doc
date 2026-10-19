@@ -17,6 +17,8 @@ import {
   createVerification,
   fetchLayouts,
   fetchSiTypes,
+  fetchTemplateForVerification,
+  fetchVerificationTemplates,
   fetchWorkOrderVerifications,
   suggestSiTypes,
   submitMeasurements,
@@ -27,6 +29,9 @@ import {
   type MeasurementsResult,
   type SiType,
   type SiTypeSuggestion,
+  type TemplateForVerification,
+  type TemplateMeasurementsPayload,
+  type VerificationTemplate,
 } from "../api";
 import { db, type CachedVerification } from "./db";
 
@@ -161,7 +166,7 @@ export async function addVerification(
 // ---------------------------------------------------------------------------
 export async function saveMeasurements(
   clientId: string,
-  payload: MeasurementsPayload,
+  payload: MeasurementsPayload | TemplateMeasurementsPayload,
 ): Promise<{ queued: true } | { queued: false; result: MeasurementsResult }> {
   const cached = await db.verifications.get(clientId);
   const serverId = cached?.server_id ?? null;
@@ -213,6 +218,72 @@ export async function loadLayouts(): Promise<LayoutsResponse> {
   const cached = await db.meta.get("layouts");
   if (cached) return cached.data as LayoutsResponse;
   throw new Error("Раскладки измерений недоступны офлайн — откройте этот экран хотя бы раз при связи");
+}
+
+// ---------------------------------------------------------------------------
+// Шаблоны поверки (всё, кроме счётчиков воды): кэшируются, чтобы форма открывалась без связи
+// ---------------------------------------------------------------------------
+export async function refreshTemplateCache(): Promise<void> {
+  try {
+    const fresh = await fetchVerificationTemplates();
+    await db.meta.put({ key: "verification_templates", data: fresh, cached_at: Date.now() });
+  } catch {
+    /* офлайн — остаётся прежняя копия */
+  }
+}
+
+/** Шаблон без связи: свой у типа, иначе общий у семейства; параметры — из характеристик типа. */
+async function offlineTemplateInfo(v: CachedVerification): Promise<TemplateForVerification> {
+  const siType = (await cachedSiTypes()).find((item) => item.id === v.si_type_id);
+  const list = ((await db.meta.get("verification_templates"))?.data as VerificationTemplate[] | undefined) ?? [];
+  if (!siType || siType.calculator_key === "water_meter") return { engine: "water_meter", template: null };
+  const template =
+    list.find((t) => t.si_type === siType.id) ?? list.find((t) => t.family === siType.family && t.si_type == null);
+  if (!template) return { engine: "water_meter", template: null };
+  const limits = (siType.limits ?? {}) as unknown as Record<string, unknown>;
+  const params: Record<string, string> = {};
+  const fromType: string[] = [];
+  for (const p of template.plan.params) {
+    const value = p.from_type ? limits[p.from_type] : undefined;
+    if (value !== undefined && value !== null && value !== "") {
+      params[p.key] = String(value);
+      fromType.push(p.key);
+    }
+  }
+  return {
+    engine: "template",
+    template,
+    params,
+    params_from_type: fromType,
+    missing: template.plan.params.filter((p) => !(p.key in params)).map((p) => p.key),
+    // Без связи точки не пересчитать по формуле — показываем подпись из шаблона.
+    modes: template.plan.modes.map((m) => ({
+      key: m.key,
+      label: (m.label || m.setpoint).replace("{setpoint}", m.setpoint).replace("{unit}", template.plan.unit),
+      setpoint: m.setpoint,
+    })),
+    saved: null,
+  };
+}
+
+/** Какой формой вносить измерения и по какому шаблону. params — пересчитать точки по внесённым параметрам. */
+export async function loadTemplateInfo(
+  v: CachedVerification,
+  params?: Record<string, string>,
+): Promise<TemplateForVerification & { offline?: boolean }> {
+  const key = `tpl:${v.client_id}`;
+  if (v.server_id != null) {
+    try {
+      const info = await fetchTemplateForVerification(v.server_id, params);
+      if (!params) await db.meta.put({ key, data: info, cached_at: Date.now() });
+      return info;
+    } catch (exc) {
+      if (!isNetworkFailure(exc)) throw exc;
+    }
+  }
+  const cached = await db.meta.get(key);
+  if (cached && !params) return { ...(cached.data as TemplateForVerification), offline: true };
+  return { ...(await offlineTemplateInfo(v)), offline: true };
 }
 
 // ---------------------------------------------------------------------------

@@ -226,6 +226,16 @@ def seal(protocol: Protocol, *, signed_by, at=None) -> Protocol:
             f"Тип СИ «{si_type}» заведён поверителем и ещё не проверен метрологом — "
             "сверьте характеристики на вкладке «Типы СИ» и подтвердите тип."
         )
+    template_ref = (verification.measurements or {}).get("template") or {}
+    if (verification.measurements or {}).get("engine") == "template":
+        from apps.verification.models import VerificationTemplate
+
+        template = VerificationTemplate.objects.filter(pk=template_ref.get("id")).first()
+        if template is None or template.needs_review:
+            raise NumberingError(
+                f"Шаблон поверки «{template_ref.get('title', '')}» ещё не проверен метрологом — проверьте его "
+                "на вкладке «Шаблоны поверки» и подтвердите."
+            )
     if not signed_by.can_sign(verification.family, verification.verified_at.date()):
         raise NumberingError(
             f"У {signed_by.full_name} нет действующей аттестации на "

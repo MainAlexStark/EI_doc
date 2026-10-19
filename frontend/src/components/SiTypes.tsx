@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { confirmSiType, fetchSiTypes, type Me, type SiType } from "../api";
 import { rememberSiType } from "../offline/sync";
 import SiTypeForm from "./SiTypeForm";
+import VerificationTemplates from "./VerificationTemplates";
 
 const REVIEWER_ROLES = new Set(["owner", "head", "metrologist"]);
 
@@ -14,6 +15,7 @@ const REVIEWER_ROLES = new Set(["owner", "head", "metrologist"]);
 export default function SiTypes({ me }: { me: Me | null }) {
   const canReview = REVIEWER_ROLES.has(me?.role ?? "");
   const [onlyPending, setOnlyPending] = useState(canReview);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<SiType[]>([]);
   const [pendingTotal, setPendingTotal] = useState(0);
@@ -64,11 +66,22 @@ export default function SiTypes({ me }: { me: Me | null }) {
     <div className="narrow">
       <div className="toolbar">
         <div className="segmented">
-          <button type="button" className={onlyPending ? "active" : ""} onClick={() => setOnlyPending(true)}>
+          <button
+            type="button"
+            className={onlyPending && !showTemplates ? "active" : ""}
+            onClick={() => { setOnlyPending(true); setShowTemplates(false); }}
+          >
             Ждут проверки{pendingTotal > 0 ? ` · ${pendingTotal}` : ""}
           </button>
-          <button type="button" className={!onlyPending ? "active" : ""} onClick={() => setOnlyPending(false)}>
+          <button
+            type="button"
+            className={!onlyPending && !showTemplates ? "active" : ""}
+            onClick={() => { setOnlyPending(false); setShowTemplates(false); }}
+          >
             Все типы
+          </button>
+          <button type="button" className={showTemplates ? "active" : ""} onClick={() => setShowTemplates(true)}>
+            Шаблоны поверки
           </button>
         </div>
         <input
@@ -82,6 +95,10 @@ export default function SiTypes({ me }: { me: Me | null }) {
         </button>
       </div>
 
+      {showTemplates ? (
+        <VerificationTemplates canReview={canReview} />
+      ) : (
+        <>
       {adding && (
         <SiTypeForm
           title="Новый тип СИ"
@@ -146,6 +163,8 @@ export default function SiTypes({ me }: { me: Me | null }) {
           </div>
         ))}
       </div>
+        </>
+      )}
     </div>
   );
 }

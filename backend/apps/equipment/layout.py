@@ -41,7 +41,7 @@ BLANK = "________"
 DOC_BLOCKS = ("heading", "paragraph", "fields", "table", "list", "signatures", "pagebreak", "spacer")
 DATA_BLOCKS = (
     "commission", "equipment_info", "checked", "conditions", "documents", "instruments",
-    "procedure", "readings", "results", "conclusion",
+    "procedure", "readings", "results", "conclusion", "operations", "grid",
 )
 ALL_BLOCKS = (*DOC_BLOCKS, *DATA_BLOCKS, "per_mode")
 RESULT_COLUMNS = {
@@ -118,6 +118,60 @@ DEFAULT_LAYOUT = [
 ]
 
 
+ATTESTATION, VERIFICATION = "attestation", "verification"
+
+# Поверка СИ по шаблону (apps.verification.templates): тот же движок, другие слова и раскладка.
+VERIFICATION_EQUIPMENT_FIELDS = (
+    ("name", "Наименование, тип СИ"), ("registry_number", "Регистрационный номер в ФИФ ОЕИ"),
+    ("modification", "Модификация"), ("serial_number", "Заводской номер"), ("year", "Год выпуска"),
+    ("manufacturer", "Изготовитель"), ("owner", "Владелец"), ("location", "Место установки"),
+)
+VERIFICATION_DOCUMENT = {
+    "header": DEFAULT_DOCUMENT["header"],
+    "title": "Протокол {{kind}} поверки",
+    "subtitle": "№ {{number}} от {{protocol_date}}",
+}
+VERIFICATION_CONCLUSION = {
+    "ok": "На основании результатов {{kind}} поверки {{who}} соответствует установленным метрологическим и "
+          "техническим требованиям и признано пригодным к применению.",
+    "fail": "На основании результатов {{kind}} поверки {{who}} не соответствует установленным метрологическим и "
+            "техническим требованиям и признано непригодным к применению. Причины: {{failed}}.",
+}
+VERIFICATION_LAYOUT = [
+    {"type": "heading", "text": "Сведения о средстве измерений"},
+    {"type": "equipment_info"},
+    {"type": "heading", "text": "Методика поверки и нормативные документы"},
+    {"type": "documents"},
+    {"type": "heading", "text": "Средства поверки"},
+    {"type": "instruments"},
+    {"type": "heading", "text": "Условия поверки"},
+    {"type": "conditions"},
+    {"type": "heading", "text": "Результаты поверки"},
+    {"type": "operations"},
+    {"type": "paragraph", "text": "Определение метрологических характеристик", "bold": True},
+    {"type": "grid"},
+    {"type": "heading", "text": "Заключение"},
+    {"type": "conclusion"},
+    {"type": "signatures", "rows": [{"role": "Поверитель", "name": "{{verifier}}"}]},
+]
+
+FLAVORS = {
+    ATTESTATION: {
+        "document": DEFAULT_DOCUMENT, "conclusion": DEFAULT_CONCLUSION, "layout": DEFAULT_LAYOUT,
+        "equipment_fields": EQUIPMENT_FIELDS, "simple": frozenset(), "noun": "аттестации",
+    },
+    VERIFICATION: {
+        "document": VERIFICATION_DOCUMENT, "conclusion": VERIFICATION_CONCLUSION, "layout": VERIFICATION_LAYOUT,
+        "equipment_fields": VERIFICATION_EQUIPMENT_FIELDS, "simple": frozenset({"verifier", "method"}),
+        "noun": "поверки",
+    },
+}
+
+
+def flavor_of(plan: dict) -> dict:
+    return FLAVORS[plan.get("flavor") or ATTESTATION]
+
+
 def blocks_help() -> str:
     return (
         "layout — список блоков: " + ", ".join(ALL_BLOCKS) + ". Подстановки {{…}}: " +
@@ -149,12 +203,13 @@ def _known_path(path: str, attr: str | None, plan: dict, in_mode: bool, extra: s
         return f"|{attr}: можно {', '.join(ATTRS)}"
     simple = {
         "number", "protocol_date", "performed_on", "kind", "kind_nom", "program", "purpose", "periodicity",
-        "quantity", "Quantity", "unit", "verdict", "conclusion", "checked", *extra,
+        "quantity", "Quantity", "unit", "verdict", "conclusion", "checked", *extra, *flavor_of(plan)["simple"],
     }
     if len(parts) == 1:
         return None if head in simple else f"неизвестная подстановка «{path}»"
     if head == "equipment":
-        return None if len(parts) == 2 and parts[1] in dict(EQUIPMENT_FIELDS) else f"нет поля оборудования «{path}»"
+        fields = dict(flavor_of(plan)["equipment_fields"])
+        return None if len(parts) == 2 and parts[1] in fields else f"нет поля «{path}» (есть: {', '.join(fields)})"
     if head == "conditions":
         keys = {c["key"] for c in plan["conditions"]}
         return None if len(parts) == 2 and parts[1] in keys else f"нет условия «{path}» (есть: {', '.join(sorted(keys))})"
@@ -206,6 +261,23 @@ def _clean_blocks(blocks, plan: dict, in_mode: bool, where: str) -> list[dict]:
         block = dict(raw, type=kind)
         if "if" in block:
             _check_text("{{" + str(block["if"]) + "}}", f"{here}.if", plan, in_mode)
+        if kind == "grid":
+            point_keys = {p["key"] for p in plan["points"]}
+            char_keys = {c["key"] for c in plan["characteristics"] if c["per"] == "mode"}
+            pts = raw.get("points") or [p["key"] for p in plan["points"]]
+            chars = raw.get("characteristics")
+            chars = [c["key"] for c in plan["characteristics"] if c["per"] == "mode"] if chars is None else chars
+            bad = [x for x in pts if x not in point_keys] + [x for x in chars if x not in char_keys]
+            if bad:
+                raise calc.PlanError(f"{here}: нет точек/характеристик (по режиму) {', '.join(map(str, bad))}")
+            block.update(points=list(pts), characteristics=list(chars),
+                         tolerance=raw.get("tolerance", True) is not False, verdict=raw.get("verdict", True) is not False)
+            titles = raw.get("titles") or {}
+            block["titles"] = {str(k): str(v)[:80] for k, v in titles.items()} if isinstance(titles, dict) else {}
+            decimals = raw.get("decimals", 3)
+            block["decimals"] = decimals if isinstance(decimals, int) and 0 <= decimals <= 6 else 3
+            out.append(block)
+            continue
         if kind == "per_mode":
             if in_mode:
                 raise calc.PlanError(f"{here}: per_mode внутри per_mode")
@@ -248,15 +320,17 @@ def _clean_blocks(blocks, plan: dict, in_mode: bool, where: str) -> list[dict]:
 
 
 def clean_document(raw: dict, plan: dict) -> dict:
+    flavor = flavor_of(plan)
+    defaults = flavor["document"]
     document = raw.get("document") or {}
     if not isinstance(document, dict):
         raise calc.PlanError("document — объект {header, title, subtitle}")
-    header = document.get("header", DEFAULT_DOCUMENT["header"])
+    header = document.get("header", defaults["header"])
     header = [str(x)[:300] for x in (header if isinstance(header, list) else [header])]
     doc = {
         "header": header,
-        "title": str(document.get("title") or DEFAULT_DOCUMENT["title"])[:300],
-        "subtitle": str(document.get("subtitle") or DEFAULT_DOCUMENT["subtitle"])[:300],
+        "title": str(document.get("title") or defaults["title"])[:300],
+        "subtitle": str(document.get("subtitle") or defaults["subtitle"])[:300],
     }
     for key in ("title", "subtitle"):
         _check_text(doc[key], f"document.{key}", plan, False)
@@ -266,7 +340,7 @@ def clean_document(raw: dict, plan: dict) -> dict:
     conclusion = raw.get("conclusion") or {}
     if not isinstance(conclusion, dict):
         raise calc.PlanError("conclusion — объект {ok, fail}")
-    concl = {k: str(conclusion.get(k) or DEFAULT_CONCLUSION[k])[:3000] for k in ("ok", "fail")}
+    concl = {k: str(conclusion.get(k) or flavor["conclusion"][k])[:3000] for k in ("ok", "fail")}
     for key, text in concl.items():
         _check_text(text, f"conclusion.{key}", plan, False, {"who", "failed", "purpose_tail"})
 
@@ -292,8 +366,13 @@ class Context:
     """Всё, что нужно для подстановок одного протокола."""
 
     def __init__(self, *, plan, equipment, commission, instruments, texts, conditions, measurements,
-                 results, kind, number, protocol_date, performed_on):
+                 results, kind, number, protocol_date, performed_on, operations=None, values=None):
         self.plan, self.equipment, self.commission, self.instruments = plan, equipment, commission, instruments
+        self.flavor = flavor_of(plan)
+        # operations — [{key, label, passed: True|False|None}] (поверка: внешний осмотр, опробование…);
+        # values — простые подстановки вида протокола (поверка: verifier, method).
+        self.operations = list(operations or [])
+        self.values = dict(values or {})
         self.texts = {**DEFAULT_TEXTS, **(texts or {})}
         self.conditions, self.measurements, self.results = conditions or {}, measurements or {}, results
         self.kind, self.number, self.protocol_date, self.performed_on = kind, number, protocol_date, performed_on
@@ -309,15 +388,16 @@ class Context:
         return f"{name}, заводской номер {self.equipment.get('serial_number', '')}"
 
     def failed(self) -> str:
-        return "; ".join(
+        ops = [f"{o['label']} — не соответствует" for o in self.operations if o.get("passed") is False]
+        return "; ".join(ops + [
             f"{r['label']}{', точка ' + r['point_label'] if r['point'] else ''} ({m['label']}): {r['shown']} при "
             f"допуске {r['tolerance']}"
             for m in (self.results or {}).get("modes", []) for r in m["characteristics"] if r["passed"] is False
-        )
+        ] + list((self.results or {}).get("extra_reasons", [])))
 
     def conclusion(self) -> str:
         if self.results is None:
-            return f"На основании результатов {KIND[self.kind][0]} аттестации установлено, что {self.who()} {BLANK}"
+            return f"На основании результатов {KIND[self.kind][0]} {self.flavor['noun']} {self.who()} {BLANK}"
         template = self.plan["conclusion"]["ok" if self.results["suitable"] else "fail"]
         purpose = self.plan.get("purpose", "").rstrip(".")
         extra = {
@@ -336,6 +416,8 @@ class Context:
         p = self.plan
         if path == "conclusion":
             return self.conclusion()
+        if len(parts) == 1 and head in self.flavor["simple"]:
+            return self.values.get(head, "")
         if len(parts) == 1:
             return {
                 "number": f"{self.number}" if self.number else BLANK,
@@ -462,6 +544,49 @@ def _results_table(ctx: Context, mode_key: str, block: dict) -> dict:
     return {"type": "table", "columns": titles, "rows": rows, "widths": [weights[c] for c in columns]}
 
 
+def _grid_table(ctx: Context, block: dict) -> dict:
+    """Таблица «режим × величины» — привычный вид протокола поверки: строка на поверяемую точку."""
+    plan = ctx.plan
+    keys_p, keys_c = block.get("points"), block.get("characteristics")
+    points = [p for p in plan["points"] if keys_p is None or p["key"] in keys_p]
+    chars = [c for c in plan["characteristics"] if c["per"] == "mode" and (keys_c is None or c["key"] in keys_c)]
+    block = {"tolerance": True, "verdict": True, **block}
+    titles = block.get("titles") or {}
+    columns = [titles.get("mode", "Поверяемая точка")]
+    columns += [titles.get(p["key"], p["label"]) for p in points]
+    for c in chars:
+        columns.append(titles.get(c["key"], c["label"]))
+        if block["tolerance"] and c["tolerance"]["kind"] != "none":
+            columns.append(titles.get(f"{c['key']}_tolerance", "Допуск"))
+    if block["verdict"]:
+        columns.append(titles.get("verdict", "Соответствие"))
+    rows = []
+    for mode in plan["modes"]:
+        data = (ctx.measurements.get(mode["key"]) or {}).get("readings") or {}
+        res = next((m for m in (ctx.results or {}).get("modes", []) if m["key"] == mode["key"]), None)
+        row = [mode["label"]]
+        for p in points:
+            values = [v.replace(".", ",") for v in (data.get(p["key"]) or []) if v]
+            row.append("; ".join(values))
+        for c in chars:
+            r = next((x for x in (res or {}).get("characteristics", []) if x["key"] == c["key"]), None)
+            row.append(r["shown"] if r else "")
+            if block["tolerance"] and c["tolerance"]["kind"] != "none":
+                row.append(r["tolerance"] if r else calc.plan_tolerance_text(c["tolerance"]))
+        if block["verdict"]:
+            row.append("" if res is None else ("соответствует" if res["passed"] else "НЕ соответствует"))
+        rows.append(row)
+    weights = [14] + [9] * len(points)
+    for c in chars:
+        weights.append(10)
+        if block["tolerance"] and c["tolerance"]["kind"] != "none":
+            weights.append(9)
+    if block["verdict"]:
+        weights.append(14)
+    return {"type": "table", "size": 8 if len(columns) > 6 else 9, "columns": columns, "rows": rows,
+            "widths": weights}
+
+
 def _render(blocks: list[dict], ctx: Context, out: list[dict]) -> None:
     for block in blocks:
         if block.get("if") and not ctx.present(str(block["if"])):
@@ -478,7 +603,7 @@ def _render(blocks: list[dict], ctx: Context, out: list[dict]) -> None:
             if not ctx.commission:
                 out.append(_p(BLANK))
         elif kind == "equipment_info":
-            for key, label in EQUIPMENT_FIELDS:
+            for key, label in ctx.flavor["equipment_fields"]:
                 if ctx.equipment.get(key):
                     out.append(_p(f"{label}: {ctx.equipment[key]};"))
         elif kind == "checked":
@@ -510,10 +635,16 @@ def _render(blocks: list[dict], ctx: Context, out: list[dict]) -> None:
                 out.append((_readings_table if kind == "readings" else _results_table)(ctx, key, block))
         elif kind == "conclusion":
             out.append(_p(ctx.conclusion()))
+        elif kind == "operations":
+            for i, op in enumerate(ctx.operations, 1):
+                verdict = {True: "соответствует", False: "не соответствует", None: BLANK}[op.get("passed")]
+                out.append(_p(f"{i}. {op['label']}: {verdict}."))
+        elif kind == "grid":
+            out.append(_grid_table(ctx, block))
         elif kind == "signatures":
             rows = block.get("rows") or [
                 {"role": COMMISSION_ROLES[r["role"]], "name": r["name"]} for r in ctx.commission
-            ]
+            ] or ([{"role": "Поверитель", "name": "{{verifier}}"}] if "verifier" in ctx.flavor["simple"] else [])
             out.append({"type": "signatures", "rows": [
                 {"role": ctx.fill(r.get("role", "")), "name": ctx.fill(r.get("name", ""))} for r in rows
             ]})
@@ -544,11 +675,11 @@ def _p(text: str) -> dict:
 def build(ctx: Context, *, draft: bool) -> dict:
     """Протокол блоками apps.assistant.documents — один источник для Word и PDF."""
     blocks: list[dict] = []
-    _render(ctx.plan.get("layout") or clean_default_layout(), ctx, blocks)
-    doc = ctx.plan.get("document") or DEFAULT_DOCUMENT
+    _render(ctx.plan.get("layout") or clean_default_layout(ctx.plan.get("flavor") or ATTESTATION), ctx, blocks)
+    doc = ctx.plan.get("document") or ctx.flavor["document"]
     number_blank = ctx.number is None
     subtitle = doc["subtitle"]
-    if number_blank and subtitle == DEFAULT_DOCUMENT["subtitle"]:
+    if number_blank and subtitle == ctx.flavor["document"]["subtitle"]:
         subtitle = f"№ {BLANK} от {BLANK}"
     return {
         "header": [ctx.fill(x) for x in doc["header"]],
@@ -560,10 +691,10 @@ def build(ctx: Context, *, draft: bool) -> dict:
     }
 
 
-def clean_default_layout() -> list[dict]:
+def clean_default_layout(flavor: str = ATTESTATION) -> list[dict]:
     # Блоки по умолчанию уже в каноническом виде, кроме полей, которые добавляет проверка.
     out = []
-    for block in DEFAULT_LAYOUT:
+    for block in FLAVORS[flavor]["layout"]:
         if block["type"] == "per_mode":
             inner = []
             for b in block["blocks"]:
@@ -574,6 +705,8 @@ def clean_default_layout() -> list[dict]:
                     b.update(mode="_", columns=list(RESULT_COLUMNS), titles={})
                 inner.append(b)
             out.append({**block, "blocks": inner})
+        elif block["type"] == "grid":
+            out.append({**block, "points": None, "characteristics": None})
         else:
             out.append(dict(block))
     return out

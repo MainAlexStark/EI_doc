@@ -91,8 +91,40 @@ def _attestation_create(action: PendingAction, user) -> dict:
     return {"id": att.pk, "plan_approved": att.plan_approved, "label": str(att)}
 
 
+def _attestation_template_save(action: PendingAction, user) -> dict:
+    from apps.equipment import service
+
+    payload = dict(action.payload)
+    try:
+        program = service.save_program(
+            user, payload, sources=action.sources, plan_check=payload.get("plan_check"),
+            program_id=payload.get("program_id"),
+        )
+    except service.AttestationError as exc:
+        raise ActionError(str(exc)) from exc
+    return {"id": program.pk, "title": program.title, "needs_review": program.needs_review,
+            "updated": bool(payload.get("program_id"))}
+
+
+def _verification_template_save(action: PendingAction, user) -> dict:
+    from apps.verification import templates
+
+    payload = dict(action.payload)
+    try:
+        template = templates.save_template(
+            user, payload, sources=action.sources, plan_check=payload.get("plan_check"),
+            template_id=payload.get("template_id"), via_assistant=True,
+        )
+    except templates.TemplateError as exc:
+        raise ActionError(str(exc)) from exc
+    return {"id": template.pk, "title": template.title, "needs_review": template.needs_review,
+            "updated": bool(payload.get("template_id"))}
+
+
 EXECUTORS = {
     "attestation_create": _attestation_create,
+    "attestation_template_save": _attestation_template_save,
+    "verification_template_save": _verification_template_save,
     "si_type_create": _si_type_create,
     "memory_company_save": _memory_company_save,
     "memory_company_delete": _memory_company_delete,
@@ -102,6 +134,16 @@ DONE_TEXT = {
     "attestation_create": lambda r: (
         f"Аттестация заведена (id {r['id']}): {r['label']}. Измерения и условия человек вносит на вкладке "
         "«Аттестация ИО»" + ("." if r.get("plan_approved") else "; план ждёт проверки метролога.")
+    ),
+    "attestation_template_save": lambda r: (
+        f"Шаблон аттестации {'обновлён' if r.get('updated') else 'заведён'} (id {r['id']}): «{r['title']}». Он есть "
+        "в списке «Новая аттестация» на вкладке «Аттестация ИО»: человек выбирает шаблон, вписывает оборудование и "
+        "вносит измерения" + ("; шаблон ждёт проверки метролога." if r.get("needs_review") else ".")
+    ),
+    "verification_template_save": lambda r: (
+        f"Шаблон поверки {'обновлён' if r.get('updated') else 'заведён'} (id {r['id']}): «{r['title']}». Поверитель "
+        "проводит по нему поверку на экране «Поверки»: параметры прибора, отметки по операциям, показания — "
+        "расчёт и протокол делает EI_doc" + ("; шаблон ждёт проверки метролога." if r.get("needs_review") else ".")
     ),
     "si_type_create": lambda r: (
         f"Тип СИ уже был в справочнике (id {r['id']})." if r.get("existing") else

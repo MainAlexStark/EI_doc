@@ -37,6 +37,19 @@ class AttestationProgram(models.Model):
         help_text="Заготовка составлена по образцу протокола и ещё не сверена с программой аттестации",
     )
     is_active = models.BooleanField("используется", default=True)
+    sources = models.JSONField(
+        "источники", default=list, blank=True,
+        help_text="Откуда взяты режимы, формулы, допуски и каркас (для заготовок от ассистента)",
+    )
+    plan_check = models.JSONField(
+        "сверка плана с примером", default=dict, blank=True,
+        help_text="Отчёт calc.check_example; числа примера здесь не хранятся",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="завёл",
+    )
+    created_via_assistant = models.BooleanField("заведена ассистентом", default=False)
 
     history = HistoricalRecords()
 

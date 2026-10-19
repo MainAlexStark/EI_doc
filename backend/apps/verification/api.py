@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.verification import measurements as service
+from apps.verification import templates
 from apps.catalog import conditions as wm_conditions
 from apps.verification.calculators import water_meter as wm
 from apps.verification.models import Verification
@@ -85,8 +86,15 @@ class VerificationMeasurementsView(APIView):
     @extend_schema(request=MeasurementsSerializer, responses={200: None})
     def post(self, request, pk: int):
         verification = get_object_or_404(
-            Verification.objects.select_related("instrument__si_type"), pk=pk
+            Verification.objects.select_related("instrument__si_type__family"), pk=pk
         )
+        if templates.uses_template(verification) or "readings" in request.data:
+            # Не счётчик воды — поверка по шаблону (apps.verification.templates).
+            try:
+                return Response(templates.apply(verification, request.data))
+            except templates.MeasurementInputError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         payload = MeasurementsSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
 

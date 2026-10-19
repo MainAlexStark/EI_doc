@@ -31,6 +31,7 @@ from apps.assistant.models import (
     Scope,
 )
 from apps.equipment.calc import plan_help
+from apps.verification.templates import template_help as verification_template_help
 
 logger = logging.getLogger(__name__)
 
@@ -204,10 +205,16 @@ def web_fetch(ctx: ToolContext, args: dict) -> ToolResult:
 # Файлы
 # ===========================================================================
 def attachment_read(ctx: ToolContext, args: dict) -> ToolResult:
+    in_chat = Attachment.objects.filter(conversation=ctx.conversation, user=ctx.user)
     try:
-        attachment = Attachment.objects.get(pk=int(args.get("attachment_id")), user=ctx.user)
+        attachment = in_chat.get(pk=int(args.get("attachment_id")))
     except Exception as exc:  # noqa: BLE001
-        raise ToolFailure("Файл не найден среди файлов этого чата") from exc
+        files = [f"{a.pk} — {a.name}" for a in in_chat.order_by("pk")[:20]]
+        raise ToolFailure(
+            ("Файл не найден. Файлы этого чата: " + "; ".join(files)) if files else
+            "В этом чате нет файлов. Не перебирай id: работай без образца (шаблон по "
+            "методике и ГОСТ) и в ответе одной строкой скажи, что файл не дошёл."
+        ) from exc
     if attachment.is_image:
         return ToolResult("Это изображение — оно уже приложено к сообщению человека, смотри его там.")
     if not attachment.text:
@@ -594,6 +601,213 @@ def ei_attestation_propose(ctx: ToolContext, args: dict) -> ToolResult:
     return ToolResult(note, ui)
 
 
+def ei_attestation_template_propose(ctx: ToolContext, args: dict) -> ToolResult:
+    """Шаблон протокола аттестации для вида ИО — без конкретного оборудования, комиссии и измерений."""
+    from apps.equipment import service
+    from apps.equipment.models import AttestationProgram
+
+    forbidden = {"measurements", "conditions", "readings", "results", "equipment", "commission"} & set(args)
+    if forbidden:
+        raise ToolFailure(
+            f"Шаблон — только структура протокола: убери {', '.join(sorted(forbidden))}. Оборудование, комиссию, "
+            "измерения и условия человек вносит сам, когда заводит аттестацию по шаблону на вкладке «Аттестация ИО»."
+        )
+    if not service.can_edit(ctx.user):
+        raise ToolFailure("У этого пользователя нет права заводить шаблоны (наблюдатель)")
+    try:
+        card = service.clean_program(args)
+    except service.AttestationError as exc:
+        raise ToolFailure(str(exc)) from exc
+    sources = [str(s) for s in (args.get("sources") or []) if str(s).strip()]
+    if not sources:
+        raise ToolFailure(
+            "Укажи sources — откуда взяты режимы, точки, формулы, допуски и каркас (образец протокола, методика/"
+            "программа аттестации с пунктами, ГОСТ, РЭ, карточка типа во ФГИС)"
+        )
+    program_id = args.get("program_id")
+    if program_id:
+        if not AttestationProgram.objects.filter(pk=program_id).exists():
+            raise ToolFailure(f"Шаблона с id {program_id} нет — посмотри ei_attestations what=programs")
+    else:
+        same = AttestationProgram.objects.filter(title=card["title"]).first()
+        if same:
+            raise ToolFailure(f"Шаблон «{card['title']}» уже есть (id {same.pk}) — передай program_id, чтобы "
+                              "обновить его, или дай другое название")
+    report = _run_check(card["plan"], args["example"]) if args.get("example") else None
+    plan = card["plan"]
+    view = [
+        ["Название", card["title"]],
+        ["Вид оборудования", card["equipment_kind"]],
+        ["Величина", f"{plan.get('quantity', '')}, {plan.get('unit', '')}".strip(", ")],
+        ["Режимы", "; ".join(str(m.get("label") or m.get("key")) for m in plan.get("modes", []))],
+        ["Точки", f"{len(plan.get('points', []))} × {plan.get('repeats', '')} повт."],
+        ["Характеристики", "; ".join(str(c.get("label") or c.get("key")) for c in plan.get("characteristics", []))],
+        ["Документы", "; ".join(plan.get("documents", []))],
+        ["Сверка с примером", "нет" if report is None else ("сходится" if report["ok"] else "ЕСТЬ РАСХОЖДЕНИЯ")],
+    ]
+    action = PendingAction.objects.create(
+        conversation=ctx.conversation, kind="attestation_template_save",
+        title=("Обновить" if program_id else "Завести") + f" шаблон аттестации: {card['title']}",
+        payload={**card, "program_id": program_id or None, "plan_check": report, "view": view},
+        sources=sources,
+    )
+    note = (
+        "Карточка шаблона показана человеку с кнопкой «Подтвердить». После подтверждения шаблон появится в "
+        "списке «Новая аттестация» на вкладке «Аттестация ИО»: человек выбирает его, вписывает оборудование, "
+        "комиссию и средства измерений, вносит измерения и условия; расчёт, заключение, номер и протокол "
+        "(Word/PDF) делает EI_doc. Шаблон от поверителя ждёт проверки метролога."
+    )
+    if report is None:
+        note += " Сверки с примером нет — скажи, что формулы метролог сверит с методикой."
+    elif not report["ok"]:
+        note += " ВНИМАНИЕ: сверка с примером не сошлась — перечисли расхождения."
+    ui = {"action": action.pk}
+    if report:
+        ui["widgets"] = [_check_widget(report)]
+    return ToolResult(note, ui)
+
+
+# ===========================================================================
+# Шаблоны поверки СИ (apps.verification.templates)
+# ===========================================================================
+def ei_verification_templates(ctx: ToolContext, args: dict) -> ToolResult:
+    from apps.verification.models import VerificationTemplate
+
+    qs = VerificationTemplate.objects.select_related("family", "si_type").filter(is_active=True)
+    for word in str(args.get("query") or "").split():
+        qs = qs.filter(Q(title__icontains=word) | Q(family__name__icontains=word) | Q(si_type__name__icontains=word)
+                       | Q(si_type__registry_number__icontains=word))
+    rows = [
+        {"id": t.pk, "title": t.title, "family": t.family.name, "family_id": t.family_id,
+         "si_type": str(t.si_type) if t.si_type_id else "", "needs_review": t.needs_review,
+         "sources": t.sources, "plan": t.plan if args.get("full") else {
+             k: t.plan.get(k) for k in ("si_kind", "method", "params", "operations")}}
+        for t in qs[: min(int(args.get("limit") or 10), 30)]
+    ]
+    return ToolResult(_dump(rows) if rows else "Шаблонов поверки не найдено.",
+                      {"sources": [_source("ei", "Шаблоны поверки EI_doc")]})
+
+
+def _verification_check(plan: dict, example) -> dict:
+    from apps.verification import templates
+
+    try:
+        return templates.check_example(plan, example)
+    except templates.TemplateError as exc:
+        raise ToolFailure(str(exc)) from exc
+
+
+def ei_verification_template_check(ctx: ToolContext, args: dict) -> ToolResult:
+    """Ничего не сохраняет: шаблон + параметры прибора из примера → прогон на числах примера."""
+    from apps.verification import templates
+
+    try:
+        plan = templates.clean_template(args.get("plan"))
+    except templates.TemplateError as exc:
+        raise ToolFailure(f"шаблон: {exc}") from exc
+    report = _verification_check(plan, args.get("example"))
+    lines = [
+        f"{r['mode']} / {r['key']}: пример {r['expected']}, посчитано {r['computed']} — "
+        f"{'сходится' if r['ok'] else 'НЕ сходится'}" for r in report["rows"]
+    ] + [f"Ошибка: {e}" for e in report["errors"]]
+    head = "Все формулы сходятся с примером." if report["ok"] else (
+        "Есть расхождения: перечитай методику/пример и поправь expr. Не подгоняй формулу под число без объяснения.")
+    return ToolResult(head + "\n" + "\n".join(lines), {"widgets": [_check_widget(report)]})
+
+
+def ei_verification_template_propose(ctx: ToolContext, args: dict) -> ToolResult:
+    """Шаблон поверки для семейства/типа СИ: карточка «Подтвердить» + пустой протокол по шаблону (Word/PDF)."""
+    from apps.catalog.api_types import can_create
+    from apps.catalog.models import MeasurementFamily, SiType
+    from apps.verification import templates
+    from apps.verification.models import VerificationTemplate
+
+    forbidden = {"measurements", "readings", "results", "instrument", "serial_number", "operations_results"} & set(args)
+    if forbidden:
+        raise ToolFailure(
+            f"Шаблон — только структура: убери {', '.join(sorted(forbidden))}. Прибор, показания и отметки вносит "
+            "поверитель, когда проводит поверку по шаблону."
+        )
+    if not can_create(ctx.user):
+        raise ToolFailure("У этого пользователя нет права заводить шаблоны (наблюдатель)")
+    try:
+        plan = templates.clean_template(args.get("plan"))
+    except templates.TemplateError as exc:
+        raise ToolFailure(f"шаблон: {exc}") from exc
+    family = MeasurementFamily.objects.filter(pk=args.get("family")).first()
+    if family is None:
+        raise ToolFailure("family — id семейства СИ (ei_reference what=families). Нет подходящего — скажи человеку, "
+                          "что метролог заводит семейство в справочнике.")
+    si_type = None
+    if args.get("si_type"):
+        si_type = SiType.objects.filter(pk=args["si_type"]).first()
+        if si_type is None or si_type.family_id != family.pk:
+            raise ToolFailure("si_type — id типа из справочника EI_doc (ei_si_types) того же семейства, или не указывай")
+    title = str(args.get("title") or "").strip()
+    if not title:
+        raise ToolFailure("title — название шаблона («Манометры показывающие — МИ 2124-90»)")
+    template_id = args.get("template_id")
+    if template_id:
+        if not VerificationTemplate.objects.filter(pk=template_id).exists():
+            raise ToolFailure(f"Шаблона поверки {template_id} нет — посмотри ei_verification_templates")
+    elif VerificationTemplate.objects.filter(title=title).exists():
+        raise ToolFailure(f"Шаблон «{title}» уже есть — передай template_id, чтобы обновить, или назови иначе")
+    sources = [str(x) for x in (args.get("sources") or []) if str(x).strip()]
+    if not sources:
+        raise ToolFailure("Укажи sources — методика поверки (пункты), описание типа, ГОСТ: откуда точки, формулы и допуски")
+    report = _verification_check(plan, args["example"]) if args.get("example") else None
+
+    view = [
+        ["Название", title], ["Семейство", family.name], ["Тип СИ", str(si_type) if si_type else "все типы семейства"],
+        ["Методика", plan["method"]],
+        ["Параметры прибора", "; ".join(
+            p["label"] + (" (из типа)" if p["from_type"] else " (вносит поверитель)") for p in plan["params"]) or "—"],
+        ["Операции", "; ".join(op["label"] for op in plan["operations"])],
+        ["Поверяемые точки", "; ".join(str(m["label"] or m["setpoint"]) for m in plan["modes"])],
+        ["Величины в точке", "; ".join(str(p.get("label") or p["key"]) for p in plan["points"])
+         + f" × {plan['repeats']}"],
+        ["Характеристики", "; ".join(str(c.get("label")) for c in plan["characteristics"])],
+        ["Сверка с примером", "нет" if report is None else ("сходится" if report["ok"] else "ЕСТЬ РАСХОЖДЕНИЯ")],
+    ]
+    action = PendingAction.objects.create(
+        conversation=ctx.conversation, kind="verification_template_save",
+        title=("Обновить" if template_id else "Завести") + f" шаблон поверки: {title}",
+        payload={"title": title, "family": family.pk, "si_type": si_type.pk if si_type else None, "plan": plan,
+                 "note": str(args.get("note") or "")[:2000], "template_id": template_id or None,
+                 "plan_check": report, "view": view},
+        sources=sources,
+    )
+    files = []
+    spec = templates.preview_spec(plan, title=title)
+    for fmt in ("docx", "pdf"):
+        try:
+            data = templates.render(spec, fmt)
+        except Exception:  # noqa: BLE001 — нет typst: обойдёмся Word
+            logger.warning("Пустой протокол по шаблону в %s не собрался", fmt, exc_info=True)
+            continue
+        attachment = _save_file(ctx, documents.safe_filename(f"Шаблон протокола — {title}", fmt), data, MIME[fmt])
+        files.append({"id": attachment.pk, "name": attachment.name, "size": attachment.size, "mime": attachment.mime})
+    note = (
+        "Карточка шаблона показана человеку с кнопкой «Подтвердить», рядом — пустой протокол по шаблону (так он "
+        "будет выглядеть). После подтверждения поверитель на экране «Поверки» выбирает прибор этого семейства/типа, "
+        "вносит параметры прибора (если их нет в типе), отметки по операциям и показания; расчёт, годность и "
+        "протокол (Word/PDF) делает EI_doc, протокол виден в журнале. Шаблон от поверителя ждёт проверки "
+        "метролога — протокол по нему не подпишется до проверки."
+    )
+    missing_type = [p["label"] for p in plan["params"] if p["from_type"] and si_type
+                    and (si_type.limits or {}).get(p["from_type"]) in (None, "")]
+    if missing_type:
+        note += f" У типа «{si_type}» в справочнике нет характеристик: {', '.join(missing_type)} — скажи человеку."
+    if report is None:
+        note += " Сверки с примером нет — скажи, что формулы метролог сверит с методикой."
+    elif not report["ok"]:
+        note += " ВНИМАНИЕ: сверка с примером не сошлась — перечисли расхождения."
+    ui = {"action": action.pk, "files": files}
+    if report:
+        ui["widgets"] = [_check_widget(report)]
+    return ToolResult(note, ui)
+
+
 # ===========================================================================
 # Виджеты
 # ===========================================================================
@@ -704,7 +918,9 @@ BUILTIN: list[Tool] = [
     ),
     Tool(
         "protocol_draft", "Составляю черновик протокола",
-        "Собрать черновик протокола (поверки, аттестации ИО и т. п.) — Word + PDF с пометкой ЧЕРНОВИК. "
+        "Собрать черновик протокола с ДАННЫМИ конкретного прибора (только если человек их дал) — Word + PDF с "
+        "пометкой ЧЕРНОВИК. Шаблон протокола без данных — НЕ здесь: ei_verification_template_propose (поверка СИ) "
+        "или ei_attestation_template_propose (аттестация ИО). "
         "Структуру повторяй по образцу (из файлов компании или приложенного человеком). Неизвестные значения — "
         "«________», никогда не выдумывай. facts — ОБЯЗАТЕЛЬНАЯ таблица происхождения КАЖДОГО существенного "
         "значения: {field, value, source (откуда: «ФГИС Аршин, поверка vri 1-…», «методика МП …, п. 5», "
@@ -790,6 +1006,50 @@ BUILTIN: list[Tool] = [
             "sources": {"type": "array", "items": STR},
         }, ["equipment", "plan", "sources"]),
         ei_attestation_propose,
+    ),
+    Tool(
+        "ei_attestation_template_propose", "Готовлю шаблон протокола аттестации",
+        "ГЛАВНЫЙ способ «составить протокол аттестации по образцу/методике»: завести ШАБЛОН (программу-заготовку) "
+        "для вида ИО — план (точки, режимы, формулы, допуски с источниками) и каркас протокола (layout, document, "
+        "conclusion) по образцу. Без конкретного оборудования, комиссии, измерений и условий — их человек вносит "
+        "сам, когда заводит аттестацию по шаблону. Человек подтвердит кнопкой. title — название шаблона "
+        "(«Камеры климатические — периодическая аттестация»), equipment_kind, plan, note, program_id — чтобы "
+        "обновить существующий шаблон, example — как в ei_attestation_check, sources — откуда каждая формула, "
+        "допуск и раздел каркаса. " + plan_help(),
+        _obj({
+            "title": STR, "equipment_kind": STR, "plan": {"type": "object"}, "note": STR, "program_id": INT,
+            "example": {"type": "object"}, "sources": {"type": "array", "items": STR},
+        }, ["title", "equipment_kind", "plan", "sources"]),
+        ei_attestation_template_propose,
+    ),
+    Tool(
+        "ei_verification_templates", "Смотрю шаблоны поверки",
+        "Шаблоны поверки СИ в EI_doc (по семейству/типу): query — слова названия, семейства, типа или номер в "
+        "реестре; full=true — целиком (чтобы обновить через template_id).",
+        _obj({"query": STR, "full": {"type": "boolean"}, "limit": INT}),
+        ei_verification_templates,
+    ),
+    Tool(
+        "ei_verification_template_check", "Сверяю шаблон поверки с примером",
+        "Прогнать шаблон поверки на числах ПРИМЕРА протокола и сравнить с напечатанными результатами. Ничего не "
+        "сохраняет. example{source, params{ключ: значение параметра прибора из примера}, modes{ключ_точки: "
+        "{readings{ключ_величины: [отсчёты]}, expected{ключ_характеристики: «как напечатано»}}}}.",
+        _obj({"plan": {"type": "object"}, "example": {"type": "object"}}, ["plan", "example"]),
+        ei_verification_template_check,
+    ),
+    Tool(
+        "ei_verification_template_propose", "Готовлю шаблон протокола поверки",
+        "ГЛАВНЫЙ способ сделать «протокол поверки по образцу/методике» для СИ (кроме счётчиков воды — у них свой "
+        "протокол): завести ШАБЛОН поверки для семейства (family — id из ei_reference what=families) или "
+        "конкретного типа (si_type — id из ei_si_types). Без конкретного прибора и измерений. Человек подтвердит "
+        "кнопкой; рядом покажется пустой протокол по шаблону. title, plan, note, template_id (обновить), example "
+        "(как в ei_verification_template_check), sources — методика поверки с пунктами, описание типа. "
+        + verification_template_help(),
+        _obj({
+            "title": STR, "family": INT, "si_type": INT, "plan": {"type": "object"}, "note": STR, "template_id": INT,
+            "example": {"type": "object"}, "sources": {"type": "array", "items": STR},
+        }, ["title", "family", "plan", "sources"]),
+        ei_verification_template_propose,
     ),
     Tool(
         "ui_show", "Показываю виджет",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deleteVerificationPhoto,
   downloadBlank,
+  downloadVerificationProtocol,
   fetchVerificationPhotoUrl,
   fetchVerificationPhotos,
   fetchWorkOrderScans,
@@ -16,6 +17,9 @@ import {
   type MeasurementsPayload,
   type MeasurementsResult,
   type ScanUploadResult,
+  type TemplateForVerification,
+  type TemplateMeasurementsPayload,
+  type TemplateReadings,
   type VerificationPhoto,
   type WorkOrder,
 } from "../api";
@@ -28,9 +32,11 @@ import {
   isOnline,
   listVerifications,
   loadLayouts,
+  loadTemplateInfo,
   outboxErrors,
   pendingCount,
   refreshSiTypeCache,
+  refreshTemplateCache,
   removeOutboxItem,
   saveMeasurements,
   subscribe,
@@ -38,9 +44,9 @@ import {
 import type { CachedVerification, OutboxItem } from "../offline/db";
 
 /** Экран поверителя: наряд → счётчики по нему → измерения. Рассчитан на
- * телефон и на работу без связи (см. src/offline/sync.ts). Раскладка
- * измерений сейчас только для счётчиков воды
- * (apps.verification.calculators.water_meter — единственный калькулятор).
+ * телефон и на работу без связи (см. src/offline/sync.ts). Счётчики воды — своя
+ * форма (apps.verification.calculators.water_meter), остальные СИ — форма по шаблону
+ * поверки (apps.verification.templates, шаблон составляет ассистент).
  *
  * Устроен как три шага с крупными кнопками вместо одной длинной страницы:
  * сначала карточки нарядов, потом список счётчиков наряда, потом измерения
@@ -627,6 +633,350 @@ function MeasurementForm({
   );
 }
 
+/** Измерения по шаблону поверки (манометры, весы, гири… — всё, кроме счётчиков воды).
+ * Шаблон составил ассистент по методике, метролог проверил; поверитель вносит только параметры
+ * прибора (если их нет у типа), отметки по операциям и показания в поверяемых точках. Считает
+ * и печатает протокол EI_doc (apps.verification.templates). Отправка — через ту же офлайн-очередь. */
+function TemplateMeasurementForm({
+  verification,
+  info,
+  onSaved,
+}: {
+  verification: CachedVerification;
+  info: TemplateForVerification;
+  onSaved: () => void;
+}) {
+  const template = info.template!;
+  const plan = template.plan;
+  const saved = info.saved ?? null;
+  const fromType = new Set(info.params_from_type ?? []);
+  const [params, setParams] = useState<Record<string, string>>(() =>
+    Object.fromEntries(plan.params.map((p) => [p.key, (info.params?.[p.key] ?? "").replace(".", ",")])),
+  );
+  const [modes, setModes] = useState(info.modes ?? []);
+  const [kind, setKind] = useState<"periodic" | "primary">((saved?.kind as "periodic" | "primary") ?? "periodic");
+  const [operations, setOperations] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      plan.operations.map((op) => [op.key, saved?.operations?.find((x) => x.key === op.key)?.passed !== false]),
+    ),
+  );
+  const [readings, setReadings] = useState<TemplateReadings>(() => {
+    const out: TemplateReadings = {};
+    for (const m of plan.modes) {
+      const prev = saved?.readings?.[m.key];
+      out[m.key] = {
+        display: prev?.display ?? "",
+        readings: Object.fromEntries(
+          plan.points.map((p) => [
+            p.key,
+            Array.from({ length: plan.repeats }, (_, i) => (prev?.readings?.[p.key]?.[i] ?? "").replace(".", ",")),
+          ]),
+        ),
+      };
+    }
+    return out;
+  });
+  const [conditions, setConditions] = useState<Record<string, string>>(() => ({ ...(saved?.conditions ?? {}) }));
+  const [manualUnsuitable, setManualUnsuitable] = useState(Boolean(saved?.manual_unsuitable));
+  const [manualReason, setManualReason] = useState(saved?.manual_unsuitability_reason ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<MeasurementsResult | null>(null);
+  const [queuedNotice, setQueuedNotice] = useState(false);
+
+  // Точки зависят от параметров прибора (25 % ВПИ и т. п.) — пересчитываем на сервере, когда всё внесено.
+  const paramsKey = JSON.stringify(params);
+  useEffect(() => {
+    if (plan.params.some((p) => !params[p.key]?.trim())) return;
+    const handle = setTimeout(() => {
+      loadTemplateInfo(verification, params)
+        .then((fresh) => {
+          if (fresh.modes?.length) setModes(fresh.modes);
+        })
+        .catch(() => undefined);
+    }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsKey]);
+
+  const setCell = (mode: string, point: string, index: number, value: string) =>
+    setReadings((current) => {
+      const next = { ...current, [mode]: { ...current[mode], readings: { ...current[mode].readings } } };
+      const row = [...next[mode].readings[point]];
+      row[index] = value;
+      next[mode].readings[point] = row;
+      return next;
+    });
+
+  const labelOf = (key: string) => modes.find((m) => m.key === key)?.label || plan.modes.find((m) => m.key === key)?.label || key;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setResult(null);
+    setQueuedNotice(false);
+    const missingParam = plan.params.find((p) => !params[p.key]?.trim());
+    if (missingParam) {
+      setError(`Не заполнен параметр прибора: ${missingParam.label}`);
+      return;
+    }
+    const empty = Object.values(readings).every((m) => Object.values(m.readings).every((row) => row.every((v) => !v.trim())));
+    if (!(manualUnsuitable && empty)) {
+      for (const m of plan.modes) {
+        for (const p of plan.points) {
+          if (readings[m.key].readings[p.key].some((v) => !v.trim())) {
+            setError(`Не заполнено: ${labelOf(m.key)}, ${p.label}. Если прибор не проверить — отметьте «Непригоден» ниже.`);
+            return;
+          }
+        }
+        if (plan.uses_display && !readings[m.key].display?.trim()) {
+          setError(`Не заполнено показание индикатора: ${labelOf(m.key)}`);
+          return;
+        }
+      }
+    }
+    if (manualUnsuitable && !manualReason.trim()) {
+      setError("Укажите причину непригодности");
+      return;
+    }
+    const dot = (v: string) => v.trim().replace(",", ".");
+    const payload: TemplateMeasurementsPayload = {
+      template_id: template.id,
+      kind,
+      params: Object.fromEntries(Object.entries(params).filter(([k]) => !fromType.has(k)).map(([k, v]) => [k, dot(v)])),
+      operations,
+      readings:
+        manualUnsuitable && empty
+          ? {}
+          : Object.fromEntries(
+              Object.entries(readings).map(([mode, data]) => [
+                mode,
+                {
+                  display: data.display ? dot(data.display) : "",
+                  readings: Object.fromEntries(Object.entries(data.readings).map(([p, row]) => [p, row.map(dot)])),
+                },
+              ]),
+            ),
+      conditions: Object.fromEntries(Object.entries(conditions).filter(([, v]) => v.trim()).map(([k, v]) => [k, dot(v)])),
+      manual_unsuitable: manualUnsuitable,
+      manual_unsuitability_reason: manualUnsuitable ? manualReason.trim() : "",
+    };
+    setBusy(true);
+    try {
+      const outcome = await saveMeasurements(verification.client_id, payload);
+      if (outcome.queued) setQueuedNotice(true);
+      else setResult(outcome.result);
+      onSaved();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось сохранить измерения");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="card" onSubmit={submit}>
+      <h3>Поверка по шаблону</h3>
+      <p className="hint">
+        {template.title} · {plan.method}
+        {template.needs_review && <> · <span className="pill warn">шаблон ждёт проверки метролога</span></>}
+      </p>
+
+      <div className="field">
+        <label>Вид поверки</label>
+        <Segmented
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: "periodic", label: "Периодическая" },
+            { value: "primary", label: "Первичная" },
+          ]}
+        />
+      </div>
+
+      {plan.params.length > 0 && (
+        <div className="form-grid">
+          {plan.params.map((p) =>
+            fromType.has(p.key) ? (
+              <div className="field" key={p.key}>
+                <label>{p.label}</label>
+                <div className="sub">{params[p.key]} {p.unit} · из типа СИ</div>
+              </div>
+            ) : (
+              <NumberInput
+                key={p.key}
+                id={`tp-${p.key}`}
+                label={`${p.label}${p.unit ? `, ${p.unit}` : ""}`}
+                value={params[p.key] ?? ""}
+                onChange={(v) => setParams((current) => ({ ...current, [p.key]: v }))}
+              />
+            ),
+          )}
+        </div>
+      )}
+
+      <div className="field">
+        <label>Операции поверки — соответствует</label>
+        <div className="check-row">
+          {plan.operations.map((op) => (
+            <label key={op.key} className={`check-chip ${operations[op.key] ? "on" : "off"}`}>
+              <input
+                type="checkbox"
+                checked={operations[op.key]}
+                onChange={(event) => setOperations((current) => ({ ...current, [op.key]: event.target.checked }))}
+              />
+              {op.label}
+            </label>
+          ))}
+        </div>
+        <p className="hint">Снимите галочку, если операция не пройдена — прибор будет признан непригодным.</p>
+      </div>
+
+      <div className="runs">
+        {plan.modes.map((m) => (
+          <fieldset className="run" key={m.key}>
+            <legend>
+              {labelOf(m.key)}
+              {plan.unit && !labelOf(m.key).includes(plan.unit) && <span className="sub"> {plan.unit}</span>}
+            </legend>
+            <div className="run-grid">
+              {plan.points.flatMap((p) =>
+                readings[m.key].readings[p.key].map((value, i) => (
+                  <NumberInput
+                    key={`${p.key}-${i}`}
+                    id={`t-${m.key}-${p.key}-${i}`}
+                    label={plan.repeats > 1 ? `${p.label}, №${i + 1}` : p.label}
+                    value={value}
+                    onChange={(v) => setCell(m.key, p.key, i, v)}
+                  />
+                )),
+              )}
+              {plan.uses_display && (
+                <NumberInput
+                  id={`t-${m.key}-display`}
+                  label="Показание индикатора"
+                  value={readings[m.key].display ?? ""}
+                  onChange={(v) => setReadings((current) => ({ ...current, [m.key]: { ...current[m.key], display: v } }))}
+                />
+              )}
+            </div>
+          </fieldset>
+        ))}
+      </div>
+
+      {plan.extra_conditions.length > 0 && (
+        <div className="form-grid">
+          {plan.extra_conditions.map((c) => (
+            <NumberInput
+              key={c.key}
+              id={`tc-${c.key}`}
+              label={`${c.label}${c.unit ? `, ${c.unit}` : ""}`}
+              value={conditions[c.key] ?? ""}
+              onChange={(v) => setConditions((current) => ({ ...current, [c.key]: v }))}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className={`unsuitable ${manualUnsuitable ? "on" : ""}`}>
+        <label className="toggle">
+          <input type="checkbox" checked={manualUnsuitable} onChange={(event) => setManualUnsuitable(event.target.checked)} />
+          Прибор непригоден по другой причине (разбит, нет пломбы, не работает…)
+        </label>
+        {manualUnsuitable && (
+          <div className="field">
+            <label htmlFor="tp-reason">Причина<span className="req">*</span></label>
+            <input id="tp-reason" className="big-input" value={manualReason} onChange={(e) => setManualReason(e.target.value)} />
+          </div>
+        )}
+      </div>
+
+      <button className="primary big wide" type="submit" disabled={busy}>
+        {busy ? "Сохраняю…" : "Сохранить и посчитать"}
+      </button>
+      {error && <div className="error">{error}</div>}
+      {queuedNotice && (
+        <div className="verdict queued">Связи нет — сохранено в телефоне. Отправится само, когда появится связь.</div>
+      )}
+      {result && (
+        <div className={`verdict ${result.suitable ? "ok" : "bad"}`}>
+          <b>{result.suitable ? "ГОДЕН" : "НЕ ГОДЕН"}</b>
+          {!result.suitable && <span>{result.reasons.join("; ")}</span>}
+        </div>
+      )}
+    </form>
+  );
+}
+
+/** Протокол поверки — черновик, пока не подписан в журнале. */
+function ProtocolDownloads({ verification, wordToo }: { verification: CachedVerification; wordToo: boolean }) {
+  const [error, setError] = useState("");
+  if (verification.server_id == null || verification.status === "draft") return null;
+  const get = (fmt: "pdf" | "docx") =>
+    downloadVerificationProtocol(verification.server_id!, fmt).catch((exc) =>
+      setError(exc instanceof Error ? exc.message : "Не удалось скачать протокол"),
+    );
+  return (
+    <div className="card">
+      <div className="actions">
+        <button type="button" onClick={() => void get("pdf")}>Протокол PDF</button>
+        {wordToo && <button type="button" onClick={() => void get("docx")}>Протокол Word</button>}
+      </div>
+      {error && <div className="error">{error}</div>}
+    </div>
+  );
+}
+
+/** Какая форма нужна этому прибору: счётчик воды — своя, остальное — по шаблону поверки. */
+function VerificationEntry({
+  verification,
+  layoutsInfo,
+  onSaved,
+}: {
+  verification: CachedVerification;
+  layoutsInfo: LayoutsResponse | null;
+  onSaved: () => void;
+}) {
+  const [info, setInfo] = useState<(TemplateForVerification & { offline?: boolean }) | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    loadTemplateInfo(verification)
+      .then(setInfo)
+      .catch((exc) => setError(exc instanceof Error ? exc.message : "Не удалось загрузить шаблон поверки"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verification.client_id, verification.server_id]);
+
+  if (error) return <div className="error">{error}</div>;
+  if (!info) return <div className="loading">Загружаю форму измерений…</div>;
+  if (info.engine === "template") {
+    if (!info.template) {
+      return (
+        <div className="card">
+          <b>Для этого типа нет шаблона поверки</b>
+          <p className="hint">
+            Попросите ассистента: «сделай шаблон протокола поверки для {verification.si_type_name}» — он соберёт
+            его по методике из ФГИС, метролог проверит.
+          </p>
+        </div>
+      );
+    }
+    return (
+      <>
+        <TemplateMeasurementForm key={verification.client_id} verification={verification} info={info} onSaved={onSaved} />
+        <ProtocolDownloads verification={verification} wordToo />
+      </>
+    );
+  }
+  return layoutsInfo ? (
+    <>
+      <MeasurementForm key={verification.client_id} verification={verification} layoutsInfo={layoutsInfo} onSaved={onSaved} />
+      <ProtocolDownloads verification={verification} wordToo={false} />
+    </>
+  ) : (
+    <div className="loading">Загружаю форму измерений…</div>
+  );
+}
+
 function SyncBar({
   online,
   queued,
@@ -753,6 +1103,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
   // Справочник типов — в телефон заранее, чтобы искать счётчик и без связи.
   useEffect(() => {
     void refreshSiTypeCache();
+    void refreshTemplateCache();
   }, []);
 
   const refreshQueueCount = useCallback(() => {
@@ -944,16 +1295,12 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
           </div>
           {online && activeVerification.si_type_id ? <SiTypeDocuments siTypeId={activeVerification.si_type_id} /> : null}
         </div>
-        {layoutsInfo ? (
-          <MeasurementForm
-            key={activeVerification.client_id}
-            verification={activeVerification}
-            layoutsInfo={layoutsInfo}
-            onSaved={() => void reloadVerifications()}
-          />
-        ) : (
-          <div className="loading">Загружаю форму измерений…</div>
-        )}
+        <VerificationEntry
+          key={activeVerification.client_id}
+          verification={activeVerification}
+          layoutsInfo={layoutsInfo}
+          onSaved={() => void reloadVerifications()}
+        />
         <PhotosPanel verification={activeVerification} />
         <button type="button" className="big wide" onClick={() => { setSelectedVerification(null); setAdding(true); }}>
           + Следующий счётчик

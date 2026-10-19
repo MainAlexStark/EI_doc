@@ -14,6 +14,7 @@ from apps.verification.models import (
     Site,
     Verification,
     VerificationPhoto,
+    VerificationTemplate,
     WorkOrder,
     WorkOrderStatus,
 )
@@ -156,3 +157,11 @@ class WorkOrderAdmin(SimpleHistoryAdmin):
         return format_html(
             '<b style="color:{}">{}</b>', colours.get(obj.status, "#000"), obj.get_status_display()
         )
+
+
+@admin.register(VerificationTemplate)
+class VerificationTemplateAdmin(SimpleHistoryAdmin):
+    list_display = ("title", "family", "si_type", "needs_review", "is_active", "created_via_assistant", "updated_at")
+    list_filter = ("needs_review", "is_active", "family", "created_via_assistant")
+    search_fields = ("title",)
+    readonly_fields = ("plan_check", "sources", "created_by", "reviewed_by", "reviewed_at", "created_at", "updated_at")

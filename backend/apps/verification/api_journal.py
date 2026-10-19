@@ -75,6 +75,7 @@ class JournalRowSerializer(serializers.Serializer):
     status = serializers.CharField()
     needs_review = serializers.BooleanField()
     journal_note = serializers.CharField()
+    protocol_formats = serializers.ListField(child=serializers.CharField())
 
     @staticmethod
     def from_verification(verification: Verification) -> dict:
@@ -95,6 +96,11 @@ class JournalRowSerializer(serializers.Serializer):
             "status": verification.status,
             "needs_review": verification.needs_review,
             "journal_note": (verification.results or {}).get("journal_note", ""),
+            # По шаблону — Word и PDF; счётчик воды — PDF из Typst; без измерений — нечего печатать.
+            "protocol_formats": (
+                ["pdf", "docx"] if (verification.measurements or {}).get("engine") == "template"
+                else ["pdf"] if (verification.results or {}).get("rows") else []
+            ),
         }
 
 

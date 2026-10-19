@@ -510,3 +510,71 @@ class AssistantToolTests(AttestationTestCase):
         assert att.plan_check["ok"] is True and att.measurements == {}
         assert "6.031" not in json.dumps(att.plan_check)
 
+
+
+class AssistantTemplateTests(AttestationTestCase):
+    """Шаблон аттестации — только структура: без оборудования, комиссии и измерений."""
+
+    def setUp(self):
+        super().setUp()
+        from apps.assistant.models import Conversation
+        from apps.assistant.tools import ToolContext
+
+        self.conversation = Conversation.objects.create(user=self.verifier, title="t")
+        self.ctx = ToolContext(user=self.verifier, conversation=self.conversation)
+
+    def template(self, **over) -> dict:
+        data = {"title": "Камеры тестовые — периодическая аттестация", "equipment_kind": "Камеры тестовые",
+                "plan": copy.deepcopy(FRIDGE_PLAN), "sources": ["ГОСТ Р 8.568-2017", "программа, п. 7"]}
+        data.update(over)
+        return data
+
+    def test_template_card_then_confirm_creates_program(self):
+        from apps.assistant import actions
+        from apps.assistant.models import PendingAction
+        from apps.assistant.tools import ei_attestation_template_propose
+
+        result = ei_attestation_template_propose(self.ctx, self.template())
+        action = PendingAction.objects.get(pk=result.ui["action"])
+        assert action.kind == "attestation_template_save"
+        assert not AttestationProgram.objects.filter(title__startswith="Камеры тестовые").exists()
+        actions.decide(action, self.verifier, confirm=True)
+        action.refresh_from_db()
+        assert action.status == "done", action.error
+        program = AttestationProgram.objects.get(title__startswith="Камеры тестовые")
+        assert program.needs_review and program.created_via_assistant and program.created_by == self.verifier
+        assert program.sources == ["ГОСТ Р 8.568-2017", "программа, п. 7"]
+        # по шаблону человек заводит аттестацию сам — тем же API, что и раньше
+        r = self.as_(self.verifier).post(reverse("attestation_list"), {
+            "program": program.pk, "kind": "periodic", "equipment": card()["equipment"]}, format="json")
+        assert r.status_code == 201, r.data
+
+    def test_template_refuses_instance_data(self):
+        from apps.assistant.tools import ToolFailure, ei_attestation_template_propose
+
+        for key in ("equipment", "measurements", "commission"):
+            with pytest.raises(ToolFailure, match="только структура"):
+                ei_attestation_template_propose(self.ctx, self.template(**{key: {}}))
+        with pytest.raises(ToolFailure, match="sources"):
+            ei_attestation_template_propose(self.ctx, self.template(sources=[]))
+
+    def test_template_duplicate_title_needs_program_id(self):
+        from apps.assistant import actions
+        from apps.assistant.models import PendingAction
+        from apps.assistant.tools import ToolFailure, ei_attestation_template_propose
+
+        result = ei_attestation_template_propose(self.ctx, self.template())
+        actions.decide(PendingAction.objects.get(pk=result.ui["action"]), self.verifier, confirm=True)
+        program = AttestationProgram.objects.get(title__startswith="Камеры тестовые")
+        with pytest.raises(ToolFailure, match="уже есть"):
+            ei_attestation_template_propose(self.ctx, self.template())
+        result = ei_attestation_template_propose(self.ctx, self.template(program_id=program.pk, note="v2"))
+        actions.decide(PendingAction.objects.get(pk=result.ui["action"]), self.verifier, confirm=True)
+        program.refresh_from_db()
+        assert program.note == "v2" and AttestationProgram.objects.filter(title=program.title).count() == 1
+
+    def test_attachment_read_lists_files_and_does_not_guess(self):
+        from apps.assistant.tools import ToolFailure, attachment_read
+
+        with pytest.raises(ToolFailure, match="нет файлов"):
+            attachment_read(self.ctx, {"attachment_id": 1})

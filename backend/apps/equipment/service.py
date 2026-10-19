@@ -13,7 +13,11 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
 from apps.equipment import calc, layout
-from apps.equipment.models import AttestationCounter, EquipmentAttestation
+from apps.equipment.models import (
+    AttestationCounter,
+    AttestationProgram,
+    EquipmentAttestation,
+)
 
 KIND_GENITIVE = {k: v[0] for k, v in layout.KIND.items()}
 COMMISSION_ROLES = layout.COMMISSION_ROLES
@@ -190,6 +194,52 @@ def update(att: EquipmentAttestation, user, data: dict) -> EquipmentAttestation:
         setattr(att, key, value)
     att.save()
     return att
+
+
+def clean_program(data: dict) -> dict:
+    """Шаблон (программа-заготовка) — только структура протокола, без конкретного ИО и без измерений."""
+    try:
+        plan = calc.clean_plan(data.get("plan"))
+    except calc.PlanError as exc:
+        raise AttestationError(f"план аттестации: {exc}") from exc
+    title = _s(data.get("title"), 250)
+    kind = _s(data.get("equipment_kind") or plan.get("equipment_kind"), 200)
+    if not title:
+        raise AttestationError("у шаблона нет названия (title)")
+    if not kind:
+        raise AttestationError("не указан вид оборудования (equipment_kind)")
+    return {"title": title, "equipment_kind": kind, "plan": plan, "note": _s(data.get("note"), 2000)}
+
+
+def save_program(user, data: dict, *, sources=None, plan_check: dict | None = None,
+                 program_id: int | None = None, via_assistant: bool = True) -> AttestationProgram:
+    """Завести или обновить шаблон аттестации. Шаблон от поверителя ждёт проверки метролога;
+    любая правка снимает отметку о проверке, если правит не метролог."""
+    if not can_edit(user):
+        raise PermissionDenied("Нет права заводить шаблоны аттестации (наблюдатель)")
+    card = clean_program(data)
+    reviewer = is_reviewer(user)
+    with transaction.atomic():
+        if program_id:
+            program = AttestationProgram.objects.select_for_update().filter(pk=program_id).first()
+            if program is None:
+                raise AttestationError(f"шаблона с id {program_id} нет")
+        else:
+            program = AttestationProgram.objects.filter(title=card["title"]).first()
+            if program is not None:
+                raise AttestationError(
+                    f"шаблон «{card['title']}» уже есть (id {program.pk}) — обнови его (program_id) или назови иначе"
+                )
+            program = AttestationProgram(created_by=user)
+        for field, value in card.items():
+            setattr(program, field, value)
+        program.sources = list(sources or [])
+        program.plan_check = plan_check or {}
+        program.created_via_assistant = via_assistant
+        program.needs_review = not reviewer
+        program.is_active = True
+        program.save()
+    return program
 
 
 def approve_plan(att: EquipmentAttestation, user) -> EquipmentAttestation:
