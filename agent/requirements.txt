@@ -1,0 +1,1 @@
+./vendor/agentkit[service]  # agentkit 0.2.0

@@ -1,0 +1,21 @@
+{
+  "_comment": "MCP-серверы ассистента EI_doc. ${ПЕРЕМЕННАЯ} — из deploy/ei-agent.env. ei — сам EI_doc (инструменты и инструкции на каждого сотрудника, см. backend/apps/assistant/host.py), rst — ФГИС «Аршин» (RSTMetrology_MCP).",
+  "servers": {
+    "ei": {
+      "url": "${EI_MCP_URL}",
+      "token": "${EI_MCP_TOKEN}",
+      "per_user": true,
+      "prefix": "",
+      "deferred": false,
+      "timeout": 180
+    },
+    "rst": {
+      "url": "${RST_MCP_URL}",
+      "token": "${RST_MCP_TOKEN}",
+      "read_only": [
+        "*"
+      ],
+      "timeout": 180
+    }
+  }
+}

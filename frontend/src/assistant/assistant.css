@@ -368,3 +368,12 @@ a.src-chip:hover, button.src-chip:hover { border-color: var(--accent); color: va
 @media (max-width: 760px) {
   .assistant { margin: -4px -16px 0; height: calc(100dvh - var(--top) - 96px); }
 }
+
+/* ── ассистент на agentkit: фрейм чата + панель контекста ── */
+.agent-shell { display: flex; height: calc(100dvh - var(--top, 57px)); min-height: 420px; }
+.agent-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.agent-frame { display: block; flex: 1; width: 100%; border: 0; background: transparent; }
+.agent-shell .ctx-panel { width: 380px; flex: none; }
+@media (max-width: 960px) {
+  .agent-shell.with-panel .ctx-panel { position: fixed; inset: var(--top, 57px) 0 0 auto; width: min(420px, 100vw); z-index: 5; }
+}

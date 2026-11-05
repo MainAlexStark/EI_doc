@@ -277,6 +277,18 @@ RST_MCP_TOKEN = env("RST_MCP_TOKEN", default="")
 # (для локального запуска без Celery); sync — прямо в запросе (тесты).
 ASSISTANT_RUN_MODE = env("ASSISTANT_RUN_MODE", default="celery")
 
+# Ассистент на agentkit (сервис agent/ рядом с EI_doc). Пусто AGENT_URL — работает встроенный чат.
+# AGENT_URL — адрес веб-чата агента для фрейма вкладки «Ассистент» (https://agent.example.ru);
+# AGENT_LOGIN_SECRET — подпись токенов входа (= AGENT_HOST_LOGIN_SECRET у агента);
+# AGENT_HOST_TOKEN — токен, с которым агент ходит в MCP-сервер EI_doc /api/assistant/agent/mcp
+# (= token сервера «ei» в agent/mcp.json); AGENT_INTERNAL_URL + AGENT_SERVICE_TOKEN — для команды
+# agent_migrate_memory (перенос личной памяти в агента).
+AGENT_URL = env("AGENT_URL", default="")
+AGENT_LOGIN_SECRET = env("AGENT_LOGIN_SECRET", default="")
+AGENT_HOST_TOKEN = env("AGENT_HOST_TOKEN", default="")
+AGENT_INTERNAL_URL = env("AGENT_INTERNAL_URL", default="http://ei-agent:8080")
+AGENT_SERVICE_TOKEN = env("AGENT_SERVICE_TOKEN", default="")
+
 # --------------------------------------------------------------------------
 # Celery
 # --------------------------------------------------------------------------

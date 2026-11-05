@@ -1,6 +1,6 @@
 from django.urls import path
 
-from apps.assistant import api
+from apps.assistant import agent_link, api, host
 
 urlpatterns = [
     path("conversations/", api.ConversationListView.as_view(), name="assistant_conversations"),
@@ -32,4 +32,7 @@ urlpatterns = [
     path("mcp/<int:pk>/tools/", api.McpToolsView.as_view(), name="assistant_mcp_tools"),
     path("settings/", api.SettingsView.as_view(), name="assistant_settings"),
     path("usage/", api.UsageView.as_view(), name="assistant_usage"),
+    # Агент на agentkit: вход во фрейм чата и MCP-сервер EI_doc для него (см. host.py).
+    path("agent/", agent_link.AgentLinkView.as_view(), name="assistant_agent"),
+    path("agent/mcp", host.mcp_endpoint, name="assistant_agent_mcp"),
 ]

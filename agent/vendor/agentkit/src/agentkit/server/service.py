@@ -1,0 +1,602 @@
+"""AgentService — всё, что нужно агенту-сервису, собранное из настроек.
+
+Проект на шаблоне описывает только своё: промпт, доменные инструменты, хуки,
+правила. Хранилище, MCP, skills, права, расписание, трейсы и HTTP API
+собираются здесь одинаково для всех агентов.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import fnmatch
+import json
+import logging
+import os
+import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from agentkit.agent import Agent, AgentConfig, AgentSpec, RunOutcome, UserTools
+from agentkit.builder import make_router, standard_tools
+from agentkit.bus import Bus, make_bus
+from agentkit.devices import DeviceHub, device_tools
+from agentkit.events import EventType, RunStatus
+from agentkit.hooks import Hooks
+from agentkit.llm.catalog import ModelCatalog
+from agentkit.llm.router import ModelRouter
+from agentkit.mcp import MCPManager, MCPServerConfig
+from agentkit.messages import Usage
+from agentkit.oauth import OAuthBroker
+from agentkit.permissions import Mode, Permissions
+from agentkit.projects import ProjectLibrary, project_tools
+from agentkit.redact import DEFAULT as REDACT
+from agentkit.redact import Redactor, install_log_redaction
+from agentkit.runs import Busy, RunManager
+from agentkit.scheduler import Scheduler
+from agentkit.semantic import VectorIndex, make_embedder
+from agentkit.server.auth import Auth
+from agentkit.server.settings import Settings, split_rules
+from agentkit.skills import SkillLibrary
+from agentkit.store.base import ScheduleRec
+from agentkit.store.sql import SQLStore
+from agentkit.subagents import DEFAULT_SUBAGENTS, task_tool
+from agentkit.tools.base import Tool, User
+from agentkit.tools.registry import ToolRegistry
+from agentkit.tools.sandbox import sandbox_tools
+from agentkit.tracing import JSONLTracer, LogTracer
+
+log = logging.getLogger("agentkit.service")
+
+_ENV = re.compile(r"\$\{([A-Z0-9_]+)\}")
+
+
+def load_mcp_config(path: Path) -> list[MCPServerConfig]:
+    """mcp.json: {"servers": {"имя": {"url": "…", "token": "${ENV}", …}}}. ${VAR} берутся из окружения."""
+    if not path or not Path(path).is_file():
+        return []
+    raw = _ENV.sub(lambda m: os.environ.get(m.group(1), ""), Path(path).read_text(encoding="utf-8"))
+    data = json.loads(raw)
+    out = []
+    for name, cfg in (data.get("servers") or {}).items():
+        fields = MCPServerConfig.__dataclass_fields__
+        out.append(MCPServerConfig(name=name, **{k: v for k, v in cfg.items() if k in fields and k != "name"}))
+    return out
+
+
+MCP_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+# Личный сервер, который не ответил, пробуем подключить снова не раньше чем через столько секунд:
+# иначе каждый шаг каждого прогона ждал бы мёртвый сервер, а без повтора он не ожил бы до перезапуска.
+USER_MCP_RETRY = 120
+USER_MCP_CONNECT_TIMEOUT = 20
+USER_MCP_CACHE = 500  # подключений пользователей в памяти процесса; самое старое закрывается
+
+
+def mcp_from_dict(name: str, d: dict[str, Any], *, public_only: bool = False) -> MCPServerConfig:
+    """Сервер, добавленный в настройках чата (хранится в базе, не в mcp.json).
+
+    Из интерфейса — только HTTP: stdio-сервер — это запуск команды на машине
+    сервиса, такое добавляется только руками в mcp.json.
+    """
+    auth = d.get("auth", "none")
+    return MCPServerConfig(
+        personal_login=bool(d.get("per_user")) and auth == "oauth",
+        public_only=public_only,
+        name=name,
+        url=d["url"],
+        token=(d.get("token") or None) if auth == "token" else None,
+        headers=dict(d.get("headers") or {}),
+        enabled=bool(d.get("enabled", True)),
+        deferred=d.get("deferred"),
+        oauth=True if auth == "oauth" else None,
+    )
+
+
+@dataclass
+class Domain:
+    """Предметная часть конкретного агента — единственное, что пишется в новом проекте."""
+
+    spec: AgentSpec
+    tools: list[Tool] = field(default_factory=list)
+    hooks: Hooks | None = None
+    subagents: dict[str, AgentSpec] = field(default_factory=lambda: dict(DEFAULT_SUBAGENTS))
+    rules: Callable[[User], str] | str = ""
+    deps: dict[str, Any] = field(default_factory=dict)
+    memory_global_roles: tuple[str, ...] = ("admin",)
+    # Пустой экран чата: что умеет агент и примеры запросов (кнопками).
+    description: str = ""
+    suggestions: list[str] = field(default_factory=list)
+    # Подписка пользователя: (user, расход за месяц) → {"name", "status", "renews_at", "limit_usd",
+    # "daily_limit_usd", "features": [...], "manage_url"}. None — из настроек AGENT_PLAN_NAME /
+    # AGENT_MONTHLY_BUDGET_USD / AGENT_DAILY_BUDGET_USD. Лимиты отсюда же и применяются (0/None — без лимита).
+    plan: Callable[[User, dict[str, Any]], Any] | None = None
+    # Вызывается после старта: подключить БД хоста, прогреть кэш и т. п.
+    on_start: Callable[[AgentService], Any] | None = None
+
+
+@dataclass
+class _UserMCP:
+    """Подключения одного пользователя: его личные серверы и общие с personal_login (его вход)."""
+
+    manager: MCPManager | None
+    tools: list[Tool]
+    expires: float  # time.monotonic(); inf — пока не придёт reload_user
+
+
+class BudgetExceeded(Exception):
+    """Лимит расходов пользователя исчерпан — новое сообщение не принимается (HTTP 402)."""
+
+
+class AgentService:
+    def __init__(self, settings: Settings, domain: Domain, *, router: ModelRouter | None = None):
+        self.settings = settings
+        self._router = router  # подмена моделей (тесты, нестандартные провайдеры)
+        self.domain = domain
+        self.auth = Auth(settings.tokens, settings.service_token, settings.host_login_secret)
+        self.store: SQLStore | None = None
+        self.bus: Bus | None = None
+        self.oauth: OAuthBroker | None = None
+        self.mcp: MCPManager | None = None
+        self.agent: Agent | None = None
+        self.runs: RunManager | None = None
+        self.scheduler: Scheduler | None = None
+        self.registry: ToolRegistry | None = None
+        self.catalog: ModelCatalog | None = None
+        self.devices: DeviceHub | None = None
+        self.projects: ProjectLibrary | None = None
+        self.index: VectorIndex | None = None  # смысловой поиск; None — только по словам
+        self.mcp_all: list[MCPServerConfig] = []  # вместе с выключенными — для списка в настройках
+        self.mcp_file_names: set[str] = set()
+        self.preview: Any = None  # SandboxPreview — ссылки на серверы, поднятые агентом в песочнице
+        self._user_mcp: dict[str, _UserMCP] = {}
+        self._user_locks: dict[str, asyncio.Lock] = {}
+        # Номер «поколения» на пользователя: reload_user, пришедший во время подключения, не даёт
+        # положить в кэш уже устаревший результат (сервер удалили, пока ждали его ответа).
+        self._user_gen: dict[str, int] = {}
+
+    async def start(self) -> None:
+        s = self.settings
+        if s.workers > 1 and not s.redis_url:
+            # Без общей шины каждый процесс думал бы, что он один: два прогона в одной
+            # сессии, отмена «мимо», SSE без живых событий. Лучше не стартовать.
+            raise RuntimeError("AGENT_WORKERS > 1 требует AGENT_REDIS_URL")
+        s.data_dir.mkdir(parents=True, exist_ok=True)
+        # Папка рабочих пространств нужна до первого разговора: песочница монтирует её при старте.
+        (s.workspace_dir or s.data_dir / "workspaces").mkdir(parents=True, exist_ok=True)
+        self.store = await SQLStore(s.database_url).init()
+        self.bus = make_bus(s.redis_url)
+        await self.bus.start()
+        self.bus.on_broadcast(self._on_broadcast)
+        self.oauth = OAuthBroker(self.store, s.public_url.rstrip("/") + "/oauth/callback", bus=self.bus,
+                                 client_name=s.name)
+        self.devices = DeviceHub(self.store, self.bus) if s.enable_devices else None
+        embedder = make_embedder(s.embed_model, openrouter_key=s.openrouter_api_key, openai_key=s.openai_api_key,
+                                 ollama_url=s.ollama_url, dimensions=s.embed_dimensions, app_name=s.name,
+                                 app_url=s.public_url)
+        self.index = await VectorIndex(self.store, embedder).init() if embedder is not None else None
+        self.projects = (ProjectLibrary(self.store, s.data_dir / "projects", inline_limit=s.project_inline_chars,
+                                        index=self.index)
+                         if s.enable_projects else None)
+        self.runs = RunManager(self.store, self.bus)
+        self.runs.on_idle = self._drain_inbox
+        await self._fail_orphans()
+        if s.sandbox_url:
+            from agentkit.server.preview import SandboxPreview  # noqa: PLC0415
+
+            self.preview = await SandboxPreview.create(s, self.store)
+        await self._build_agent()
+        # Планировщик создаётся всегда — «Запустить сейчас» работает и при выключенном
+        # AGENT_SCHEDULER; тикать по расписанию он начинает только если включён.
+        self.scheduler = Scheduler(self.store, lambda name: self.agent, self.user_for, tz=s.tz,
+                                   runner=self._scheduled_run)
+        if s.scheduler:
+            self.scheduler.start()
+        if self.domain.on_start:
+            res = self.domain.on_start(self)
+            if hasattr(res, "__await__"):
+                await res
+
+    async def _fail_orphans(self) -> None:
+        """«running» без живой блокировки — прогон умер вместе с процессом.
+
+        Смотрим именно на блокировку, а не просто на статус: при нескольких
+        процессах перезапуск одного не должен ронять прогоны соседей.
+        """
+        orphans = [r.id for r in await self.store.list_running_runs()
+                   if await self.bus.active(r.session_id) != r.id]
+        if n := await self.store.fail_runs(orphans, "прогон прерван перезапуском сервиса"):
+            log.warning("помечено прерванными прогонов: %d", n)
+
+    async def _on_broadcast(self, msg: dict[str, Any]) -> None:
+        if msg.get("cmd") == "reload":
+            await self._build_agent()
+        elif msg.get("cmd") == "reload_user" and msg.get("user"):
+            await self._drop_user_mcp(msg["user"])
+
+    async def _build_agent(self) -> None:
+        if self.mcp:
+            await self.mcp.close()
+        self.mcp_all = await self.mcp_configs()
+        # Серверы с personal_login общий процесс не подключает: токена «на всех» у них нет — у каждого свой.
+        self.mcp = MCPManager([c for c in self.mcp_all if not c.personal_login], oauth=self.oauth)
+        mcp_tools = await self.mcp.connect()
+        # Общие серверы могли поменяться (в том числе personal_login) — подключения пользователей собираются заново.
+        for uid in list(self._user_mcp):
+            await self._drop_user_mcp(uid)
+        self.agent = assemble_agent(self.settings, self.domain, self.store, router=self._router,
+                                    mcp_tools=mcp_tools, mcp_instructions=self.mcp.instructions,
+                                    extra_tools=self._platform_tools(), index=self.index)
+        if self.mcp.per_user:
+            # Через self.mcp на момент вызова: «перечитать MCP» заменяет менеджер целиком.
+            self.agent.context_providers.append(lambda user, sid: self.mcp.turn_context(user, sid))
+        if self.projects:
+            self.agent.context_providers.append(self.projects.context)
+        if self.devices:
+            self.agent.context_providers.append(self.devices.context)
+        self.registry = self.agent.tools
+        s = self.settings
+        if self.catalog is None:
+            self.catalog = ModelCatalog(self.agent.router, configured=[s.model_main, s.model_small, *s.model_list()])
+            # Каталог — сетевой запрос на секунды; старт сервиса его не ждёт.
+            self._catalog_task = asyncio.create_task(self.catalog.refresh())
+        else:
+            self.catalog.router = self.agent.router
+        self.agent.vision_for = self.catalog.vision
+        self.agent.budget = self.over_budget
+        self.agent.user_tools = self.user_tools
+        log.info("агент готов: %d инструментов (MCP: %s)", len(self.registry),
+                 ", ".join(f"{k}={'ok' if v.ok else 'ошибка'}" for k, v in self.mcp.status.items()) or "нет")
+
+    def _platform_tools(self) -> list[Tool]:
+        s = self.settings
+        out: list[Tool] = []
+        if self.projects:
+            out += project_tools(self.projects)
+        if self.devices:
+            out += device_tools(self.devices)
+        if s.sandbox_url:
+            pv = self.preview if self.preview is not None and self.preview.available else None
+            out += sandbox_tools(s.sandbox_url, s.sandbox_token, egress=s.sandbox_egress, preview=pv)
+        return out
+
+    # ── MCP-серверы: из mcp.json и добавленные в настройках ──────────
+    async def mcp_custom(self) -> dict[str, dict[str, Any]]:
+        return await self.store.kv_get("config", "mcp_servers") or {}
+
+    async def mcp_configs(self) -> list[MCPServerConfig]:
+        """mcp.json главнее: сервер с тем же именем из базы игнорируется (его нельзя «перебить» из UI)."""
+        file = load_mcp_config(self.settings.mcp_config)
+        self.mcp_file_names = {c.name for c in file}
+        custom = [mcp_from_dict(n, d) for n, d in (await self.mcp_custom()).items() if n not in self.mcp_file_names]
+        return [*file, *custom]
+
+    async def save_mcp_custom(self, servers: dict[str, dict[str, Any]]) -> None:
+        await self.store.kv_set("config", "mcp_servers", servers)
+        await self.reload()
+
+    async def reload(self) -> None:
+        """Перечитать mcp.json и skills без перезапуска — во всех процессах сервиса."""
+        await self.bus.broadcast({"cmd": "reload"})
+
+    # ── личные MCP-серверы пользователя ─────────────────────────────
+    def shared_mcp_names(self) -> set[str]:
+        return {c.name for c in self.mcp_all}
+
+    async def mcp_personal(self, user_id: str) -> dict[str, dict[str, Any]]:
+        return await self.store.kv_get("mcp_servers", user_id) or {}
+
+    def personal_config(self, name: str, d: dict[str, Any]) -> MCPServerConfig:
+        return mcp_from_dict(name, {**d, "per_user": False}, public_only=not self.settings.user_mcp_private)
+
+    async def save_mcp_personal(self, user_id: str, servers: dict[str, dict[str, Any]]) -> None:
+        await self.store.kv_set("mcp_servers", user_id, servers)
+        await self.reload_user(user_id)
+
+    async def reload_user(self, user_id: str) -> None:
+        """Пересобрать подключения одного пользователя во всех процессах (сохранил сервер, вошёл, вышел)."""
+        await self.bus.broadcast({"cmd": "reload_user", "user": user_id})
+
+    async def user_mcp_configs(self, user_id: str) -> list[MCPServerConfig]:
+        shared = self.shared_mcp_names()
+        per_login = [c for c in self.mcp_all if c.personal_login]
+        personal = []
+        if self.settings.user_mcp:
+            # Имя занято общим сервером — личный не подключается: его инструменты назывались бы так же
+            # (mcp__<имя>__…), и человек не знал бы, в какой из двух серверов на деле ушёл вызов.
+            personal = [self.personal_config(n, d) for n, d in (await self.mcp_personal(user_id)).items()
+                        if n not in shared]
+        return [*per_login, *personal]
+
+    async def user_mcp(self, user: User) -> _UserMCP | None:
+        """Подключения пользователя — лениво, при первом прогоне или открытии «Инструментов», и в кэше."""
+        entry = self._user_mcp.get(user.id)
+        if entry and time.monotonic() < entry.expires:
+            return entry
+        lock = self._user_locks.setdefault(user.id, asyncio.Lock())
+        async with lock:  # два разговора одного человека не подключаются к его серверам дважды
+            entry = self._user_mcp.get(user.id)
+            if entry and time.monotonic() < entry.expires:
+                return entry
+            gen = self._user_gen.get(user.id, 0)
+            configs = [c for c in await self.user_mcp_configs(user.id) if c.enabled]
+            mgr, tools, expires = None, [], float("inf")
+            if configs:
+                mgr = MCPManager(configs, oauth=self.oauth, owner=user.id, connect_timeout=USER_MCP_CONNECT_TIMEOUT)
+                tools = await mgr.connect()
+                if any(not st.ok and not st.needs_auth for st in mgr.status.values()):
+                    expires = time.monotonic() + USER_MCP_RETRY
+            new = _UserMCP(mgr, tools, expires)
+            if self._user_gen.get(user.id, 0) != gen:
+                return new  # пока подключались, настройки поменялись — в кэш не кладём
+            old = self._user_mcp.pop(user.id, None)
+            if old and old.manager:
+                await old.manager.close()
+            self._user_mcp[user.id] = new
+            while len(self._user_mcp) > USER_MCP_CACHE:
+                uid = next(iter(self._user_mcp))
+                await self._drop_user_mcp(uid)
+            return new
+
+    async def _drop_user_mcp(self, user_id: str) -> None:
+        self._user_gen[user_id] = self._user_gen.get(user_id, 0) + 1
+        entry = self._user_mcp.pop(user_id, None)
+        if entry and entry.manager:
+            await entry.manager.close()
+
+    async def user_tools(self, user: User) -> UserTools | None:
+        """Agent.user_tools: личные инструменты пользователя подмешиваются в каждый шаг его прогона."""
+        entry = await self.user_mcp(user)
+        if entry is None or entry.manager is None:
+            return None
+        return UserTools(tools=entry.tools, instructions=entry.manager.instructions())
+
+    async def registry_for(self, user: User) -> ToolRegistry:
+        return (await self.agent.tools_for(user))[0]
+
+    # ── сообщения ────────────────────────────────────────────────────
+    async def send(self, session_id: str, user: User, content: Any, *, model: str | None = None,
+                   mode: str | None = None) -> dict[str, Any]:
+        """Новое сообщение: запустить прогон или, если агент занят, поставить в очередь входящих.
+
+        Сообщение из очереди агент подхватит между шагами текущего прогона, а
+        если тот уже заканчивается — сразу после него (on_idle).
+        """
+        try:
+            run_id = await self.runs.start(
+                session_id, lambda: self.agent.run(session_id, user, content, model=model, mode=mode),
+                cancel=self.agent.cancel)
+            return {"run_id": run_id, "queued": False}
+        except Busy:
+            pass
+        await self.store.inbox_push(session_id, content, _user_dict(user))
+        # Прогон мог закончиться между попыткой запуска и записью в очередь — тогда
+        # on_idle уже отработал и сообщение никто не заберёт. Проверяем ещё раз.
+        if not await self.runs.active_run(session_id):
+            await self._drain_inbox(session_id)
+        return {"run_id": await self.runs.active_run(session_id), "queued": True}
+
+    async def _drain_inbox(self, session_id: str) -> None:
+        items = await self.store.inbox_pop(session_id)
+        if not items:
+            return
+        # Возвращаем в очередь в том же порядке: прогон без input заберёт её сам
+        # на первом шаге — с хуками и событием user_message, как и на ходу.
+        for it in items:
+            await self.store.inbox_push(session_id, it["content"], it["user"])
+        user = _user_from(items[-1]["user"])
+        try:
+            await self.runs.start(session_id, lambda: self.agent.run(session_id, user, None),
+                                  cancel=self.agent.cancel)
+        except Busy:
+            pass  # кто-то успел запустить прогон — он и заберёт очередь
+
+    async def _scheduled_run(self, rec: ScheduleRec, session_id: str, user: User) -> RunOutcome:
+        """Запуск по расписанию — через RunManager: виден в чате, его можно остановить."""
+        result = await self.send(session_id, user, rec.prompt)
+        await self.runs.wait(session_id, timeout=3600)
+        run = await self.store.get_run(result["run_id"]) if result.get("run_id") else None
+        text = ""
+        if run:
+            for e in reversed(await self.store.list_events(run_id=run.id)):
+                if e.type == EventType.MESSAGE and not e.agent and e.data.get("content"):
+                    text = e.data["content"]
+                    break
+        return RunOutcome(run_id=run.id if run else "", status=RunStatus(run.status) if run else RunStatus.ERROR,
+                          text=text, usage=Usage(**(run.usage or {})) if run else Usage(), events=[])
+
+    # ── модели: избранное пользователя и список доступных ────────────
+    async def model_prefs(self, user: User) -> dict[str, Any]:
+        """Избранные модели, «показывать только избранные» и модель по умолчанию — у каждого свои."""
+        p = await self.store.kv_get("model_prefs", user.id) or {}
+        return {"favorites": p.get("favorites", self.settings.model_list()),
+                "only_favorites": bool(p.get("only_favorites", False)),
+                "default": p.get("default") or self.settings.model_main}
+
+    async def model_policy(self) -> list[str] | None:
+        """Список, который админ оставил в настройках; None — действует AGENT_MODELS_ALLOW."""
+        v = await self.store.kv_get("config", "models_allowed")
+        return v.get("ids") if isinstance(v, dict) else None
+
+    def model_allowed(self, model_id: str, policy: list[str] | None) -> bool:
+        s = self.settings
+        mid = self.agent.router.resolve(model_id)
+        # Основную и малую модели не отключить: на них работают сжатие истории, субагенты и расписание.
+        if mid in (self.agent.router.resolve("main"), self.agent.router.resolve("small"), s.model_main, s.model_small):
+            return True
+        if policy is not None:
+            return mid in policy
+        patterns = [x.strip() for x in s.models_allow.split(",") if x.strip()]
+        return not patterns or any(fnmatch.fnmatchcase(mid, p) for p in patterns)
+
+    async def check_model(self, model: str | None) -> str | None:
+        """Модель из запроса пользователя: провайдер должен существовать, а модель — быть разрешена.
+
+        Проверка на сервере, а не только в выпадающем списке: иначе любой мог бы прислать
+        в API самую дорогую модель каталога.
+        """
+        if not model:
+            return None
+        from agentkit.llm.router import split_model
+
+        mid = self.agent.router.resolve(model)
+        provider, _ = split_model(mid, self.agent.router.default_provider)
+        if provider not in self.agent.router.providers or not self.model_allowed(mid, await self.model_policy()):
+            raise ValueError(f"модель {model} недоступна — выберите другую в списке моделей")
+        return model
+
+    # ── подписка и лимиты расходов ───────────────────────────────────
+    def period_starts(self, now: float | None = None) -> tuple[float, float]:
+        """Начало дня и месяца в часовом поясе сервиса (AGENT_TZ), а не машины: в контейнере
+        локальное время — UTC, и «день» москвича кончался бы в 03:00."""
+        t = datetime.fromtimestamp(now if now is not None else time.time(), ZoneInfo(self.settings.tz))
+        day = t.replace(hour=0, minute=0, second=0, microsecond=0)
+        return day.timestamp(), day.replace(day=1).timestamp()
+
+    async def plan_info(self, user: User) -> dict[str, Any]:
+        """Тариф, лимиты и расход за месяц и за сегодня — для «Подписки» и проверки лимита."""
+        s = self.settings
+        day_start, month_start = self.period_starts()
+        usage = await self.store.usage_summary(user_id=user.id, since=month_start)
+        today = await self.store.usage_summary(user_id=user.id, since=day_start)
+        info: dict[str, Any] = {"name": s.plan_name or "Без ограничений", "status": "active",
+                                "limit_usd": s.monthly_budget_usd or None,
+                                "daily_limit_usd": s.daily_budget_usd or None,
+                                "manage_url": s.billing_url or None, "features": []}
+        if self.domain.plan is not None:
+            res = self.domain.plan(user, usage)
+            if hasattr(res, "__await__"):
+                res = await res
+            info.update(res or {})
+        exempt = {r.strip() for r in s.budget_exempt_roles.split(",") if r.strip()}
+        return {**info, "usage": usage, "usage_today": today, "period_start": month_start, "day_start": day_start,
+                "exempt": any(user.has_role(r) for r in exempt)}
+
+    async def over_budget(self, user: User) -> str | None:
+        """Почему пользователю больше нельзя тратить, или None.
+
+        Проверяется до прогона (сообщение не принимается) и перед каждым шагом модели. Два
+        прогона одного человека могут оба пройти проверку и сделать ещё по шагу — перерасход
+        не больше шага на прогон; ради точной отсечки пришлось бы резервировать деньги до ответа
+        модели, а его цену заранее не знает никто.
+        """
+        p = await self.plan_info(user)
+        if p["exempt"]:
+            return None
+        month, day = p["usage"]["cost"], p["usage_today"]["cost"]
+        if (lim := p.get("limit_usd")) and month >= lim:
+            tail = f" или продлите подписку: {p['manage_url']}" if p.get("manage_url") else \
+                " или попросите администратора поднять лимит (AGENT_MONTHLY_BUDGET_USD)"
+            return f"Месячный лимит расходов исчерпан: ${month:.2f} из ${lim:.2f}. Продолжить можно с 1-го числа{tail}."
+        if (lim := p.get("daily_limit_usd")) and day >= lim:
+            return (f"Дневной лимит расходов исчерпан: ${day:.2f} из ${lim:.2f}. Продолжить можно завтра "
+                    f"(после 00:00, {self.settings.tz}) или попросите администратора поднять лимит "
+                    "(AGENT_DAILY_BUDGET_USD).")
+        return None
+
+    async def check_budget(self, user: User) -> None:
+        if why := await self.over_budget(user):
+            raise BudgetExceeded(why)
+
+    def user_for(self, user_id: str) -> User:
+        for u in self.auth.users.values():
+            if u.id == user_id:
+                return u
+        return User(id=user_id, name=user_id)
+
+    async def stop(self) -> None:
+        if self.scheduler:
+            await self.scheduler.stop()
+        if self.runs:
+            await self.runs.shutdown()
+        if self.mcp:
+            await self.mcp.close()
+        for uid in list(self._user_mcp):
+            await self._drop_user_mcp(uid)
+        if self.bus:
+            await self.bus.close()
+        if self.index is not None and hasattr(self.index.embedder, "aclose"):
+            await self.index.embedder.aclose()
+        if self.store:
+            await self.store.close()
+
+
+def _user_dict(u: User) -> dict[str, Any]:
+    return {"id": u.id, "name": u.name, "roles": list(u.roles), "extra": u.extra}
+
+
+def _user_from(d: dict[str, Any]) -> User:
+    return User(id=d["id"], name=d.get("name", ""), roles=d.get("roles") or [], extra=d.get("extra") or {})
+
+
+def assemble_agent(
+    s: Settings,
+    domain: Domain,
+    store: SQLStore,
+    *,
+    router: ModelRouter | None = None,
+    mcp_tools: list[Tool] | None = None,
+    mcp_instructions: Callable[[], str] | None = None,
+    extra_tools: list[Tool] | None = None,
+    index: VectorIndex | None = None,
+) -> Agent:
+    """Собирает агента из настроек и домена. Один и тот же код для сервиса, evals и тестов."""
+    reg = standard_tools(
+        files=s.enable_files, shell=s.enable_shell, web_fetch=s.enable_web, tavily_key=s.tavily_api_key,
+        memory_global_roles=domain.memory_global_roles, subagents=False,
+        extra=[*domain.tools, *(extra_tools or []), *(mcp_tools or [])],
+    )
+    if domain.subagents:
+        reg.add(task_tool(domain.subagents))
+    spec = replace(domain.spec)
+    if s.max_steps and spec.max_steps == AgentSpec().max_steps:
+        spec.max_steps = s.max_steps
+    if s.reasoning_effort and not spec.reasoning_effort:
+        spec.reasoning_effort = s.reasoning_effort
+    ws_root = s.workspace_dir or (s.data_dir / "workspaces")
+    # Ключи из .env pydantic читает сам, мимо os.environ — без этого они не были бы «известными».
+    REDACT.add_env(s.secret_env())
+    REDACT.add_url(s.database_url, "пароль базы")
+    REDACT.add_url(s.redis_url, "пароль Redis")
+    install_log_redaction(REDACT)
+    tracers: list[Any] = [LogTracer()]
+    if s.trace_dir:
+        tracers.append(JSONLTracer(s.trace_dir))
+
+    def workspace(session_id: str) -> Path:
+        p = ws_root / session_id
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    router = router or make_router(
+        openrouter_key=s.openrouter_api_key, yandex_key=s.yandex_api_key, yandex_folder=s.yandex_folder_id,
+        openai_key=s.openai_api_key, ollama_url=s.ollama_url, main=s.model_main, small=s.model_small,
+        fallbacks=s.fallback_map(), app_name=s.name, app_url=s.public_url,
+    )
+    return Agent(
+        router=router,
+        store=store,
+        tools=reg,
+        spec=spec,
+        subagents=domain.subagents,
+        permissions=Permissions(mode=Mode(s.default_mode), workspace_edits=s.workspace_edits,
+                                allow=split_rules(s.allow_rules),
+                                ask=split_rules(s.ask_rules), deny=split_rules(s.deny_rules)),
+        hooks=domain.hooks,
+        skills=SkillLibrary.from_dirs(s.skills_dir),
+        mcp_instructions=mcp_instructions,
+        config=AgentConfig(context_window=s.context_window, tz=s.tz, max_output_chars=s.max_output_chars,
+                           auto_memory=s.auto_memory, memory_inline_chars=s.memory_inline_chars,
+                           vision_models=[x.strip() for x in s.vision_models.split(",") if x.strip()] or None),
+        deps=domain.deps,
+        workspace=workspace if s.enable_files or s.enable_shell else None,
+        rules=domain.rules,
+        tracers=tracers,
+        redactor=Redactor(patterns=s.redact_patterns, base=REDACT),
+        index=index,
+    )

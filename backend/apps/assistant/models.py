@@ -149,6 +149,10 @@ class Conversation(models.Model):
     title = models.CharField(max_length=200, blank=True)
     model = models.CharField(max_length=200, blank=True)
     pinned = models.BooleanField(default=False)
+    # Разговор в agentkit (X-Agent-Session-Id), за которым стоит эта запись: файлы, которые собрал
+    # EI_doc, и карточки действий привязаны к разговору. Сами сообщения живут в agentkit — в
+    # старом списке чатов такие записи не показываются.
+    external_id = models.CharField(max_length=120, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 

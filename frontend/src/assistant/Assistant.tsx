@@ -11,6 +11,8 @@ import {
   type Conversation,
   type ModelInfo,
 } from "./api";
+import AgentFrame from "./AgentFrame";
+import { fetchAgentLink, type AgentLink } from "./api";
 import ChatView from "./ChatView";
 import ContextPanel from "./ContextPanel";
 
@@ -43,7 +45,19 @@ const SUGGESTIONS = [
 
 const PANEL_KEY = "ei_doc_assistant_context_open";
 
+/** Ассистент на agentkit, если он развёрнут (AGENT_URL в .env EI_doc), иначе — встроенный чат. */
 export default function Assistant() {
+  const [link, setLink] = useState<AgentLink | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    fetchAgentLink().then(setLink).catch(() => setFailed(true));
+  }, []);
+  if (link?.enabled) return <AgentFrame url={link.url} origin={link.origin} token={link.token} />;
+  if (link || failed) return <BuiltinAssistant />;
+  return <div className="muted pad">Загрузка…</div>;
+}
+
+function BuiltinAssistant() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [current, setCurrent] = useState<number | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);

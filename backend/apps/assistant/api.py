@@ -125,7 +125,7 @@ def _conversation(request, pk) -> Conversation:
 # ---------------------------------------------------------------------------
 class ConversationListView(APIView):
     def get(self, request):
-        qs = Conversation.objects.filter(user=request.user)
+        qs = Conversation.objects.filter(user=request.user, external_id="")
         query = (request.query_params.get("q") or "").strip()
         if query:
             qs = qs.filter(Q(title__icontains=query) | Q(messages__content__icontains=query)).distinct()

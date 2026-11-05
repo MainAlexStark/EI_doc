@@ -43,6 +43,13 @@ AI Studio (те же YANDEX_VISION_*). RST_MCP_URL/RST_MCP_TOKEN — RSTMetrolog
 по имени контейнера в mcp-network; веб-поиск — Yandex Search API (тот же
 сервисный аккаунт, роль search-api.webSearch.user). Прогоны агента выполняет
 отдельный контейнер assistant-worker (очередь Celery «assistant»).
+
+Ассистент на agentkit (папка agent/, отдельный сервис со своим доменом):
+  cd agent && ./deploy.sh agent.example.com
+Он сам возьмёт из .env EI_doc общие секреты и ключи и впишет сюда AGENT_URL —
+после ./deploy.sh update вкладка «Ассистент» откроет его чат (вход — через
+EI_doc, второго логина нет). Личную память старого ассистента перенести:
+  docker compose exec web python manage.py agent_migrate_memory
 TELEGRAM_WEBHOOK_SECRET генерируется сам, как SECRET_KEY, — как только
 появится TELEGRAM_BOT_TOKEN, вебхук регистрируется сам при каждом запуске
 контейнера (см. claude/hub.md).'
@@ -268,7 +275,8 @@ cmd_install() {
   chmod 600 "$ENV_FILE"
 
   env_set "DEBUG" "False"
-  env_set "ALLOWED_HOSTS" "$DOMAIN"
+  # ei-doc-web — имя контейнера: по нему в mcp-network ходит агент (agent/, MCP-сервер EI_doc).
+  env_set "ALLOWED_HOSTS" "${DOMAIN},ei-doc-web"
   env_set "CSRF_TRUSTED_ORIGINS" "https://${DOMAIN}"
 
   env_set "DB_HOST" "postgres"

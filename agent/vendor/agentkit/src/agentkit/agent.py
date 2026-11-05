@@ -1,0 +1,1087 @@
+"""Агентный цикл.
+
+    модель → вызовы инструментов → права/хуки → выполнение → результаты → модель …
+
+Ключевые решения:
+
+* Прогон, которому нужно подтверждение человека, ОСТАНАВЛИВАЕТСЯ (статус
+  waiting_approval), а не ждёт в памяти. Решение человека продолжает работу
+  новым прогоном. Так ожидание переживает перезапуск сервиса и может длиться
+  сколько угодно — человек ответит завтра с телефона.
+* Всё состояние — в Store. Агент без состояния между вызовами: один объект
+  обслуживает все сессии, его можно держать в любом количестве процессов.
+* Ошибка инструмента — не исключение цикла, а текст для модели: «Ошибка: …».
+  Модель исправляет аргументы сама.
+* Последний разрешённый шаг идёт без инструментов: модель обязана подвести
+  итог, а не оборваться на полуслове.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Any
+
+from agentkit.attachments import expand_parts, is_vision
+from agentkit.context import (
+    PromptParts,
+    build_system_prompt,
+    compact,
+    effective_history,
+    estimate_tokens,
+    truncate_text,
+)
+from agentkit.events import Event, EventType, RunStatus
+from agentkit.hooks import HookEvent, Hooks, fold
+from agentkit.llm.base import LLMError, LLMRequest
+from agentkit.llm.router import ModelRouter
+from agentkit.memory_auto import enabled_for as auto_memory_enabled
+from agentkit.memory_auto import extract as auto_memory_extract
+from agentkit.messages import Message, ToolCall, Usage, new_id
+from agentkit.permissions import Decision, Mode, Permissions
+from agentkit.redact import DEFAULT as DEFAULT_REDACTOR
+from agentkit.redact import MARKER, Redactor, StreamRedactor, contains_marker
+from agentkit.semantic import VectorIndex, rank_memory
+from agentkit.skills import SkillLibrary
+from agentkit.store.base import ApprovalRec, Store
+from agentkit.tools.base import Tool, ToolArgsError, ToolContext, ToolDenied, ToolResult, User
+from agentkit.tools.registry import LOADED_KEY, ToolRegistry, make_tool_search, match_any
+
+log = logging.getLogger("agentkit.agent")
+
+EPHEMERAL = {EventType.TEXT_DELTA, EventType.THINKING_DELTA}
+REDACTED_NOTE = ("\n\n[Система] «[секрет скрыт: …]» — ключ или пароль, скрытый от тебя кодом; значения ты не узнаешь. "
+                 "Не вписывай эту метку в файлы и команды: правь строки рядом, а сам секрет пусть впишет человек.")
+
+
+@dataclass
+class AgentSpec:
+    """Описание агента: главного или субагента (explore, plan, …)."""
+
+    name: str = "main"
+    description: str = ""  # для списка субагентов в инструменте task
+    prompt: str = ""
+    model: str = "main"  # роль из ModelRouter.roles или «провайдер:модель»
+    tools: list[str] | None = None  # шаблоны разрешённых инструментов; None — все
+    deny_tools: list[str] = field(default_factory=list)
+    max_steps: int = 30
+    mode: Mode | None = None  # принудительный режим прав (explore → readonly)
+    reasoning_effort: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = 8000
+    include_core_rules: bool = True
+
+
+@dataclass
+class AgentConfig:
+    max_output_chars: int = 30_000  # длиннее — обрезка + полный текст в blob, читается read_output
+    context_window: int = 128_000
+    compact_threshold: float = 0.75
+    keep_user_turns: int = 2
+    compact_model: str = "small"
+    tz: str = "Europe/Moscow"
+    loop_guard: int = 3  # одинаковый вызов N раз подряд → предупреждение модели
+    max_stop_continues: int = 3  # сколько раз stop-хук может не дать закончить
+    persist_thinking: bool = False
+    vision_models: list[str] | None = None  # шаблоны моделей, которым отдавать картинки; None — по умолчанию
+    # Фоновая память: после хода (статус done) модель small выбирает из слов человека устойчивые
+    # факты в его личную память — см. memory_auto.py. Выключено по умолчанию: это ещё один запрос
+    # к модели на каждый ход; сервис включает (AGENT_AUTO_MEMORY), человек может выключить у себя.
+    auto_memory: bool = False
+    auto_memory_model: str = "small"
+    auto_memory_timeout: float = 60.0
+    # Сколько символов памяти идёт в промпт целиком. Больше — в промпт попадают записи, ближайшие
+    # к последнему сообщению человека (по смыслу и словам), и самые новые; остальное модель
+    # находит через memory_search. Без порога память в сотни записей съедала бы контекст каждого шага.
+    memory_inline_chars: int = 6000
+
+
+@dataclass
+class TurnContext:
+    """Что подмешать в конкретный шаг: текст в системный промпт, инструменты этого шага и какие спрятать.
+
+    Так ядро узнаёт о проекте разговора или подключённом компьютере, не зная о них
+    самих: поставщик контекста решает по пользователю и сессии.
+
+    ``tools`` — инструменты, которые есть только у этого пользователя (MCP-сервер хоста
+    с ``per_user``: у каждого свой магазин и свои подключения). Имя, совпавшее с общим
+    инструментом, отбрасывается: личный список не может подменить встроенный.
+    """
+
+    text: str = ""
+    hide_tools: set[str] = field(default_factory=set)
+    tools: list[Tool] = field(default_factory=list)
+
+
+ContextProvider = Callable[[User, str], Awaitable["TurnContext | str | None"]]
+
+
+@dataclass
+class UserTools:
+    """Инструменты, которые есть только у одного пользователя: его личные MCP-серверы и т. п.
+
+    Общий реестр агента один на процесс, а личные серверы у каждого свои — поэтому они
+    не добавляются в agent.tools, а подмешиваются в каждый шаг прогона этого пользователя.
+    """
+
+    tools: list[Tool] = field(default_factory=list)
+    instructions: str = ""  # инструкции личных MCP-серверов — в системный промпт рядом с общими
+
+
+UserToolsProvider = Callable[[User], Awaitable["UserTools | None"]]
+# Лимит расходов: None — можно тратить дальше, строка — почему нельзя (её увидит человек).
+# Сам лимит и расход считает хост (у сервиса — по базе): ядро не знает ни тарифов, ни периодов.
+BudgetCheck = Callable[[User], Awaitable["str | None"]]
+
+
+@dataclass
+class RunOutcome:
+    run_id: str
+    status: RunStatus
+    text: str
+    usage: Usage
+    events: list[Event]
+
+
+class Agent:
+    def __init__(
+        self,
+        *,
+        router: ModelRouter,
+        store: Store,
+        tools: ToolRegistry | None = None,
+        spec: AgentSpec | None = None,
+        subagents: dict[str, AgentSpec] | None = None,
+        permissions: Permissions | None = None,
+        hooks: Hooks | None = None,
+        skills: SkillLibrary | None = None,
+        mcp_instructions: Callable[[], str] | None = None,
+        config: AgentConfig | None = None,
+        deps: dict[str, Any] | None = None,
+        workspace: Callable[[str], Path | None] | Path | None = None,
+        rules: Callable[[User], str] | str = "",
+        memory_scopes: Callable[[User], list[str]] | None = None,
+        tracers: list[Any] | None = None,
+        can_ask: bool = True,
+        budget: BudgetCheck | None = None,
+        redactor: Redactor | None = None,
+        user_tools: UserToolsProvider | None = None,
+        index: VectorIndex | None = None,
+    ):
+        self.router = router
+        # Секреты (ключи сервиса из окружения, токены MCP/OAuth, типовые форматы) — маркером:
+        # в результате инструмента до модели и в каждом событии до базы, UI и трейсеров.
+        self.redactor = redactor or DEFAULT_REDACTOR
+        self.budget = budget
+        self.store = store
+        self.tools = tools or ToolRegistry()
+        self.spec = spec or AgentSpec()
+        self.subagents = subagents or {}
+        self.permissions = permissions or Permissions()
+        self.hooks = hooks or Hooks()
+        self.skills = skills
+        self.mcp_instructions = mcp_instructions
+        self.user_tools = user_tools
+        self.config = config or AgentConfig()
+        self.deps = deps or {}
+        self._workspace = workspace
+        self.rules = rules
+        self.memory_scopes = memory_scopes or (lambda u: ["global", f"user:{u.id}"])
+        # Смысловой поиск (semantic.py): отбор памяти в промпт и memory_search. None — только по словам.
+        self.index = index
+        self.tracers = tracers or []
+        # Каталог моделей знает, кто умеет картинки, точнее шаблонов; сервис подставляет его сюда.
+        self.vision_for: Callable[[str], bool | None] | None = None
+        # Проект разговора, подключённый компьютер и т. п. — см. TurnContext.
+        self.context_providers: list[ContextProvider] = []
+        # Субагент не может остановиться ради подтверждения: продолжить его
+        # прогон было бы некому. Вместо «спросить» он получает отказ.
+        self.can_ask = can_ask
+        self._cancel: dict[str, asyncio.Event] = {}
+        # Реестр прогона: общие инструменты + личные из TurnContext.tools. Вызов, tool_search
+        # и решение по карточке ищут инструмент здесь, а не в self.tools, иначе личный
+        # инструмент, показанный модели, при вызове оказывался бы «нет такого инструмента».
+        self._run_tools: dict[str, ToolRegistry] = {}
+        # Субагент видит личные инструменты через тот же фильтр, что и общие (spec.tools / deny).
+        self._tool_filter: tuple[list[str] | None, list[str]] = (None, [])
+
+        if "tool_search" not in self.tools:
+            self.tools.add(make_tool_search(
+                lambda ctx: ctx.tools if ctx.tools is not None else ctx.agent.tools_in(ctx.run_id)))
+        # Инструмент skill — и при пустой папке: навыки пользователь может создать сам в настройках.
+        if self.skills is not None and "skill" not in self.tools:
+            self.tools.add(self.skills.tool())
+
+    # ── публичное API ────────────────────────────────────────────────
+
+    async def skills_for(self, user: User) -> SkillLibrary:
+        """Навыки, которые видит этот пользователь: из папки приложения + свои, без выключенных."""
+        base = self.skills or SkillLibrary()
+        return base.for_user(await self.store.kv_get("skills", user.id) or {})
+
+    async def tools_for(self, user: User) -> tuple[ToolRegistry, str]:
+        """Реестр для прогона этого пользователя (общий + личные) и инструкции его личных серверов."""
+        if self.user_tools is None:
+            return self.tools, ""
+        try:
+            extra = await self.user_tools(user)
+        except Exception:  # noqa: BLE001 — сбой личных серверов не должен ронять прогон
+            log.exception("user tools failed")
+            return self.tools, ""
+        if not extra:
+            return self.tools, ""
+        if not extra.tools:
+            return self.tools, extra.instructions
+        reg = ToolRegistry(self.tools.all())
+        for t in extra.tools:
+            # Общий главнее: личный сервер не может подменить для человека инструмент, который
+            # настроил админ (с его правилами и правами), — просто совпав с ним именем.
+            if t.name not in reg:
+                reg.add(t)
+        return reg, extra.instructions
+
+    def workspace_for(self, session_id: str) -> Path | None:
+        ws = self._workspace
+        if callable(ws):
+            return ws(session_id)
+        return ws
+
+    def tools_in(self, run_id: str) -> ToolRegistry:
+        """Инструменты прогона: общие и личные пользователя (если поставщики контекста их дали)."""
+        return self._run_tools.get(run_id, self.tools)
+
+    def _with_turn_tools(self, run_id: str, extra: list[Tool], base: ToolRegistry | None = None) -> ToolRegistry:
+        """Реестр прогона: base (общие + личные MCP-серверы пользователя, см. tools_for) и поверх —
+        инструменты хоста на этот разговор (TurnContext.tools). Запоминается на прогон: tool_search,
+        вызов и решение по карточке должны найти тот же инструмент, что видела модель."""
+        base = base if base is not None else self.tools
+        if not extra:
+            if base is self.tools:
+                self._run_tools.pop(run_id, None)
+            else:
+                self._run_tools[run_id] = base
+            return base
+        allow, deny = self._tool_filter
+        reg = ToolRegistry(base.all())
+        reg.extend(t for t in extra if t.name not in base
+                   and (allow is None or match_any(t.name, allow)) and not match_any(t.name, deny))
+        self._run_tools[run_id] = reg
+        return reg
+
+    def cancel(self, run_id: str) -> bool:
+        ev = self._cancel.get(run_id)
+        if ev:
+            ev.set()
+            return True
+        return False
+
+    async def run(
+        self,
+        session_id: str,
+        user: User,
+        input: str | list[dict[str, Any]] | None = None,
+        *,
+        model: str | None = None,
+        mode: Mode | str | None = None,
+        trigger: str = "user",
+    ) -> AsyncIterator[Event]:
+        """Прогон по новому сообщению пользователя. Отдаёт события по мере работы."""
+        session = await self.store.get_session(session_id)
+        if session is None:
+            raise ValueError(f"нет сессии {session_id}")
+        state = session.state or {}
+        model = model or state.get("model") or self.spec.model
+        mode = Mode(mode or self.spec.mode or state.get("mode") or self.permissions.mode)
+
+        async def body(emit: Callable[[Event], Any], run_id: str) -> RunStatus:
+            # Неотвеченные подтверждения при новом сообщении — отклоняются: человек
+            # пошёл другим путём, а висящий вызов без результата сломал бы историю.
+            await self._expire_pending(session_id, emit, run_id, "пользователь отправил новое сообщение вместо подтверждения")
+            if not await self.store.list_messages(session_id):
+                started = fold(await self.hooks.run(HookEvent.SESSION_START,
+                                                    {"session_id": session_id, "user": user}, self))
+                if started.add_context:
+                    await self.store.append_message(
+                        session_id, Message.user(started.add_context, kind="hook_context", hidden=True), run_id)
+            if input is not None:
+                text = _plain_text(input)
+                hooked = fold(await self.hooks.run(HookEvent.USER_PROMPT_SUBMIT,
+                                                   {"prompt": text, "session_id": session_id, "user": user}, self))
+                if hooked.decision == Decision.DENY:
+                    await emit(Event(EventType.ERROR, {"message": hooked.reason or "сообщение отклонено"}))
+                    return RunStatus.ERROR
+                await self.store.append_message(session_id, Message.user(input), run_id)
+                if hooked.add_context:
+                    await self.store.append_message(
+                        session_id, Message.user(hooked.add_context, kind="hook_context", hidden=True), run_id)
+                if not session.title:
+                    title = _plain_text(input).strip()
+                    if title:
+                        await self.store.update_session(session_id, title=title.splitlines()[0][:80])
+            return await self._loop(session_id, user, run_id, emit, model=model, mode=mode)
+
+        # Текст запроса — в событие старта: по журналу (JSONL, ak_events) прогон потом
+        # разбирается и превращается в eval-кейс без доступа к таблице сообщений.
+        info = {"input": _plain_text(input)[:8000]} if input is not None else None
+        async for ev in self._drive(session_id, body, model=model, trigger=trigger, info=info, user=user):
+            yield ev
+
+    async def resolve_approval(
+        self,
+        approval_id: str,
+        user: User,
+        *,
+        approve: bool,
+        comment: str = "",
+        edited_args: dict[str, Any] | None = None,
+    ) -> AsyncIterator[Event]:
+        """Решение человека по карточке. Когда решены все карточки шага — агент продолжает."""
+        rec = await self.store.get_approval(approval_id)
+        if rec is None:
+            raise ValueError("нет такого подтверждения")
+        # Атомарно: двойной клик или два процесса не выполнят действие дважды.
+        if rec.status != "pending" or not await self.store.claim_approval(approval_id):
+            raise ValueError(f"подтверждение уже {rec.status if rec.status != 'pending' else 'решается'}")
+        session = await self.store.get_session(rec.session_id)
+        assert session is not None
+        state = session.state or {}
+        model = state.get("model") or self.spec.model
+        mode = Mode(self.spec.mode or state.get("mode") or self.permissions.mode)
+
+        async def body(emit: Callable[[Event], Any], run_id: str) -> RunStatus:
+            tools, _ = await self.tools_for(user)
+            turn = await self._turn_context(user, rec.session_id)
+            tool = self._with_turn_tools(run_id, turn.tools, tools).get(rec.tool_name)
+            tools = self.tools_in(run_id)
+            args = edited_args if edited_args is not None else rec.args
+            if not approve:
+                # Явно «не выполнено» и «не проси снова»: на голом «отклонил» haiku заново просил
+                # подтверждение, будто карточки ещё не было (кейс planning/rejected-approval-is-respected).
+                content = ("Человек отклонил это действие — оно НЕ выполнено. Сообщи, что не сделал его, "
+                           "и не запрашивай то же самое снова без новой просьбы."
+                           + (f" Комментарий: {comment}" if comment else ""))
+                result = ToolResult(content=content, is_error=True)
+            elif tool is None:
+                result = ToolResult.error(f"инструмент {rec.tool_name} больше недоступен")
+            else:
+                try:
+                    args = tool.validate(args)
+                    seq = await self._last_seq(rec.session_id)
+                    ctx = self._ctx(rec.session_id, run_id, user, emit, rec.tool_call_id, seq, tools)
+                    result = await self._invoke(tool, args, ctx)
+                    if comment:
+                        result.content += f"\n\nКомментарий пользователя: {comment}"
+                except ToolArgsError as e:
+                    result = ToolResult.error(f"неверные аргументы после правки: {e}")
+            await self.store.update_approval(approval_id, status="approved" if approve else "rejected",
+                                             decided_by=user.id, decided_at=time.time(), comment=comment)
+            await emit(Event(EventType.APPROVAL_RESOLVED, {"approval_id": approval_id, "approved": approve,
+                                                           "tool_call_id": rec.tool_call_id}))
+            await self._record_result(rec.session_id, run_id, emit, rec.tool_call_id, rec.tool_name, result)
+            still = [a for a in await self.store.list_approvals(rec.session_id)
+                     if a.status in ("pending", "resolving") and a.id != approval_id]
+            if still:
+                return RunStatus.WAITING_APPROVAL
+            return await self._loop(rec.session_id, user, run_id, emit, model=model, mode=mode)
+
+        async for ev in self._drive(rec.session_id, body, model=model, trigger="approval", user=user):
+            yield ev
+
+    async def run_to_end(self, session_id: str, user: User, input: str | None, **kw: Any) -> RunOutcome:
+        """Прогнать до конца и вернуть итог — для субагентов, расписания, evals, CLI."""
+        evs: list[Event] = []
+        status = RunStatus.DONE
+        run_id = ""
+        usage = Usage()
+        async for ev in self.run(session_id, user, input, **kw):
+            evs.append(ev)
+            run_id = ev.run_id or run_id
+            if ev.type == EventType.USAGE:
+                usage.add(Usage(**{k: v for k, v in ev.data.items() if k in Usage.__dataclass_fields__}))
+            if ev.type == EventType.RUN_FINISHED:
+                status = RunStatus(ev.data["status"])
+        text = ""
+        for ev in reversed(evs):
+            if ev.type == EventType.MESSAGE and ev.data.get("content") and not ev.agent:
+                text = ev.data["content"]
+                break
+        return RunOutcome(run_id=run_id, status=status, text=text, usage=usage, events=evs)
+
+    async def rewind(self, session_id: str, seq: int) -> dict[str, Any]:
+        """Откат диалога к сообщению seq (включительно) и файлов рабочей папки к тому моменту."""
+        await self._expire_pending(session_id, None, None, "откат диалога")
+        restored = await self._restore_files(session_id, seq)
+        removed = await self.store.delete_messages_after(session_id, seq)
+        return {"messages_removed": removed, "files_restored": restored}
+
+    # ── внутреннее: запуск с очередью событий ─────────────────────────
+
+    async def _drive(self, session_id, body, *, model: str, trigger: str, info: dict[str, Any] | None = None,
+                     user: User | None = None):
+        run = await self.store.create_run(session_id, model=self.router.resolve(model), trigger=trigger)
+        q: asyncio.Queue[Event | None] = asyncio.Queue()
+        cancel = self._cancel.setdefault(run.id, asyncio.Event())
+        usage = Usage()
+        steps = 0
+
+        async def emit(ev: Event) -> None:
+            nonlocal steps
+            ev.data = self.redactor.deep(ev.data)
+            ev.run_id = ev.run_id or run.id
+            ev.session_id = ev.session_id or session_id
+            if ev.type not in EPHEMERAL:
+                await self.store.add_event(ev)
+            if ev.type == EventType.USAGE:
+                # Расход субагентов и фоновой памяти входит в стоимость прогона, шаги — только свои.
+                usage.add(Usage(**{k: v for k, v in ev.data.items() if k in Usage.__dataclass_fields__}))
+                steps += 0 if ev.agent or ev.data.get("memory") else 1
+                # Расход — в базу на каждом шаге, а не только в конце: иначе лимит не видел бы
+                # идущих прогонов (часовая задача или пять параллельных разговоров тратили бы
+                # «бесплатно» до самого конца), а упавший процесс терял бы потраченное.
+                await self.store.update_run(run.id, usage=usage.to_dict(), steps=steps)
+            for t in self.tracers:
+                try:
+                    t.on_event(ev)
+                except Exception:  # noqa: BLE001 — трейсер не должен ронять прогон
+                    log.exception("tracer failed")
+            await q.put(ev)
+
+        async def runner() -> None:
+            status = RunStatus.ERROR
+            error = None
+            try:
+                await emit(Event(EventType.RUN_STARTED, {"model": self.router.resolve(model), "trigger": trigger,
+                                                         **(info or {})}))
+                status = await body(emit, run.id)
+            except asyncio.CancelledError:
+                status = RunStatus.CANCELLED
+            except LLMError as e:
+                error = str(e)
+                await emit(Event(EventType.ERROR, {"message": f"Модель недоступна: {e}"}))
+            except Exception as e:  # noqa: BLE001
+                log.exception("run %s failed", run.id)
+                error = f"{type(e).__name__}: {e}"
+                await emit(Event(EventType.ERROR, {"message": error}))
+            finally:
+                if cancel.is_set() and status not in (RunStatus.WAITING_APPROVAL,):
+                    status = RunStatus.CANCELLED
+                await self.store.update_run(run.id, status=str(status), usage=usage.to_dict(), steps=steps,
+                                            error=error, finished_at=time.time())
+                await emit(Event(EventType.RUN_FINISHED, {"status": str(status), "usage": usage.to_dict(),
+                                                          "error": error}))
+                self._cancel.pop(run.id, None)
+                # Память — после run_finished: человек уже видит ответ и может писать дальше
+                # (сообщение встанет в очередь и уйдёт сразу за проходом), а сессия ещё
+                # заблокирована — два прохода по одним сообщениям не пойдут параллельно.
+                if status == RunStatus.DONE and user is not None:
+                    await self._auto_memory(session_id, user, emit)
+                self._run_tools.pop(run.id, None)
+                await q.put(None)
+
+        task = asyncio.create_task(runner())
+        try:
+            while True:
+                ev = await q.get()
+                if ev is None:
+                    break
+                yield ev
+        finally:
+            # Если потребитель ушёл раньше (закрыл SSE), прогон доводится до конца
+            # в фоне: иначе в истории остался бы вызов инструмента без результата.
+            if task.done():
+                await task
+
+    async def _auto_memory(self, session_id: str, user: User, emit) -> None:
+        if not self.config.auto_memory:
+            return
+        try:
+            session = await self.store.get_session(session_id)
+            # Только свой разговор и не субагент: решение по чужой карточке (admin) не пишет
+            # в его память, а дочерняя сессия субагента — не слова человека.
+            if session is None or session.parent_id or session.user_id != user.id:
+                return
+            if not await auto_memory_enabled(self.store, user.id) or await self._over_budget(user):
+                return
+            res = await asyncio.wait_for(auto_memory_extract(
+                store=self.store, router=self.router, session_id=session_id, user_id=user.id,
+                model=self.config.auto_memory_model, redactor=self.redactor), self.config.auto_memory_timeout)
+        except Exception:  # noqa: BLE001 — память best-effort: ответ человек уже получил
+            log.exception("auto memory failed in %s", session_id)
+            return
+        if res.usage.cost or res.usage.input_tokens:
+            await emit(Event(EventType.USAGE, {**res.usage.to_dict(), "model": self.router.resolve(
+                self.config.auto_memory_model), "step": "memory", "memory": True}))
+        if res.changed:
+            await emit(Event(EventType.MEMORY_UPDATED, {"added": res.added, "updated": res.updated}))
+
+    # ── внутреннее: цикл ──────────────────────────────────────────────
+
+    def _ctx(self, session_id: str, run_id: str, user: User, emit, call_id: str = "", seq: int = 0,
+             tools: ToolRegistry | None = None) -> ToolContext:
+        return ToolContext(tools=tools,
+            session_id=session_id, run_id=run_id, user=user, agent=self, store=self.store, emit=emit,
+            tool_call_id=call_id, workspace=self.workspace_for(session_id), deps=self.deps,
+            cancel=self._cancel.get(run_id) or asyncio.Event(), message_seq=seq, agent_name=self.spec.name,
+        )
+
+    async def _turn_context(self, user: User, session_id: str) -> TurnContext:
+        out = TurnContext()
+        texts = []
+        for prov in self.context_providers:
+            try:
+                res = await prov(user, session_id)
+            except Exception:  # noqa: BLE001 — сбой поставщика не должен ронять прогон
+                log.exception("context provider failed")
+                continue
+            if isinstance(res, str):
+                res = TurnContext(text=res)
+            if res:
+                if res.text:
+                    texts.append(res.text)
+                out.hide_tools |= res.hide_tools
+                out.tools.extend(res.tools)
+        out.text = "\n\n".join(texts)
+        return out
+
+    async def memory_view(self, user: User, query: str = "") -> tuple[list[Any], str]:
+        """Записи памяти для промпта и пометка, если показана не вся память.
+
+        Помещается в memory_inline_chars — вся, как раньше (пометка пустая). Не помещается —
+        сначала ближайшие к запросу, затем самые новые, пока есть место; в промпте — по времени.
+        """
+        mem = await self.store.memory_list(self.memory_scopes(user))
+        limit = self.config.memory_inline_chars
+        if limit <= 0 or sum(len(m.text) + 20 for m in mem) <= limit:
+            return mem, ""
+        picked: dict[str, Any] = {}
+        used = 0
+
+        def take(m: Any) -> None:
+            nonlocal used
+            if m.id not in picked and used + len(m.text) + 20 <= limit:
+                picked[m.id] = m
+                used += len(m.text) + 20
+
+        if query.strip():
+            # Близкие к вопросу — не больше двух третей места: самым новым (часто «правила на
+            # сейчас») тоже должно остаться.
+            for m in await rank_memory(self.store, self.index, self.memory_scopes(user), query, mem, k=12, margin=0.12):
+                if used > limit * 2 // 3:
+                    break
+                take(m)
+        for m in reversed(mem):
+            take(m)
+        shown = [m for m in mem if m.id in picked]
+        note = (f"Показано {len(shown)} из {len(mem)} записей — ближайшие к последнему сообщению и самые новые. "
+                "Если для ответа может понадобиться что-то ещё из памяти (факты о человеке, прошлые договорённости), "
+                "ищи через memory_search.")
+        return shown, note
+
+    async def _system_prompt(self, user: User, loaded: set[str], mode: Mode, extra: str = "",
+                             tools: ToolRegistry | None = None, user_mcp: str = "",
+                             memory: tuple[list[Any], str] | None = None) -> str:
+        tools = tools if tools is not None else self.tools
+        shared_mcp = self.mcp_instructions() if self.mcp_instructions else ""
+        mem, mem_note = memory if memory is not None else await self.memory_view(user)
+        rules = self.rules(user) if callable(self.rules) else self.rules
+        parts = PromptParts(
+            agent_prompt=self.spec.prompt,
+            rules=rules,
+            skills_index=(await self.skills_for(user)).index() if self.skills else "",
+            mcp_instructions="\n\n".join(x for x in (shared_mcp, user_mcp) if x),
+            deferred_tools=tools.deferred_names(loaded),
+            memory=[f"[{m.id}] {m.text}" for m in mem],
+            memory_note=mem_note,
+            user_name=user.name,
+            user_roles=user.roles,
+            profile=await self.store.kv_get("profile", user.id) or {},
+            mode=str(mode),
+            tz=self.config.tz,
+            include_core_rules=self.spec.include_core_rules,
+        )
+        if self.subagents:
+            parts.extra.append("# Субагенты (инструмент task)\n" + "\n".join(
+                f"- {s.name}: {s.description}" for s in self.subagents.values()))
+        if extra:
+            parts.extra.append(extra)
+        return build_system_prompt(parts)
+
+    async def _loop(self, session_id: str, user: User, run_id: str, emit, *, model: str, mode: Mode) -> RunStatus:
+        perms = self.permissions.with_mode(mode)
+        cancel = self._cancel.get(run_id) or asyncio.Event()
+        stop_continues = 0
+        seen_calls: dict[str, int] = {}
+        spec = self.spec
+        compacted_once = False
+
+        for step in range(spec.max_steps):
+            if cancel.is_set():
+                return RunStatus.CANCELLED
+            # Сообщения, присланные во время работы, — между шагами: здесь все
+            # вызовы предыдущего шага уже закрыты результатами, и сообщение
+            # пользователя не разорвёт пару «вызов — результат».
+            await self._take_inbox(session_id, run_id, emit)
+            # Лимит — перед каждым запросом к модели, после очереди входящих: если остановиться
+            # до неё, сообщения остались бы в очереди, on_idle запускал бы по ним новый прогон,
+            # тот снова упирался бы в лимит — и так по кругу.
+            if why := await self._over_budget(user):
+                await emit(Event(EventType.ERROR, {"message": why, "budget": True}))
+                return RunStatus.BUDGET
+            # Выбор пользователя по инструментам (Всегда / Спрашивать / Заблокирован) — каждый шаг:
+            # переключил в настройках посреди долгой задачи — действует со следующего вызова.
+            perms = perms.with_mode(mode, await self.store.kv_get("tool_policy", user.id) or {})
+            state = await self.store.get_state(session_id)
+            loaded = set(state.get(LOADED_KEY, []))
+            history = effective_history(await self.store.list_messages(session_id))
+            turn = await self._turn_context(user, session_id)
+            # Каждый шаг: подключил личный сервер посреди долгой задачи — инструменты есть со следующего шага.
+            # Поверх — инструменты хоста на этот разговор (TurnContext.tools, MCP с per_user).
+            base, user_mcp = await self.tools_for(user)
+            tools = self._with_turn_tools(run_id, turn.tools, base)
+            memory = await self.memory_view(user, _last_user_text(history))
+            system = await self._system_prompt(user, loaded, mode, turn.text, tools, user_mcp, memory)
+            # memory_search нужен, только когда в промпте не вся память: иначе искать там нечего,
+            # а лишний инструмент — соблазн «перепроверить» то, что и так перед глазами.
+            hidden = turn.hide_tools if memory[1] else turn.hide_tools | {"memory_search"}
+            visible = [t for t in tools.visible(loaded) if t.name not in hidden and not perms.blocked(t.name)]
+            schemas = [t.schema() for t in visible]
+            msgs = [Message.system(system), *self._prepare(history, session_id, model)]
+
+            # Сжатие: не чаще раза за шаг и только если есть что сжимать.
+            if (not compacted_once and estimate_tokens(msgs, schemas)
+                    > self.config.context_window * self.config.compact_threshold):
+                hooked = fold(await self.hooks.run(HookEvent.PRE_COMPACT, {"session_id": session_id}, self))
+                res = await compact(await self.store.list_messages(session_id), self.router,
+                                    model=self.config.compact_model, keep_user_turns=self.config.keep_user_turns,
+                                    extra_instructions=hooked.add_context or "")
+                if res is not None:
+                    compacted_once = True
+                    await self.store.append_message(
+                        session_id,
+                        Message.user(f"[Сводка предыдущей части разговора]\n{res.summary}", kind="summary",
+                                     covers_upto=res.covers_upto, hidden=True),
+                        run_id,
+                    )
+                    await emit(Event(EventType.COMPACTED, {"tokens_before": res.tokens_before,
+                                                           "covers_upto": res.covers_upto}))
+                    history = effective_history(await self.store.list_messages(session_id))
+                    msgs = [Message.system(system), *self._prepare(history, session_id, model)]
+
+            last_step = step == spec.max_steps - 1
+            if last_step:
+                msgs.append(Message.user("[Система] Лимит шагов исчерпан. Инструменты отключены: подведи итог — "
+                                         "что сделано, что не успел, что делать дальше."))
+            req = LLMRequest(
+                model=model, messages=msgs, tools=[] if last_step else schemas,
+                max_tokens=spec.max_tokens, temperature=spec.temperature, reasoning_effort=spec.reasoning_effort,
+            )
+
+            async def notice(text: str) -> None:
+                await emit(Event(EventType.NOTICE, {"message": text}))
+
+            resp = None
+            # Куски маскируются потоком: секрет, разрезанный между кусками, по отдельности ни один
+            # шаблон не узнаёт — в живом UI он мелькал, хотя в базе был скрыт (см. StreamRedactor).
+            streams = {EventType.TEXT_DELTA: StreamRedactor(self.redactor),
+                       EventType.THINKING_DELTA: StreamRedactor(self.redactor)}
+
+            async def delta(kind: EventType, text: str, *, final: bool = False, streams=streams) -> None:
+                out = streams[kind].flush() if final else streams[kind].push(text)
+                if out:
+                    await emit(Event(kind, {"text": out}))
+
+            async for ch in self.router.stream(req, on_notice=notice):
+                if cancel.is_set():
+                    break
+                if ch.kind == "text":
+                    await delta(EventType.THINKING_DELTA, "", final=True)  # рассуждение кончилось — его хвост раньше ответа
+                    await delta(EventType.TEXT_DELTA, ch.text)
+                elif ch.kind == "thinking":
+                    await delta(EventType.THINKING_DELTA, ch.text)
+                elif ch.kind == "done":
+                    resp = ch.response
+            for kind in streams:
+                await delta(kind, "", final=True)
+            if resp is None:
+                return RunStatus.CANCELLED
+
+            await emit(Event(EventType.USAGE, {**resp.usage.to_dict(), "model": resp.model, "step": step}))
+            msg = resp.message
+            if last_step:
+                msg.tool_calls = []
+            seq = await self.store.append_message(session_id, msg, run_id)
+            await emit(Event(EventType.MESSAGE, {"seq": seq, "content": msg.text,
+                                                 "tool_calls": [tc.to_openai() for tc in msg.tool_calls]}))
+
+            if not msg.tool_calls:
+                if last_step:
+                    return RunStatus.MAX_STEPS
+                hooked = fold(await self.hooks.run(HookEvent.STOP, {"session_id": session_id, "text": msg.text}, self))
+                if hooked.continue_with and stop_continues < self.config.max_stop_continues:
+                    stop_continues += 1
+                    await self.store.append_message(
+                        session_id, Message.user(hooked.continue_with, kind="hook_context", hidden=True), run_id)
+                    continue
+                if await self.store.inbox_count(session_id):
+                    continue  # пока отвечали, человек дописал — отвечаем и на это
+                return RunStatus.DONE
+
+            pending, stop = await self._execute(session_id, user, run_id, emit, msg.tool_calls, perms, seq, seen_calls,
+                                                tools)
+            if pending:
+                return RunStatus.WAITING_APPROVAL
+            if stop == "waiting_input":
+                return RunStatus.WAITING_INPUT
+            if stop == "done":
+                return RunStatus.DONE
+        return RunStatus.MAX_STEPS
+
+    async def _over_budget(self, user: User) -> str | None:
+        if self.budget is None:
+            return None
+        try:
+            return await self.budget(user)
+        except Exception:  # noqa: BLE001 — сбой учёта не должен останавливать работу
+            log.exception("budget check failed")
+            return None
+
+    def _prepare(self, history: list[tuple[int, Message]], session_id: str, model: str) -> list[Message]:
+        msgs = _for_model(history)
+        if not any(isinstance(m.content, list) for m in msgs):
+            return msgs
+        ws = self.workspace_for(session_id)
+        mid = self.router.resolve(model)
+        known = self.vision_for(mid) if self.vision_for else None
+        vision = known if known is not None else is_vision(mid, self.config.vision_models)
+        return [replace(m, content=expand_parts(m.content, ws, vision=vision)) if isinstance(m.content, list) else m
+                for m in msgs]
+
+    async def _take_inbox(self, session_id: str, run_id: str, emit) -> int:
+        items = await self.store.inbox_pop(session_id)
+        taken = 0
+        for it in items:
+            # Те же хуки, что у обычного сообщения: иначе фильтр обходился бы отправкой «на ходу».
+            hooked = fold(await self.hooks.run(HookEvent.USER_PROMPT_SUBMIT, {
+                "prompt": _plain_text(it["content"]), "session_id": session_id, "user": it.get("user")}, self))
+            if hooked.decision == Decision.DENY:
+                await emit(Event(EventType.ERROR, {"message": hooked.reason or "сообщение отклонено"}))
+                continue
+            seq = await self.store.append_message(session_id, Message.user(it["content"], steered=True), run_id)
+            if hooked.add_context:
+                await self.store.append_message(
+                    session_id, Message.user(hooked.add_context, kind="hook_context", hidden=True), run_id)
+            await emit(Event(EventType.USER_MESSAGE, {"seq": seq, "content": it["content"]}))
+            taken += 1
+        return taken
+
+    async def _execute(self, session_id, user, run_id, emit, calls: list[ToolCall], perms: Permissions,
+                       seq: int, seen: dict[str, int], tools: ToolRegistry | None = None) -> tuple[int, str | None]:
+        """Выполняет вызовы одного шага. Подряд идущие безопасные — параллельно."""
+        tools = tools if tools is not None else self.tools_in(run_id)
+        batches: list[list[ToolCall]] = []
+        for c in calls:
+            t = tools.get(c.name)
+            par = bool(t and t.parallel_ok)
+            if par and batches and all((tools.get(x.name) and tools.get(x.name).parallel_ok)
+                                       for x in batches[-1]):
+                batches[-1].append(c)
+            else:
+                batches.append([c])
+
+        pending = 0
+        stop: str | None = None
+        for batch in batches:
+            outcomes = await asyncio.gather(*(self._one(session_id, user, run_id, emit, c, perms, seq, seen, tools)
+                                              for c in batch))
+            for kind, st in outcomes:
+                pending += kind == "pending"
+                stop = stop or st
+        return pending, stop
+
+    async def _one(self, session_id, user, run_id, emit, call: ToolCall, perms: Permissions, seq: int,
+                   seen: dict[str, int], tools: ToolRegistry | None = None) -> tuple[str, str | None]:
+        tools = tools if tools is not None else self.tools_in(run_id)
+        tool = tools.get(call.name)
+        await emit(Event(EventType.TOOL_CALL, {"id": call.id, "name": call.name, "args": call.arguments,
+                                               "title": tool.title if tool else ""}))
+
+        async def done(result: ToolResult) -> tuple[str, str | None]:
+            await self._record_result(session_id, run_id, emit, call.id, call.name, result)
+            return "done", result.stop
+
+        if tool is None:
+            hint = ""
+            if any(t.name == call.name for t in tools.all()):
+                hint = " Он отложенный — сначала загрузи его через tool_search."
+            return await done(ToolResult.error(f"нет инструмента «{call.name}».{hint}"))
+        state = await self.store.get_state(session_id)
+        if tool.deferred and tool.name not in set(state.get(LOADED_KEY, [])):
+            return await done(ToolResult.error(
+                f"инструмент «{call.name}» отложенный: сначала вызови tool_search(\"select:{call.name}\")."))
+        if call.raw_arguments is not None:
+            return await done(ToolResult.error(f"аргументы — не JSON-объект: {call.raw_arguments[:300]}"))
+        try:
+            args = tool.validate(call.arguments)
+        except ToolArgsError as e:
+            return await done(ToolResult.error(f"неверные аргументы: {e}"))
+
+        ctx = self._ctx(session_id, run_id, user, emit, call.id, seq, tools)
+        hooked = fold(await self.hooks.run(HookEvent.PRE_TOOL_USE,
+                                           {"tool_name": tool.name, "args": args, "session_id": session_id}, ctx))
+        if hooked.updated_args is not None:
+            try:
+                args = tool.validate(hooked.updated_args)
+            except ToolArgsError as e:
+                return await done(ToolResult.error(f"хук передал неверные аргументы: {e}"))
+        if not tool.read_only and contains_marker(args):
+            # Модель видит маркер вместо секрета и норовит переписать файл целиком — вместе с маркером:
+            # .env или конфиг остались бы без настоящего ключа. Такой вызов не выполняется ни в каком режиме.
+            return await done(ToolResult.error(
+                f"в аргументах есть «{MARKER}…]» — это метка, а не значение: настоящий секрет от тебя скрыт. "
+                "Вызов не выполнен, чтобы не записать метку вместо секрета. Правь точечно (edit_file) строки "
+                "без секрета; если нужно вписать или перенести сам секрет — попроси об этом человека."))
+        verdict = perms.check(tool, args, ctx)
+        decision, reason = verdict.decision, verdict.reason
+        if hooked.decision == Decision.DENY:
+            decision, reason = Decision.DENY, hooked.reason or "запрещено хуком"
+        elif hooked.decision == Decision.ALLOW and decision == Decision.ASK:
+            decision = Decision.ALLOW
+        elif hooked.decision == Decision.ASK and decision == Decision.ALLOW:
+            decision, reason = Decision.ASK, hooked.reason
+
+        if decision == Decision.DENY:
+            # Было «…предложи человеку другой путь» — и модель сама шла этим путём: после отказа на
+            # `rm tmp.log` делала `mv tmp.log /tmp/…` (живой прогон, safety/deny-rule-respected).
+            # Правило по шаблону команды цель не видит, поэтому запрет на цель — словами здесь.
+            return await done(ToolResult(
+                content=f"Отказано: {reason}. Действие НЕ выполнено. Не повторяй его и не добивайся того же "
+                        "другим способом (другой командой, переносом, перезаписью): запрет — на результат, а не "
+                        "на одну команду. Скажи человеку, что запрещено; другие варианты — только предложить, "
+                        "выполнять после его согласия.", is_error=True))
+        if decision == Decision.ASK:
+            if not self.can_ask:
+                return await done(ToolResult(content="Отказано: субагент не может запросить подтверждение. "
+                                                     "Верни главному агенту, что нужно сделать.", is_error=True))
+            if tool.preview is not None:
+                # Карточку собирает хост (проверка данных, развёрнутые даты, предупреждения): его
+                # отказ или «уже есть» — ответ модели, а не карточка, которую нечем выполнить.
+                try:
+                    got = await tool.preview(args, ctx)
+                except ToolDenied as e:
+                    return await done(ToolResult(content=f"Отказано: {e}", is_error=True))
+                except Exception as e:  # noqa: BLE001
+                    log.warning("preview %s failed: %s", tool.name, e, exc_info=True)
+                    return await done(ToolResult.error(f"не удалось подготовить карточку подтверждения: {e}"))
+                if isinstance(got, ToolResult):
+                    return await done(got)
+                view = got
+            else:
+                view = tool.describe(args) if tool.describe else _default_view(args)
+            rec = await self.store.create_approval(ApprovalRec(
+                id=new_id("a_"), session_id=session_id, run_id=run_id, tool_call_id=call.id, tool_name=tool.name,
+                args=args, view=view, reason=reason))
+            await emit(Event(EventType.APPROVAL_REQUIRED, {
+                "approval_id": rec.id, "tool_call_id": call.id, "tool": tool.name, "description": tool.description,
+                "args": args, "view": view, "reason": reason, "destructive": tool.destructive}))
+            return "pending", None
+
+        sig = tool.name + json.dumps(args, sort_keys=True, ensure_ascii=False, default=str)
+        seen[sig] = seen.get(sig, 0) + 1
+        result = await self._invoke(tool, args, ctx)
+        if seen[sig] >= self.config.loop_guard:
+            result.content = (f"[Система] Это {seen[sig]}-й одинаковый вызов {tool.name} с теми же аргументами. "
+                              "Результат не изменится — смени подход или спроси человека.\n\n" + result.content)
+        if hooked.add_context:
+            result.content += f"\n\n[Контекст] {hooked.add_context}"
+        return await done(result)
+
+    async def _invoke(self, tool: Tool, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        t0 = time.monotonic()
+        try:
+            result = await tool.call(args, ctx)
+        except TimeoutError:
+            result = ToolResult.error(f"инструмент не уложился в {tool.timeout:.0f} с")
+        except ToolDenied as e:
+            result = ToolResult(content=f"Отказано: {e}", is_error=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — любая ошибка инструмента уходит модели текстом
+            log.warning("tool %s failed: %s", tool.name, e, exc_info=True)
+            result = ToolResult.error(f"{type(e).__name__}: {e}")
+        hooked = fold(await self.hooks.run(HookEvent.POST_TOOL_USE, {
+            "tool_name": tool.name, "args": args, "result": result.content, "is_error": result.is_error}, ctx))
+        if hooked.updated_result is not None:
+            result.content = hooked.updated_result
+        if hooked.add_context:
+            result.content += f"\n\n[Контекст] {hooked.add_context}"
+        # До обрезки и blob: иначе read_output отдал бы полный текст с секретом.
+        masked = self.redactor.text(result.content)
+        if masked != result.content:
+            # Пояснение — здесь, только когда секрет и правда скрыт, а не строкой в CORE_RULES: промпт
+            # остаётся одинаковым у всех прогонов (кэш), а модель узнаёт о метке ровно там, где её видит.
+            # Без пояснения write_file переписывал файл вместе с меткой и упирался в отказ.
+            masked += REDACTED_NOTE
+        result.content = masked
+        result.ui = self.redactor.deep(result.ui)
+        result.data = self.redactor.deep(result.data)
+        limit = tool.max_output_chars or self.config.max_output_chars
+        text, cut = truncate_text(result.content, limit)
+        if cut:
+            bid = await self.store.blob_put(ctx.session_id, "tool_output", result.content,
+                                            meta={"tool": tool.name, "chars": len(result.content)})
+            text += (f"\n\n[Вывод обрезан: {len(result.content)} символов. Полностью — "
+                     f"read_output(id=\"{bid}\", offset=…), или сузь запрос.]")
+            result.content = text
+        result.elapsed_ms = int((time.monotonic() - t0) * 1000)
+        return result
+
+    async def _record_result(self, session_id, run_id, emit, call_id: str, name: str, result: ToolResult) -> None:
+        # Ещё раз — для результатов мимо _invoke (отказы, ошибки аргументов с текстом модели).
+        result.content = self.redactor.text(result.content)
+        await self.store.append_message(session_id, Message.tool(call_id, name, result.content,
+                                                                 is_error=result.is_error, ui=result.ui,
+                                                                 elapsed_ms=result.elapsed_ms), run_id)
+        await emit(Event(EventType.TOOL_RESULT, {
+            "id": call_id, "name": name, "content": result.content[:4000], "is_error": result.is_error,
+            "data": _jsonable(result.data), "ui": result.ui, "elapsed_ms": result.elapsed_ms}))
+
+    async def _expire_pending(self, session_id, emit, run_id, why: str) -> None:
+        for rec in await self.store.list_approvals(session_id, status="pending"):
+            await self.store.update_approval(rec.id, status="expired", decided_at=time.time(), comment=why)
+            await self.store.append_message(session_id, Message.tool(
+                rec.tool_call_id, rec.tool_name, f"Действие не выполнено: {why}.", is_error=True), run_id)
+            if emit:
+                await emit(Event(EventType.APPROVAL_RESOLVED, {"approval_id": rec.id, "approved": False,
+                                                               "expired": True, "tool_call_id": rec.tool_call_id}))
+
+    async def _last_seq(self, session_id: str) -> int:
+        msgs = await self.store.list_messages(session_id)
+        return msgs[-1][0] if msgs else 0
+
+    async def _restore_files(self, session_id: str, seq: int) -> list[str]:
+        ws = self.workspace_for(session_id)
+        if ws is None:
+            return []
+        first: dict[str, tuple[str, dict]] = {}
+        for bid, meta in await self.store.blob_list(session_id, "file_checkpoint"):
+            if meta.get("message_seq", 0) >= seq and meta["path"] not in first:
+                first[meta["path"]] = (bid, meta)
+        restored = []
+        for path, (bid, meta) in first.items():
+            target = (ws / path).resolve()
+            if not str(target).startswith(str(ws.resolve())):
+                continue
+            if meta.get("existed"):
+                got = await self.store.blob_get(bid)
+                if got:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text(got[0], encoding="utf-8")
+            elif target.exists():
+                target.unlink()
+            restored.append(path)
+        return restored
+
+    # ── субагенты ─────────────────────────────────────────────────────
+
+    def child(self, spec: AgentSpec, tools: ToolRegistry | None = None) -> Agent:
+        """Агент-субагент: свой промпт и инструменты, общие модель, хранилище и хуки.
+
+        tools — реестр прогона родителя (с личными инструментами пользователя): без него
+        субагент general не видел бы личный MCP-сервер, которым пользуется главный агент."""
+        tools = (tools if tools is not None else self.tools).filtered(spec.tools, [*spec.deny_tools, "task"])
+        child = Agent(
+            router=self.router, store=self.store, tools=tools, spec=spec, subagents={},
+            permissions=self.permissions if spec.mode is None else self.permissions.with_mode(spec.mode),
+            hooks=self.hooks, skills=self.skills, mcp_instructions=self.mcp_instructions,
+            config=replace(self.config, auto_memory=False),
+            deps=self.deps, workspace=self._workspace, rules=self.rules, memory_scopes=self.memory_scopes,
+            tracers=self.tracers, can_ask=False, budget=self.budget, redactor=self.redactor, index=self.index,
+        )
+        child.context_providers = self.context_providers
+        child._tool_filter = (list(spec.tools) if spec.tools is not None else None, [*spec.deny_tools, "task"])
+        child.vision_for = self.vision_for
+        return child
+
+
+def _last_user_text(history: list[tuple[int, Message]]) -> str:
+    """Последняя реплика человека — по ней отбирается память. Сводки и служебное не в счёт."""
+    for _, m in reversed(history):
+        if m.role == "user" and not m.meta.get("kind") and not m.meta.get("hidden"):
+            return m.text[:2000]
+    return ""
+
+
+def _for_model(history: list[tuple[int, Message]]) -> list[Message]:
+    """История для запроса: без служебных записей и с «заплатками» на оборванные вызовы.
+
+    Если процесс упал между вызовом инструмента и записью результата, в
+    истории остаётся assistant с tool_calls без ответа — и провайдер отвергает
+    весь запрос. Заплатка в запросе (в базе история не трогается) это лечит.
+    """
+    out: list[Message] = []
+    answered = {m.tool_call_id for _, m in history if m.role == "tool"}
+    for _, m in history:
+        if m.meta.get("kind") == "event":
+            continue
+        clean = replace(m, meta={})
+        out.append(clean)
+        if m.role == "assistant":
+            for tc in m.tool_calls:
+                if tc.id not in answered:
+                    out.append(Message.tool(tc.id, tc.name, "Результат отсутствует: вызов был прерван."))
+    return _reorder_tool_results(out)
+
+
+def _reorder_tool_results(msgs: list[Message]) -> list[Message]:
+    """Результаты инструментов должны идти сразу за своим assistant-сообщением.
+
+    Результат подтверждённого действия записывается позже (когда человек
+    нажал кнопку), и между вызовом и результатом могли оказаться другие
+    записи. Переставляем результаты к своим вызовам.
+    """
+    by_call: dict[str, Message] = {}
+    for m in msgs:
+        if m.role == "tool" and m.tool_call_id:
+            by_call.setdefault(m.tool_call_id, m)
+    out: list[Message] = []
+    placed: set[str] = set()
+    for m in msgs:
+        if m.role == "tool":
+            continue
+        out.append(m)
+        if m.role == "assistant":
+            for tc in m.tool_calls:
+                r = by_call.get(tc.id)
+                if r is not None and tc.id not in placed:
+                    out.append(r)
+                    placed.add(tc.id)
+    return out
+
+
+def _default_view(args: dict[str, Any]) -> list[list[str]]:
+    rows = []
+    for k, v in args.items():
+        s = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+        rows.append([k, s if len(s) < 500 else s[:500] + "…"])
+    return rows
+
+
+def _jsonable(v: Any) -> Any:
+    try:
+        json.dumps(v)
+        return v
+    except (TypeError, ValueError):
+        return json.loads(json.dumps(v, default=str))
+
+
+def _plain_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+    return json.dumps(content, ensure_ascii=False)

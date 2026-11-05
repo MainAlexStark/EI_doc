@@ -1,0 +1,1099 @@
+"""HTTP API агента и веб-чат.
+
+Прогоны идут в фоне (RunManager), клиент следит за ними по SSE
+(/api/sessions/{id}/events) или опросом (/api/sessions/{id}/poll) — второй
+вариант для хостов, где прокси не держит долгие соединения.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import html
+import json
+import re
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, Literal
+
+import httpx
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from agentkit import replay as rp
+from agentkit.attachments import UPLOADS, save_upload
+from agentkit.events import EventType
+from agentkit.mcp import MCPAuthRequired, MCPClient, MCPServerConfig
+from agentkit.memory_auto import PREFS_NS as MEMORY_PREFS_NS
+from agentkit.memory_auto import enabled_for as auto_memory_enabled
+from agentkit.oauth import OAuthError, OAuthOptions
+from agentkit.permissions import Mode
+from agentkit.runs import Busy
+from agentkit.scheduler import next_run, validate_cron
+from agentkit.server.auth import require_admin
+from agentkit.server.platform_api import register as register_platform
+from agentkit.server.preview import register as register_preview
+from agentkit.server.service import MCP_NAME, AgentService, BudgetExceeded
+from agentkit.skills import skill_problem
+from agentkit.store.base import ScheduleRec
+from agentkit.tools.base import User
+
+STATIC = Path(__file__).parent / "static"
+
+
+class NewSession(BaseModel):
+    title: str = ""
+    model: str | None = None
+    mode: str | None = None
+    project_id: str | None = None
+
+
+class ReplayEval(BaseModel):
+    seq: int | None = None
+    run_id: str | None = None
+    judge: str = ""  # критерий живого кейса — каким должен быть правильный ответ
+    case_id: str = ""
+
+
+class PatchSession(BaseModel):
+    title: str | None = None
+    model: str | None = None
+    mode: str | None = None
+    project_id: str | None = None  # перенос: id проекта или null — «без проекта» (различаем по model_fields_set)
+    pinned: bool | None = None
+    archived: bool | None = None
+
+
+class SendMessage(BaseModel):
+    text: str = ""
+    files: list[dict[str, Any]] = []  # то, что вернул POST /files
+    model: str | None = None
+    mode: str | None = None
+
+
+class Decide(BaseModel):
+    approve: bool
+    comment: str = ""
+    args: dict[str, Any] | None = None
+
+
+class Rewind(BaseModel):
+    seq: int
+
+
+class ProfileIn(BaseModel):
+    name: str = ""  # полное имя
+    call_me: str = ""  # как обращаться
+    work: str = ""  # чем занимается
+    instructions: str = ""  # пожелания к ответам — уходят в системный промпт
+
+
+class MemoryPrefs(BaseModel):
+    auto: bool  # фоновая память: запоминать факты из разговоров без «запомни»
+
+
+class MemoryIn(BaseModel):
+    text: str
+    scope: str = "user"  # user | global
+
+
+class MemoryPatch(BaseModel):
+    text: str
+
+
+class ModelPrefs(BaseModel):
+    favorites: list[str] | None = None
+    only_favorites: bool | None = None
+    default: str | None = None
+
+
+class ModelPolicy(BaseModel):
+    ids: list[str] | None = None  # None — снять ограничение (действует AGENT_MODELS_ALLOW)
+
+
+class ScheduleIn(BaseModel):
+    id: str | None = None  # есть — правка существующей задачи
+    name: str
+    cron: str
+    prompt: str
+    enabled: bool = True
+    keep_session: bool = False
+
+
+class SchedulePatch(BaseModel):
+    enabled: bool
+
+
+class MCPServerIn(BaseModel):
+    name: str
+    url: str
+    auth: Literal["none", "token", "oauth"] = "none"
+    token: str | None = None  # None — оставить прежний (в интерфейс токен не отдаётся)
+    headers: dict[str, str] | None = None
+    enabled: bool = True
+    deferred: bool | None = None
+    original_name: str | None = None  # правка существующего (в том числе переименование)
+    personal: bool = False  # личный сервер: виден и работает только у того, кто добавил
+    per_user: bool = False  # общий сервер с OAuth: у каждого пользователя свой вход
+
+
+class ToolPolicyIn(BaseModel):
+    # {имя инструмента: allow | ask | deny | null}; null — вернуть как задано по умолчанию.
+    tools: dict[str, Literal["allow", "ask", "deny"] | None]
+
+
+class SkillIn(BaseModel):
+    name: str
+    description: str
+    body: str
+    original_name: str | None = None  # правка (в том числе переименование)
+
+
+class SkillToggle(BaseModel):
+    enabled: bool
+
+
+class MCPTestIn(BaseModel):
+    url: str
+    auth: Literal["none", "token", "oauth"] = "none"
+    token: str | None = None
+    headers: dict[str, str] | None = None
+    name: str | None = None  # для правки: взять сохранённый токен
+    personal: bool = False
+
+
+class MCPToggle(BaseModel):
+    enabled: bool
+
+
+class HeadlessRun(BaseModel):
+    text: str
+    session_id: str | None = None
+    model: str | None = None
+    mode: str | None = None
+
+
+def build_app(svc: AgentService, *, extra_routers: list[APIRouter] | None = None,
+              static_dir: Path | None = None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        await svc.start()
+        yield
+        await svc.stop()
+
+    app = FastAPI(title=svc.settings.name, lifespan=lifespan)
+    if svc.settings.allowed_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in svc.settings.allowed_origins.split(",")],
+                           allow_methods=["*"], allow_headers=["*"])
+    auth = svc.auth
+    api = APIRouter(prefix="/api")
+
+    async def own_session(session_id: str, user: User):
+        s = await svc.store.get_session(session_id)
+        if s is None or (s.user_id != user.id and not user.has_role("admin")):
+            raise HTTPException(404, "нет такой сессии")
+        return s
+
+    @app.get("/healthz")
+    async def healthz():
+        return {"ok": True, "agent": svc.settings.name, "tools": len(svc.registry or [])}
+
+    @api.get("/me")
+    async def me(user: User = Depends(auth)):
+        prof = await svc.store.kv_get("profile", user.id) or {}
+        return {"id": user.id, "name": prof.get("name") or user.name, "call_me": prof.get("call_me", ""),
+                "roles": user.roles}
+
+    @api.get("/profile")
+    async def profile(user: User = Depends(auth)):
+        return {"name": user.name, "call_me": "", "work": "", "instructions": "",
+                **(await svc.store.kv_get("profile", user.id) or {})}
+
+    @api.put("/profile")
+    async def save_profile(body: ProfileIn, user: User = Depends(auth)):
+        data = {k: v.strip()[:4000] for k, v in body.model_dump().items()}
+        await svc.store.kv_set("profile", user.id, data)
+        return data
+
+    @api.get("/plan")
+    async def plan(user: User = Depends(auth)):
+        return {**await svc.plan_info(user), "blocked": await svc.over_budget(user)}
+
+    @api.get("/config")
+    async def config(user: User = Depends(auth)):
+        s = svc.settings
+        prefs = await svc.model_prefs(user)
+        policy = await svc.model_policy()
+        favs = [m for m in prefs["favorites"] if svc.model_allowed(m, policy)]
+        return {"name": s.name, "models": favs or [s.model_main],
+                "default_model": prefs["default"] if svc.model_allowed(prefs["default"], policy) else s.model_main,
+                # В выборе — три режима, как у Claude: спрашивать / автоматически / без вопросов.
+                # plan, readonly, accept_edits остаются в ядре — для субагентов и хост-приложений.
+                "modes": [m.value for m in (Mode.DEFAULT, Mode.AUTO, Mode.BYPASS)
+                          if m != Mode.BYPASS or user.has_role("admin")],
+                "default_mode": s.default_mode, "is_admin": user.has_role("admin"),
+                "description": svc.domain.description or s.description,
+                "suggestions": svc.domain.suggestions or [x.strip() for x in s.suggestions.split("|") if x.strip()],
+                "titles": {t.name: t.title for t in (await svc.registry_for(user)).all() if t.title},
+                "help_url": s.help_url or None, "plan_name": s.plan_name or None}
+
+    # ── сессии ───────────────────────────────────────────────────────
+    async def project_names(user: User) -> dict[str, str]:
+        if svc.projects is None:
+            return {}
+        return {p.id: p.name for p, _ in await svc.store.project_list_for(user.id)}
+
+    @api.get("/sessions")
+    async def list_sessions(project_id: str | None = None, archived: bool = False, user: User = Depends(auth)):
+        """Без архива по умолчанию; ?archived=true — только архив. Закреплённые — первыми."""
+        items = await svc.store.list_sessions(user.id, limit=100, project_id=project_id, archived=archived)
+        names = await project_names(user)
+        return [{"id": s.id, "title": s.title or "Новый разговор", "updated_at": s.updated_at,
+                 "project_id": s.project_id if s.project_id in names else None, "project": names.get(s.project_id or ""),
+                 "pinned": s.pinned_at is not None, "archived": s.archived_at is not None,
+                 "running": await svc.runs.active_run(s.id) is not None} for s in items]
+
+    @api.post("/sessions")
+    async def create_session(body: NewSession, user: User = Depends(auth)):
+        state = {k: v for k, v in {"model": await svc.check_model(body.model),
+                                   "mode": _check_mode(body.mode, user)}.items() if v}
+        if body.project_id:
+            await app.state.project_access(body.project_id, user)  # участник проекта — хотя бы читатель
+        s = await svc.store.create_session(user.id, title=body.title, agent=svc.agent.spec.name, state=state,
+                                           project_id=body.project_id or None)
+        return {"id": s.id}
+
+    @api.get("/sessions/{session_id}")
+    async def get_session(session_id: str, user: User = Depends(auth)):
+        s = await own_session(session_id, user)
+        msgs = await svc.store.list_messages(session_id)
+        times = await svc.store.message_times(session_id)
+        pending = await svc.store.list_approvals(session_id, status="pending")
+        reg = await svc.registry_for(user) if pending else svc.registry
+        project = None
+        if s.project_id and svc.projects is not None:
+            p, role = await svc.store.project_role(s.project_id, user.id)
+            project = {"id": p.id, "name": p.name, "role": role} if p and role else None
+        return {
+            "id": s.id, "title": s.title, "state": s.state, "project": project,
+            "messages": [{"seq": seq, "ts": times.get(seq), **m.to_dict()} for seq, m in msgs],
+            "approvals": [{**a.__dict__, "destructive": bool((t := reg.get(a.tool_name)) and t.destructive),
+                           "title": t.title if t else ""} for a in pending],
+            "running_run": await svc.runs.active_run(session_id),
+            "queued": await svc.store.inbox_count(session_id),
+            "last_seq": await svc.store.last_event_seq(session_id),
+            "runs": [r.__dict__ for r in await svc.store.list_runs(session_id, limit=20)],
+        }
+
+    @api.patch("/sessions/{session_id}")
+    async def patch_session(session_id: str, body: PatchSession, user: User = Depends(auth)):
+        s = await own_session(session_id, user)
+        if body.title is not None:
+            await svc.store.update_session(session_id, title=body.title)
+        # Закрепление, архив и перенос — не активность в разговоре: updated_at не трогаем,
+        # иначе разговор прыгал бы в «Сегодня» от одного клика по меню.
+        flags: dict[str, Any] = {}
+        if body.pinned is not None:
+            flags["pinned_at"] = time.time() if body.pinned else None
+        if body.archived is not None:
+            flags["archived_at"] = time.time() if body.archived else None
+        if "project_id" in body.model_fields_set and (body.project_id or None) != s.project_id:
+            if await svc.runs.active_run(session_id):
+                raise HTTPException(409, "сначала остановите прогон — проект меняет контекст агента")
+            if body.project_id:
+                await app.state.project_access(body.project_id, user)  # как при создании: хотя бы читатель
+            flags["project_id"] = body.project_id or None
+        if flags:
+            await svc.store.update_session(session_id, updated_at=s.updated_at, **flags)
+        if body.model is not None or body.mode is not None:
+            state = dict(s.state or {})
+            if body.model is not None:
+                state["model"] = await svc.check_model(body.model)
+            if body.mode is not None:
+                state["mode"] = _check_mode(body.mode, user)
+            await svc.store.set_state(session_id, state)
+        return {"ok": True}
+
+    @api.delete("/sessions/{session_id}")
+    async def delete_session(session_id: str, user: User = Depends(auth)):
+        await own_session(session_id, user)
+        if await svc.runs.active_run(session_id):
+            raise HTTPException(409, "сначала остановите прогон")
+        await svc.store.delete_session(session_id)
+        return {"ok": True}
+
+    @api.post("/sessions/{session_id}/messages")
+    async def send(session_id: str, body: SendMessage, user: User = Depends(auth)):
+        """Если агент занят — сообщение встаёт в очередь, и он подхватит его между шагами (queued: true)."""
+        s = await own_session(session_id, user)
+        if s.archived_at is not None:  # написали в архивный — он снова живой, иначе пропал бы из списка
+            await svc.store.update_session(session_id, archived_at=None)
+        mode = _check_mode(body.mode, user)
+        model = await svc.check_model(body.model)
+        content = _content(session_id, body)
+        if not content:
+            raise HTTPException(400, "пустое сообщение")
+        await svc.check_budget(user)
+        return await svc.send(session_id, user, content, model=model, mode=mode)
+
+    @api.post("/sessions/{session_id}/cancel")
+    async def cancel(session_id: str, user: User = Depends(auth)):
+        await own_session(session_id, user)
+        return {"ok": await svc.runs.cancel(session_id)}
+
+    @api.post("/sessions/{session_id}/rewind")
+    async def rewind(session_id: str, body: Rewind, user: User = Depends(auth)):
+        await own_session(session_id, user)
+        if await svc.runs.active_run(session_id):
+            raise HTTPException(409, "сначала остановите прогон")
+        return await svc.agent.rewind(session_id, body.seq)
+
+    @api.get("/sessions/{session_id}/events")
+    async def events(session_id: str, after: int = 0, user: User = Depends(auth)):
+        await own_session(session_id, user)
+
+        async def gen():
+            yield ": ok\n\n"
+            async for ev in svc.runs.subscribe(session_id, after):
+                yield f"id: {ev.get('seq', 0)}\nevent: {ev['type']}\ndata: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
+            yield "event: idle\ndata: {}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @api.get("/sessions/{session_id}/poll")
+    async def poll(session_id: str, after: int = 0, user: User = Depends(auth)):
+        await own_session(session_id, user)
+        evs = await svc.store.list_events(session_id=session_id, after_seq=after, limit=500)
+        return {"events": [e.to_dict() for e in evs], "running": await svc.runs.active_run(session_id) is not None}
+
+    # ── подтверждения ────────────────────────────────────────────────
+    @api.post("/approvals/{approval_id}")
+    async def decide(approval_id: str, body: Decide, user: User = Depends(auth)):
+        rec = await svc.store.get_approval(approval_id)
+        if rec is None:
+            raise HTTPException(404, "нет такого подтверждения")
+        await own_session(rec.session_id, user)
+        if rec.status != "pending":
+            raise HTTPException(409, f"уже решено: {rec.status}")
+        try:
+            run_id = await svc.runs.start(
+                rec.session_id,
+                lambda: svc.agent.resolve_approval(approval_id, user, approve=body.approve, comment=body.comment,
+                                                   edited_args=body.args),
+                cancel=svc.agent.cancel)
+        except Busy:
+            raise HTTPException(409, "агент ещё работает в этом разговоре") from None
+        return {"run_id": run_id}
+
+    # ── синхронный запуск для интеграций ─────────────────────────────
+    @api.post("/run")
+    async def headless(body: HeadlessRun, user: User = Depends(auth)):
+        """Для других сервисов: отправить задачу и дождаться итога одним запросом."""
+        sid = body.session_id
+        if sid:
+            await own_session(sid, user)
+        else:
+            sid = (await svc.store.create_session(user.id, title=body.text[:80])).id
+        mode = _check_mode(body.mode, user)
+        model = await svc.check_model(body.model)
+        await svc.check_budget(user)
+        try:
+            # Через RunManager, а не напрямую: прогон виден в веб-чате, его можно
+            # остановить, и второй запрос в ту же сессию получит 409, а не гонку.
+            run_id = await svc.runs.start(
+                sid, lambda: svc.agent.run(sid, user, body.text, model=model, mode=mode, trigger="api"),
+                cancel=svc.agent.cancel)
+        except Busy:
+            raise HTTPException(409, "в сессии уже идёт прогон") from None
+        await svc.runs.wait(sid)
+        run = await svc.store.get_run(run_id)
+        evs = await svc.store.list_events(session_id=sid, limit=100_000)
+        text = next((e.data.get("content") for e in reversed(evs)
+                     if e.run_id == run_id and e.type == EventType.MESSAGE and not e.agent and e.data.get("content")), "")
+        pending = await svc.store.list_approvals(sid, status="pending")
+        return {"session_id": sid, "run_id": run_id, "status": run.status if run else "unknown", "text": text,
+                "usage": run.usage if run else {}, "approvals": [a.__dict__ for a in pending]}
+
+    # ── память ───────────────────────────────────────────────────────
+    @api.get("/memory")
+    async def memory_list(user: User = Depends(auth)):
+        items = await svc.store.memory_list(["global", f"user:{user.id}"])
+        return [m.__dict__ for m in items]
+
+    @api.post("/memory")
+    async def memory_add(body: MemoryIn, user: User = Depends(auth)):
+        if body.scope == "global":
+            require_admin(user)
+        rec = await svc.store.memory_add("global" if body.scope == "global" else f"user:{user.id}", body.text,
+                                         created_by=user.id)
+        return rec.__dict__
+
+    @api.get("/memory/prefs")
+    async def memory_prefs(user: User = Depends(auth)):
+        # available=false — фоновая память выключена для всех (AGENT_AUTO_MEMORY), переключатель не нужен.
+        return {"auto": await auto_memory_enabled(svc.store, user.id), "available": svc.settings.auto_memory}
+
+    @api.put("/memory/prefs")
+    async def memory_prefs_save(body: MemoryPrefs, user: User = Depends(auth)):
+        await svc.store.kv_set(MEMORY_PREFS_NS, user.id, {"auto": body.auto})
+        return {"auto": body.auto, "available": svc.settings.auto_memory}
+
+    async def own_memory(memory_id: str, user: User) -> None:
+        """Своё правит каждый, общее («для всех») — только админ."""
+        items = {m.id: m for m in await svc.store.memory_list(["global", f"user:{user.id}"])}
+        if memory_id not in items:
+            raise HTTPException(404, "нет такой записи")
+        if items[memory_id].scope != f"user:{user.id}":
+            require_admin(user)
+
+    @api.patch("/memory/{memory_id}")
+    async def memory_edit(memory_id: str, body: MemoryPatch, user: User = Depends(auth)):
+        await own_memory(memory_id, user)
+        if not body.text.strip():
+            raise HTTPException(400, "пустая запись — удалите её вместо этого")
+        await svc.store.memory_update(memory_id, body.text.strip())
+        return {"ok": True}
+
+    @api.delete("/memory/{memory_id}")
+    async def memory_delete(memory_id: str, user: User = Depends(auth)):
+        await own_memory(memory_id, user)
+        return {"ok": await svc.store.memory_delete(memory_id)}
+
+    # ── инструменты, MCP, расход ─────────────────────────────────────
+    @api.get("/tools")
+    async def tools(user: User = Depends(auth)):
+        custom = await svc.mcp_custom()
+        admin = user.has_role("admin")
+        entry = await svc.user_mcp(user)
+        mine = entry.manager.status if entry and entry.manager else {}
+        shared = svc.shared_mcp_names()
+        views = [_mcp_view(c, (mine if c.personal_login else svc.mcp.status).get(c.name), custom.get(c.name), admin,
+                           c.name not in svc.mcp_file_names) for c in svc.mcp_all]
+        if svc.settings.user_mcp:
+            for name, d in (await svc.mcp_personal(user.id)).items():
+                views.append(_personal_view(svc.personal_config(name, d), mine.get(name), d, name in shared))
+        return {
+            "tools": [{"name": t.name, "title": t.title, "description": t.description.split("\n")[0], "read_only": t.read_only,
+                       "destructive": t.destructive, "deferred": t.deferred, "group": t.group, "source": t.source}
+                      for t in (await svc.registry_for(user)).all()],
+            "mcp": views,
+            "user_mcp": svc.settings.user_mcp, "user_mcp_max": svc.settings.user_mcp_max,
+            "skills": [{"name": k.name, "description": k.description}
+                       for k in (await svc.agent.skills_for(user)).skills.values()],
+            "policy": await svc.store.kv_get("tool_policy", user.id) or {},
+        }
+
+    @api.put("/tools/policy")
+    async def tools_policy(body: ToolPolicyIn, user: User = Depends(auth)):
+        """Свой выбор по инструментам: «Всегда разрешать», «Спрашивать», «Заблокирован».
+
+        У каждого пользователя свой: правила сервиса (AGENT_DENY_RULES/ASK_RULES) всё равно сильнее."""
+        known = {t.name for t in (await svc.registry_for(user)).all()}
+        policy = dict(await svc.store.kv_get("tool_policy", user.id) or {})
+        for name, v in body.tools.items():
+            if v is None:
+                policy.pop(name, None)
+            elif name in known or name in policy:
+                policy[name] = v
+            else:
+                raise HTTPException(404, f"нет инструмента {name}")
+        await svc.store.kv_set("tool_policy", user.id, policy)
+        return {"ok": True, "policy": policy}
+
+    # ── навыки ───────────────────────────────────────────────────────
+    async def _skills_doc(user: User) -> dict:
+        doc = await svc.store.kv_get("skills", user.id) or {}
+        return {"custom": dict(doc.get("custom") or {}), "off": list(doc.get("off") or [])}
+
+    @api.get("/skills")
+    async def skills_list(user: User = Depends(auth)):
+        """Навыки пользователя: из папки приложения (только чтение) и свои — с текстом для редактора."""
+        doc = await _skills_doc(user)
+        app_skills = svc.agent.skills.skills if svc.agent.skills else {}
+        off = set(doc["off"])
+        out = [{"name": k.name, "description": k.description, "body": k.body, "files": k.files, "source": "app",
+                "enabled": k.name not in off} for k in app_skills.values()]
+        out += [{"name": n, "description": d.get("description", ""), "body": d.get("body", ""), "files": [],
+                 "source": "user", "enabled": n not in off, "updated_at": d.get("updated_at")}
+                for n, d in sorted(doc["custom"].items()) if n not in app_skills]
+        return {"skills": out, "dir": str(svc.settings.skills_dir)}
+
+    @api.post("/skills")
+    async def skills_save(body: SkillIn, user: User = Depends(auth)):
+        name = body.name.strip()
+        if problem := skill_problem(name, body.description, body.body):
+            raise HTTPException(400, problem)
+        doc = await _skills_doc(user)
+        app_skills = svc.agent.skills.skills if svc.agent.skills else {}
+        old = body.original_name
+        if name in app_skills:
+            raise HTTPException(409, f"навык {name} уже есть в папке приложения — выберите другое имя")
+        if name in doc["custom"] and name != old:
+            raise HTTPException(409, f"навык {name} уже есть")
+        if old and old not in doc["custom"]:
+            raise HTTPException(404, f"нет своего навыка {old}")
+        prev = doc["custom"].pop(old, {}) if old else {}
+        doc["custom"][name] = {"description": body.description.strip(), "body": body.body.strip(),
+                               "created_at": prev.get("created_at") or time.time(), "updated_at": time.time()}
+        if old and old != name and old in doc["off"]:
+            doc["off"] = [n if n != old else name for n in doc["off"]]
+        await svc.store.kv_set("skills", user.id, doc)
+        return {"ok": True}
+
+    @api.patch("/skills/{name}")
+    async def skills_toggle(name: str, body: SkillToggle, user: User = Depends(auth)):
+        doc = await _skills_doc(user)
+        app_skills = svc.agent.skills.skills if svc.agent.skills else {}
+        if name not in app_skills and name not in doc["custom"]:
+            raise HTTPException(404, f"нет навыка {name}")
+        off = [n for n in doc["off"] if n != name]
+        if not body.enabled:
+            off.append(name)
+        doc["off"] = off
+        await svc.store.kv_set("skills", user.id, doc)
+        return {"ok": True}
+
+    @api.delete("/skills/{name}")
+    async def skills_delete(name: str, user: User = Depends(auth)):
+        doc = await _skills_doc(user)
+        if name not in doc["custom"]:
+            raise HTTPException(404 if not (svc.agent.skills and name in svc.agent.skills.skills) else 409,
+                                "навыки из папки приложения удаляются из репозитория; здесь их можно выключить")
+        doc["custom"].pop(name)
+        doc["off"] = [n for n in doc["off"] if n != name]
+        await svc.store.kv_set("skills", user.id, doc)
+        return {"ok": True}
+
+    # ── модели ───────────────────────────────────────────────────────
+    @api.get("/models")
+    async def models(refresh: bool = False, user: User = Depends(auth)):
+        """Каталог моделей. Обычный пользователь видит только разрешённые; админ — все, с отметкой."""
+        admin = user.has_role("admin")
+        await svc.catalog.refresh(force=refresh and admin)
+        policy = await svc.model_policy()
+        items = []
+        for m in svc.catalog.models():
+            ok = svc.model_allowed(m.id, policy)
+            if ok or admin:
+                items.append({**m.to_dict(), "allowed": ok})
+        prefs = await svc.model_prefs(user)
+        out: dict[str, Any] = {"models": items, **prefs, "main": svc.settings.model_main,
+                               "fetched_at": svc.catalog.fetched_at}
+        if admin:
+            out["policy"] = {"custom": policy is not None, "patterns": svc.settings.models_allow,
+                             "errors": svc.catalog.errors}
+        return out
+
+    @api.put("/models/prefs")
+    async def models_prefs(body: ModelPrefs, user: User = Depends(auth)):
+        cur = await svc.store.kv_get("model_prefs", user.id) or {}
+        if body.favorites is not None:
+            cur["favorites"] = list(dict.fromkeys(body.favorites))[:200]
+        if body.only_favorites is not None:
+            cur["only_favorites"] = body.only_favorites
+        if body.default is not None:
+            cur["default"] = await svc.check_model(body.default) or ""
+        await svc.store.kv_set("model_prefs", user.id, cur)
+        return await svc.model_prefs(user)
+
+    @api.put("/models/policy")
+    async def models_policy(body: ModelPolicy, user: User = Depends(auth)):
+        require_admin(user)
+        if body.ids is None:
+            await svc.store.kv_delete("config", "models_allowed")
+        else:
+            await svc.store.kv_set("config", "models_allowed", {"ids": sorted(set(body.ids))})
+        return {"ok": True}
+
+    @api.post("/reload")
+    async def reload(user: User = Depends(auth)):
+        # Админ перечитывает всё (mcp.json, навыки); остальные — свои личные серверы и входы.
+        if user.has_role("admin"):
+            await svc.reload()
+        else:
+            await svc.reload_user(user.id)
+        return {"ok": True, "tools": len(await svc.registry_for(user))}
+
+    @api.get("/usage")
+    async def usage(days: int = 30, user: User = Depends(auth)):
+        since = time.time() - days * 86400
+        return await svc.store.usage_summary(user_id=None if user.has_role("admin") else user.id, since=since)
+
+    # ── replay: ход прогона и «в eval» (только admin) ────────────────
+    # Ход виден по журналу ak_events — то же, что `agentkit replay`, но из ответа в чате: разбирать
+    # «почему агент так сделал» не нужно лезть на сервер за базой. Только admin: в журнале —
+    # полные аргументы и результаты инструментов, в т. ч. чужих разговоров.
+    async def _turn(session_id: str, user: User, seq: int | None, run_id: str | None):
+        require_admin(user)
+        await own_session(session_id, user)
+        evs, msgs = await rp.from_store(svc.store, session_id)
+        turn = rp.turn_of(rp.runs(evs), run_id=run_id, seq=seq)
+        if not turn:
+            raise HTTPException(404, "в журнале нет прогона с этим ответом — возможно, история сжата или откачена")
+        return turn, msgs
+
+    @api.get("/sessions/{session_id}/replay")
+    async def replay_view(session_id: str, seq: int | None = None, run_id: str | None = None,
+                          user: User = Depends(auth)):
+        turn, _ = await _turn(session_id, user, seq, run_id)
+        return {"session_id": session_id, "runs": rp.structured(turn), "text": rp.timeline(turn, full=True)}
+
+    @api.post("/sessions/{session_id}/replay/eval")
+    async def replay_eval(session_id: str, body: ReplayEval, user: User = Depends(auth)):
+        turn, msgs = await _turn(session_id, user, body.seq, body.run_id)
+        ws = svc.agent.workspace_for(session_id) if svc.agent else None
+        try:
+            cases = rp.to_cases(turn, case_id=body.case_id or None, judge=body.judge or None, messages=msgs,
+                                workspace=ws if ws and ws.is_dir() else None)
+        except SystemExit as e:  # to_cases пишет для CLI: ошибка — текст для человека
+            raise HTTPException(400, str(e)) from None
+        name = f"{cases[0]['id'].removesuffix('-wiring')}.yaml"
+        return {"cases": cases, "yaml": rp.dump_cases(cases, f"{svc.settings.name}, разговор {session_id}"),
+                "filename": name}
+
+    # ── расписание ───────────────────────────────────────────────────
+    @api.get("/schedules")
+    async def schedules(user: User = Depends(auth)):
+        return [s.__dict__ for s in await svc.store.schedule_list(user_id=None if user.has_role("admin") else user.id)]
+
+    async def own_schedule(schedule_id: str, user: User) -> ScheduleRec:
+        s = {x.id: x for x in await svc.store.schedule_list()}.get(schedule_id)
+        if s is None or (s.user_id != user.id and not user.has_role("admin")):
+            raise HTTPException(404, "нет такого расписания")
+        return s
+
+    @api.get("/schedules/preview")
+    async def schedule_preview(cron: str, user: User = Depends(auth)):
+        """Ближайшие запуски — чтобы человек видел, что именно он настроил, до сохранения."""
+        if not validate_cron(cron):
+            return {"ok": False, "next": []}
+        out, t = [], time.time()
+        for _ in range(3):
+            t = next_run(cron, svc.settings.tz, t)
+            out.append(t)
+        return {"ok": True, "next": out}
+
+    @api.post("/schedules")
+    async def add_schedule(body: ScheduleIn, user: User = Depends(auth)):
+        if not body.name.strip() or not body.prompt.strip():
+            raise HTTPException(400, "нужны название и задание для агента")
+        if not validate_cron(body.cron):
+            raise HTTPException(400, "неверное cron-выражение (5 полей: минута час день месяц день_недели)")
+        from agentkit.messages import new_id
+
+        old = await own_schedule(body.id, user) if body.id else None
+        sid = old.session_id if old else None
+        if body.keep_session and not sid:
+            sid = (await svc.store.create_session(user.id, title=f"⏰ {body.name}")).id
+        elif not body.keep_session:
+            sid = None
+        rec = ScheduleRec(id=old.id if old else new_id("sc_"), name=body.name.strip(), cron=body.cron.strip(),
+                          prompt=body.prompt.strip(), user_id=old.user_id if old else user.id, enabled=body.enabled,
+                          session_id=sid, last_run_at=old.last_run_at if old else None,
+                          next_run_at=next_run(body.cron, svc.settings.tz))
+        await svc.store.schedule_upsert(rec)
+        return rec.__dict__
+
+    @api.patch("/schedules/{schedule_id}")
+    async def patch_schedule(schedule_id: str, body: SchedulePatch, user: User = Depends(auth)):
+        s = await own_schedule(schedule_id, user)
+        s.enabled = body.enabled
+        # После паузы считаем от «сейчас»: иначе включённая задача сразу сработала бы за пропущенное.
+        s.next_run_at = next_run(s.cron, svc.settings.tz) if body.enabled else s.next_run_at
+        await svc.store.schedule_upsert(s)
+        return s.__dict__
+
+    @api.post("/schedules/{schedule_id}/run")
+    async def run_schedule(schedule_id: str, user: User = Depends(auth)):
+        s = await own_schedule(schedule_id, user)
+        if not await svc.scheduler.run_now(s):
+            raise HTTPException(409, "задача уже выполняется")
+        return {"ok": True}
+
+    @api.delete("/schedules/{schedule_id}")
+    async def del_schedule(schedule_id: str, user: User = Depends(auth)):
+        await own_schedule(schedule_id, user)
+        await svc.store.schedule_delete(schedule_id)
+        return {"ok": True}
+
+    # ── файлы ────────────────────────────────────────────────────────
+    def _workspace(session_id: str) -> Path:
+        ws = svc.agent.workspace_for(session_id)
+        if ws is None:
+            raise HTTPException(400, "у агента нет рабочей папки (AGENT_ENABLE_FILES=false)")
+        return ws
+
+    def _content(session_id: str, body: SendMessage) -> Any:
+        if not body.files:
+            return body.text.strip()
+        ws = _workspace(session_id)
+        parts: list[dict[str, Any]] = [{"type": "text", "text": body.text}] if body.text.strip() else []
+        for f in body.files:
+            path = str(f.get("path", ""))
+            target = (ws / path).resolve()
+            # Ссылку присылает клиент — проверяем, что это действительно загруженный файл этой сессии.
+            if not path.startswith(UPLOADS + "/") or ws.resolve() not in target.parents or not target.is_file():
+                raise HTTPException(400, f"нет загруженного файла {path}")
+            parts.append({k: f[k] for k in ("type", "path", "name", "kind", "size", "mime") if k in f} | {"type": "file"})
+        return parts
+
+    @api.post("/sessions/{session_id}/files")
+    async def upload(session_id: str, file: UploadFile, user: User = Depends(auth)):
+        await own_session(session_id, user)
+        data = await file.read(svc.settings.max_upload_mb * 1024 * 1024 + 1)
+        if len(data) > svc.settings.max_upload_mb * 1024 * 1024:
+            raise HTTPException(413, f"файл больше {svc.settings.max_upload_mb} МБ")
+        return save_upload(_workspace(session_id), file.filename or "file", data, file.content_type or "")
+
+    @api.get("/sessions/{session_id}/files/preview")
+    async def preview(session_id: str, path: str, user: User = Depends(auth)):
+        """Excel и Word для панели предпросмотра: браузер их не показывает, отдаём таблицу или текст."""
+        await own_session(session_id, user)
+        ws = _workspace(session_id).resolve()
+        p = (ws / path).resolve()
+        if ws not in p.parents or not p.is_file():
+            raise HTTPException(404, "нет файла")
+        ext = p.suffix.lower()
+        try:
+            if ext == ".xlsx":
+                import openpyxl
+
+                wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
+                sheets = []
+                for ws_ in wb.worksheets[:10]:
+                    rows = []
+                    for row in ws_.iter_rows(values_only=True):
+                        if len(rows) >= 500:
+                            break
+                        rows.append(["" if v is None else str(v) for v in row])
+                    while rows and not any(rows[-1]):
+                        rows.pop()
+                    sheets.append({"name": ws_.title, "rows": rows})
+                return {"kind": "sheets", "sheets": sheets}
+            if ext == ".docx":
+                import docx
+
+                d = docx.Document(str(p))
+                blocks: list[dict[str, Any]] = []
+                for para in d.paragraphs:
+                    style = (para.style.name or "").lower() if para.style is not None else ""
+                    level = int(style.split()[-1]) if style.startswith("heading") and style.split()[-1].isdigit() else 0
+                    if para.text.strip():
+                        blocks.append({"type": "h" if level else "p", "level": level, "text": para.text})
+                for t in d.tables:
+                    blocks.append({"type": "table", "rows": [[c.text for c in r.cells] for r in t.rows][:300]})
+                return {"kind": "doc", "blocks": blocks}
+        except ImportError as e:
+            raise HTTPException(501, f"для предпросмотра нужен пакет {e.name}") from None
+        raise HTTPException(415, "для этого типа предпросмотра нет")
+
+    @api.get("/sessions/{session_id}/files")
+    async def download(session_id: str, path: str, user: User = Depends(auth)):
+        await own_session(session_id, user)
+        ws = _workspace(session_id).resolve()
+        target = (ws / path).resolve()
+        if ws not in target.parents or not target.is_file():
+            raise HTTPException(404, "нет такого файла")
+        return FileResponse(target, filename=target.name)
+
+    # ── MCP-серверы: общие (admin) и личные (каждый свои) ───────────
+    # Общие — kv config/mcp_servers и mcp.json, правит только admin. Личные — kv mcp_servers/<id>:
+    # видны и работают только у владельца; адрес вводит не админ, поэтому только публичный https
+    # (netguard), а OAuth-токены — под владельцем. Какой из двух списков правится, говорит флаг
+    # personal: имена в них могут совпасть (общий добавили позже личного), угадывать по имени нельзя.
+    def personal_on() -> None:
+        if not svc.settings.user_mcp:
+            raise HTTPException(403, "личные MCP-серверы выключены (AGENT_USER_MCP=false) — попросите администратора")
+
+    def check_url(url: str, personal: bool) -> str:
+        url = _check_mcp_url(url)
+        if personal and not svc.settings.user_mcp_private and not url.startswith("https://"):
+            raise HTTPException(400, "личный сервер — только https://… (http и внутренние адреса включает "
+                                     "администратор: AGENT_USER_MCP_PRIVATE=true, для разработки)")
+        return url
+
+    async def server_list(user: User, personal: bool) -> dict[str, dict[str, Any]]:
+        if personal:
+            personal_on()
+            return await svc.mcp_personal(user.id)
+        require_admin(user)
+        return await svc.mcp_custom()
+
+    async def save_list(user: User, personal: bool, servers: dict[str, dict[str, Any]]) -> None:
+        if personal:
+            await svc.save_mcp_personal(user.id, servers)
+        else:
+            await svc.save_mcp_custom(servers)
+
+    async def oauth_target(name: str, personal: bool, user: User) -> tuple[MCPServerConfig, str]:
+        """Конфиг сервера и чей вход (owner): личный и personal_login — свой, общий — admin за всех."""
+        if personal:
+            personal_on()
+            d = (await svc.mcp_personal(user.id)).get(name)
+            if d is None:
+                raise HTTPException(404, f"нет личного сервера {name}")
+            return svc.personal_config(name, d), user.id
+        cfg = next((c for c in svc.mcp_all if c.name == name), None)
+        if cfg is None or not cfg.personal_login:
+            require_admin(user)  # общий токен на всех — решает только admin
+        if cfg is None or not cfg.url:
+            raise HTTPException(404, f"нет HTTP MCP-сервера {name}")
+        return cfg, user.id if cfg.personal_login else ""
+
+    async def forget_oauth(name: str, owner: str = "") -> None:
+        try:
+            await svc.oauth.forget(name, owner)
+        except Exception:  # noqa: BLE001 — входа могло и не быть
+            pass
+
+    async def reload_for(owner: str) -> None:
+        if owner:
+            await svc.reload_user(owner)
+        else:
+            await svc.reload()
+
+    @api.post("/mcp/{name}/connect")
+    async def mcp_connect(name: str, personal: bool = False, user: User = Depends(auth)):
+        cfg, owner = await oauth_target(name, personal, user)
+        try:
+            url = await svc.oauth.start(name, cfg.url, OAuthOptions.from_config(cfg.oauth), user_id=user.id,
+                                        owner=owner, public_only=cfg.public_only)
+        except OAuthError as e:
+            raise HTTPException(400, str(e)) from None
+        except httpx.HTTPError as e:  # личный сервер во внутренней сети и т. п. — текст для человека
+            raise HTTPException(400, f"сервер {name} недоступен: {e}") from None
+        return {"url": url, "redirect_uri": svc.oauth.redirect_uri}
+
+    @api.post("/mcp/servers")
+    async def mcp_save(body: MCPServerIn, user: User = Depends(auth)):
+        """Добавить или изменить сервер: общий (admin; из mcp.json — только правкой файла) или свой личный."""
+        servers = await server_list(user, body.personal)
+        old_name = body.original_name or body.name
+        if not MCP_NAME.match(body.name):
+            raise HTTPException(400, "имя — латиница в нижнем регистре, цифры, «-» и «_», до 32 символов")
+        if body.name in svc.mcp_file_names:
+            raise HTTPException(409, f"сервер {body.name} уже задан в mcp.json — выберите другое имя")
+        if body.personal and body.name in svc.shared_mcp_names():
+            raise HTTPException(409, f"имя {body.name} занято общим сервером — выберите другое")
+        if body.name != old_name and body.name in servers:
+            raise HTTPException(409, f"сервер {body.name} уже есть")
+        if not body.original_name and body.name in servers:
+            raise HTTPException(409, f"сервер {body.name} уже есть")
+        if body.personal and not body.original_name and len(servers) >= svc.settings.user_mcp_max:
+            raise HTTPException(400, f"личных серверов не больше {svc.settings.user_mcp_max} — удалите ненужный "
+                                     "(лимит — AGENT_USER_MCP_MAX)")
+        prev = servers.pop(old_name, {}) if body.original_name else {}
+        token = prev.get("token", "") if body.token is None else body.token.strip()
+        if body.auth == "token" and not token:
+            raise HTTPException(400, "укажите токен или выберите другой способ входа")
+        servers[body.name] = {
+            "url": check_url(body.url, body.personal), "auth": body.auth, "token": token if body.auth == "token" else "",
+            "headers": prev.get("headers", {}) if body.headers is None else _check_headers(body.headers),
+            "enabled": body.enabled, "deferred": body.deferred,
+            # per_user — только у общего и только с OAuth: личный и так у одного человека.
+            "per_user": bool(body.per_user and body.auth == "oauth" and not body.personal),
+            "added_by": prev.get("added_by") or user.id, "created_at": prev.get("created_at") or time.time(),
+        }
+        if body.original_name and old_name != body.name:
+            # Входы пользователей в per_user-сервер под старым именем не переносятся — войдут заново.
+            await forget_oauth(old_name, user.id if body.personal else "")
+        await save_list(user, body.personal, servers)
+        if body.personal:
+            entry = await svc.user_mcp(user)
+            st = entry.manager.status.get(body.name) if entry and entry.manager else None
+        else:
+            st = svc.mcp.status.get(body.name)
+        return {"ok": True, "status": st.__dict__ if st else None}
+
+    @api.post("/mcp/test")
+    async def mcp_test(body: MCPTestIn, user: User = Depends(auth)):
+        """Проверить сервер до сохранения: отвечает ли, сколько инструментов, нужен ли вход."""
+        saved = await server_list(user, body.personal)
+        token = body.token
+        if token is None and body.name:
+            token = saved.get(body.name, {}).get("token", "")
+        cfg = MCPServerConfig(name=body.name or "test", url=check_url(body.url, body.personal),
+                              token=(token or None) if body.auth == "token" else None,
+                              headers=_check_headers(body.headers or {}), timeout=20,
+                              public_only=body.personal and not svc.settings.user_mcp_private)
+        client = MCPClient(cfg)
+        try:
+            raw = await asyncio.wait_for(client.list_tools(), 20)
+        except MCPAuthRequired:
+            return {"ok": False, "needs_auth": True,
+                    "error": "сервер просит вход" + ("" if body.auth == "oauth" else " — выберите OAuth или токен")}
+        except Exception as e:  # noqa: BLE001 — любой сбой показываем человеку как есть
+            return {"ok": False, "needs_auth": False, "error": str(e) or type(e).__name__}
+        finally:
+            await client.close()
+        return {"ok": True, "tools": [t.get("title") or t["name"] for t in raw][:50], "count": len(raw),
+                "server": client.server_info.get("name") or "", "version": client.server_info.get("version") or ""}
+
+    @api.patch("/mcp/servers/{name}")
+    async def mcp_toggle(name: str, body: MCPToggle, personal: bool = False, user: User = Depends(auth)):
+        servers = await server_list(user, personal)
+        if name not in servers:
+            raise HTTPException(404, "такого сервера нет среди добавленных в настройках")
+        servers[name]["enabled"] = body.enabled
+        await save_list(user, personal, servers)
+        return {"ok": True}
+
+    @api.delete("/mcp/servers/{name}")
+    async def mcp_delete(name: str, personal: bool = False, user: User = Depends(auth)):
+        servers = await server_list(user, personal)
+        if name not in servers:
+            raise HTTPException(404, "такого сервера нет среди добавленных в настройках")
+        servers.pop(name)
+        await forget_oauth(name, user.id if personal else "")
+        await save_list(user, personal, servers)
+        return {"ok": True}
+
+    @api.delete("/mcp/{name}/connect")
+    async def mcp_disconnect(name: str, personal: bool = False, user: User = Depends(auth)):
+        _, owner = await oauth_target(name, personal, user)
+        await svc.oauth.disconnect(name, owner)
+        await reload_for(owner)
+        return {"ok": True}
+
+    @app.get("/oauth/callback", response_class=HTMLResponse)
+    async def oauth_callback(state: str = "", code: str = "", error: str = "", error_description: str = ""):
+        # Без авторизации по токену: сюда возвращает браузер с сервера OAuth. Защита — одноразовый
+        # state, выданный тому, кто нажал «Подключить»; владелец токена берётся из state, а не из
+        # запроса. Подсунуть чужую ссылку согласия бесполезно: токен ляжет к тому, кто её начал.
+        if error:
+            return _oauth_page(False, f"{error}: {error_description}")
+        try:
+            done = await svc.oauth.complete(state, code)
+        except OAuthError as e:
+            return _oauth_page(False, str(e))
+        await reload_for(done.owner)
+        return _oauth_page(True, f"{done.server} подключён")
+
+    register_platform(api, app, svc, auth)
+    register_preview(app, svc)
+    app.include_router(api)
+    for r in extra_routers or []:
+        app.include_router(r)
+
+    static = static_dir if static_dir and static_dir.is_dir() else STATIC
+
+    @app.get("/")
+    async def index():
+        # Ссылки на app.js/app.css — с версией по содержимому файлов, а сама страница не кэшируется.
+        # Иначе после обновления Chrome эвристически берёт старый app.js из кэша к новой
+        # разметке (Safari перепроверяет чаще) — и интерфейс ломается только в одном браузере.
+        text = (static / "index.html").read_text(encoding="utf-8")
+        for name in ("app.js", "app.css", "viz.js"):
+            f = static / name
+            if f.is_file():
+                st = f.stat()
+                ver = f"{int(st.st_mtime)}-{st.st_size}"
+                text = text.replace(f'"/static/{name}"', f'"/static/{name}?v={ver}"')
+        # Встраивание во фрейм — только сайтам из AGENT_EMBED_ORIGINS: иначе чужая страница
+        # накрыла бы чат прозрачным фреймом и кликала руками человека (подтвердить, удалить).
+        origins = [o.strip().rstrip("/") for o in svc.settings.embed_origins.split(",") if o.strip()]
+        if origins:
+            meta = '<meta name="agentkit-embed-origins" content="' + html.escape(" ".join(origins)) + '">'
+            text = text.replace("</head>", meta + "\n</head>", 1)
+        csp = "frame-ancestors 'self'" + "".join(" " + o for o in origins)
+        return HTMLResponse(text, headers={"Cache-Control": "no-cache", "Content-Security-Policy": csp})
+
+    app.mount("/static", _RevalidatedStatic(directory=static), name="static")
+
+    @app.exception_handler(BudgetExceeded)
+    async def budget_exceeded(_, exc: BudgetExceeded):
+        # 402, а не 400/429: это не ошибка запроса и не «повторите через секунду» — хост-приложение
+        # по этому коду может сразу показать оплату.
+        return JSONResponse({"detail": str(exc)}, status_code=402)
+
+    @app.exception_handler(ValueError)
+    async def value_error(_, exc: ValueError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    return app
+
+
+class _RevalidatedStatic(StaticFiles):
+    """Статика всегда перепроверяется (ETag → 304): без этого браузер держит старый файл неделями."""
+
+    def file_response(self, *args: Any, **kwargs: Any):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+def _oauth_page(ok: bool, text: str) -> str:
+    # Окно согласия открывалось из чата — сообщаем ему результат и закрываемся.
+    payload = json.dumps({"type": "agentkit-oauth", "ok": ok, "text": text}, ensure_ascii=False)
+    return f"""<!doctype html><meta charset="utf-8"><title>{'Готово' if ok else 'Ошибка'}</title>
+<body style="font:16px system-ui;padding:40px;text-align:center">
+<p>{'✓' if ok else '✕'} {html.escape(text)}</p><p style="color:#888">Окно можно закрыть.</p>
+<script>try{{window.opener&&window.opener.postMessage({payload},"*");setTimeout(()=>window.close(),1200)}}catch(e){{}}</script>"""
+
+
+def _check_mcp_url(url: str) -> str:
+    url = url.strip()
+    if not re.match(r"^https?://[^\s/]+", url):
+        raise HTTPException(400, "адрес сервера — http(s)://…, например https://example.com/mcp")
+    return url
+
+
+def _check_headers(headers: dict[str, str]) -> dict[str, str]:
+    out = {}
+    for k, v in headers.items():
+        k, v = k.strip(), str(v).strip()
+        if not k:
+            continue
+        if not re.match(r"^[A-Za-z0-9-]+$", k) or not v.isascii():
+            raise HTTPException(400, f"заголовок «{k}»: имя — латиница, цифры и «-», значение — без кириллицы")
+        out[k] = v
+    return out
+
+
+def _mcp_view(c: Any, st: Any, d: dict[str, Any] | None, admin: bool, custom: bool) -> dict[str, Any]:
+    """Сервер для списка в настройках. Токены не отдаются никогда — только «задан/не задан»."""
+    view: dict[str, Any] = {
+        "name": c.name, "enabled": c.enabled, "custom": custom,
+        "ok": bool(st and st.ok), "tools": st.tools if st else 0, "error": st.error if st else "",
+        "needs_auth": bool(st and st.needs_auth), "oauth": bool(st and st.oauth),
+        "server": (st.server_info.get("name") or "") if st else "", "version": (st.server_info.get("version") or "") if st else "",
+        "transport": "http" if c.url else "stdio",
+        "personal": False, "per_user": bool(getattr(c, "personal_login", False)),
+        "can_manage": admin and custom,
+        # Войти может admin (общий токен) и каждый — в per_user-сервер (свой токен).
+        "can_connect": c.enabled and bool(c.url) and (admin or bool(getattr(c, "personal_login", False))),
+    }
+    if admin:  # адрес — только админу: в нём бывают внутренние хосты
+        view["address"] = c.url or c.command or ""
+        if custom and d:
+            view.update(auth=d.get("auth", "none"), has_token=bool(d.get("token")), header_names=sorted(d.get("headers") or {}),
+                        deferred=d.get("deferred"), added_by=d.get("added_by", ""))
+    elif custom and d:
+        view["auth"] = d.get("auth", "none")
+    return view
+
+
+def _personal_view(c: Any, st: Any, d: dict[str, Any], shadowed: bool) -> dict[str, Any]:
+    """Личный сервер — для владельца: адрес и способ входа свои, их видно; токены — нет."""
+    view = _mcp_view(c, st, d, True, True)
+    view.update(personal=True, can_manage=True, can_connect=c.enabled and not shadowed)
+    if shadowed:
+        view.update(ok=False, needs_auth=False, tools=0, error="имя занято общим сервером — переименуйте, чтобы он заработал")
+    return view
+
+
+def _check_mode(mode: str | None, user: User) -> str | None:
+    if mode is None or mode == "":
+        return None
+    try:
+        m = Mode(mode)
+    except ValueError:
+        raise HTTPException(400, f"неизвестный режим {mode}") from None
+    if m == Mode.BYPASS and not user.has_role("admin"):
+        raise HTTPException(403, "режим bypass — только для admin")
+    return m.value
+

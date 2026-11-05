@@ -1,0 +1,160 @@
+# Развёртывание на VPS: агент, база и TLS одной командой.
+#
+#   ./deploy.sh agent.example.com
+#
+
+name: ei-agent
+
+services:
+  ei-agent:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-docker}
+    container_name: ei-agent
+    restart: unless-stopped
+    env_file:
+      - ./deploy/ei-agent.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Рабочие папки сессий, файлы агента, трейсы. База — отдельно, в postgres.
+      - data:/srv/data
+    # Наружу не выставлен: снаружи виден только общий Caddy по mcp-network.
+    expose:
+      - "8080"
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - mcp-network
+      - internal
+      - sandbox
+
+  # Компьютер агента (run_python / run_bash): сервер, который держит по контейнеру на разговор.
+  # Ему — и только ему — дан docker.sock: сервис агента сокета не видит, а код разговоров
+  # работает в отдельных контейнерах (uid 1000, без capabilities, только своя папка /work,
+  # своя сеть ak-sbn-<сессия> без выхода наружу: в ней только этот контейнер и egress).
+  sandbox:
+    build:
+      context: .
+      dockerfile: deploy/sandbox.Dockerfile
+    image: ei-agent-sandbox:latest
+    container_name: ei-agent-sandbox
+    restart: unless-stopped
+    # root — ради docker.sock (он и так равен root на машине); права на папки — только нужные.
+    user: "0"
+    env_file:
+      - ./deploy/sandbox.env
+    environment:
+      SANDBOX_BACKEND: docker
+      SANDBOX_IMAGE: ei-agent-sandbox:latest
+      SANDBOX_VOLUME: ei-agent_data
+      SANDBOX_SUBPATH: workspaces
+      SANDBOX_EGRESS_CONTAINER: ei-agent-egress
+      SANDBOX_PROXY: http://egress:3128
+    depends_on:
+      ei-agent:
+        condition: service_healthy
+      egress:
+        condition: service_started
+    volumes:
+      - type: volume
+        source: data
+        target: /work
+        volume:
+          subpath: workspaces
+      - /var/run/docker.sock:/var/run/docker.sock
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 60s  # успеть убрать контейнеры разговоров
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - sandbox
+
+  # Единственный выход контейнеров разговоров в интернет: домены из AGENT_SANDBOX_EGRESS
+  # (deploy.sh кладёт список в deploy/sandbox.env), внутренние адреса — никогда. Сервер песочницы
+  # подключает egress к сети каждого разговора; порт 3129 (с токеном) — обратная дорога для превью.
+  egress:
+    build:
+      context: .
+      dockerfile: deploy/sandbox.Dockerfile
+    image: ei-agent-sandbox:latest
+    container_name: ei-agent-egress
+    restart: unless-stopped
+    command: ["python", "-m", "agentkit.egress"]
+    env_file:
+      - ./deploy/sandbox.env
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - sandbox
+      - egress
+
+  postgres:
+    # С расширением pgvector — смысловой поиск по памяти и файлам идёт в базе (HNSW-индекс).
+    # Переход с postgres:16-alpine на уже существующем томе: образ на Debian, а не Alpine — после
+    # первого запуска выполнить REINDEX DATABASE agent; (другая библиотека сортировки строк).
+    image: pgvector/pgvector:pg16
+    container_name: ei-agent-postgres
+    restart: unless-stopped
+    # Отдельный env: базе незачем видеть ключи моделей и токены.
+    env_file:
+      - ./deploy/postgres.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - internal
+
+  # Шина между процессами агента (AGENT_WORKERS > 1): блокировки прогонов,
+  # живые события, отмена. Данные не хранит — после перезапуска ей нечего терять.
+  redis:
+    image: redis:7-alpine
+    container_name: ei-agent-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - internal
+
+volumes:
+  data:
+  pgdata:
+
+networks:
+  mcp-network:
+    external: true
+  internal:
+  # Агент ↔ сервер песочницы и превью egress. internal: true — без выхода в интернет.
+  # Контейнеры разговоров сюда не входят: у каждого своя сеть (ak-sbn-<сессия>), её создаёт сервер песочницы.
+  sandbox:
+    internal: true
+  egress:

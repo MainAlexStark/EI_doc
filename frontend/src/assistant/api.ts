@@ -275,3 +275,10 @@ export const fetchUsage = () =>
   json<{ since: string; rows: { model: string; calls: number; tokens: number; cost: number }[] }>(
     "/api/assistant/usage/",
   );
+
+// ── ассистент на agentkit (вкладка — фрейм его чата) ─────────────────
+export type AgentLink =
+  | { enabled: false }
+  | { enabled: true; url: string; origin: string; token: string; ttl: number };
+
+export const fetchAgentLink = () => json<AgentLink>("/api/assistant/agent/");

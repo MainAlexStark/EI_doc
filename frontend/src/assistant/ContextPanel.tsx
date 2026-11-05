@@ -47,11 +47,14 @@ const tokens = (chars: number) => Math.round(chars / 3.5);
 const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K` : String(n));
 
 export default function ContextPanel({
-  models, focusFileId, onClose,
+  models, focusFileId, onClose, agentMode = false,
 }: {
   models: ModelInfo[];
   focusFileId: number | null;
   onClose: () => void;
+  /** Чат — агент на agentkit: модели, MCP-серверы и личная память живут в его настройках,
+   *  здесь — только то, что EI_doc отдаёт агенту сам (файлы, общая память, правила). */
+  agentMode?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("files");
   useEffect(() => {
@@ -66,18 +69,18 @@ export default function ContextPanel({
       <div className="ctx-tabs">
         {([
           ["files", "Файлы"],
-          ["memory", "Память"],
-          ["tools", "Инструменты"],
-          ["settings", "Настройки"],
+          ["memory", agentMode ? "Общая память" : "Память"],
+          ...(agentMode ? [] : [["tools", "Инструменты"]]),
+          ["settings", agentMode ? "Правила" : "Настройки"],
         ] as [Tab, string][]).map(([key, label]) => (
           <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
         ))}
       </div>
       <div className="ctx-body">
         {tab === "files" && <FilesTab focusFileId={focusFileId} />}
-        {tab === "memory" && <MemoryTab />}
-        {tab === "tools" && <ToolsTab />}
-        {tab === "settings" && <SettingsTab models={models} />}
+        {tab === "memory" && <MemoryTab agentMode={agentMode} />}
+        {tab === "tools" && !agentMode && <ToolsTab />}
+        {tab === "settings" && <SettingsTab models={models} agentMode={agentMode} />}
       </div>
     </aside>
   );
@@ -442,11 +445,11 @@ function UploadForm({
 }
 
 // ---------------------------------------------------------------------------
-function MemoryTab() {
+function MemoryTab({ agentMode }: { agentMode: boolean }) {
   const [items, setItems] = useState<MemoryItem[]>([]);
   const [canCompany, setCanCompany] = useState(false);
   const [draft, setDraft] = useState("");
-  const [scope, setScope] = useState("personal");
+  const [scope, setScope] = useState(agentMode ? "company" : "personal");
   const [editing, setEditing] = useState<{ id: number; text: string } | null>(null);
   const [error, setError] = useState("");
 
@@ -491,19 +494,22 @@ function MemoryTab() {
   return (
     <div className="memory-tab">
       <p className="small muted">
-        Память — короткие факты, которые агент учитывает в каждом чате. Агент сам предлагает, что запомнить; общие
-        правила компании сохраняются только после подтверждения метролога.
+        {agentMode
+          ? "Общая память компании — короткие факты, которые ассистент учитывает в каждом чате у каждого сотрудника. Меняет метролог или руководитель. Личная память — в чате ассистента: меню → Настройки → Память."
+          : "Память — короткие факты, которые агент учитывает в каждом чате. Агент сам предлагает, что запомнить; общие правила компании сохраняются только после подтверждения метролога."}
       </p>
       {error && <div className="chat-error">{error}</div>}
       {section("Общее для компании", items.filter((m) => m.scope === "company"), "Например: «Протоколы по манометрам оформляем в серии 01»")}
-      {section("Только для меня", items.filter((m) => m.scope === "personal"), "Например: «Мои районы — Слободской и Кирово-Чепецк»")}
-      <div className="mem-add">
+      {!agentMode && section("Только для меня", items.filter((m) => m.scope === "personal"), "Например: «Мои районы — Слободской и Кирово-Чепецк»")}
+      {(!agentMode || canCompany) && <div className="mem-add">
         <textarea rows={2} placeholder="Новый факт…" value={draft} onChange={(e) => setDraft(e.target.value)} />
         <div className="row-gap">
-          <select value={scope} onChange={(e) => setScope(e.target.value)}>
-            <option value="personal">Только мне</option>
-            {canCompany && <option value="company">Всей компании</option>}
-          </select>
+          {!agentMode && (
+            <select value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="personal">Только мне</option>
+              {canCompany && <option value="company">Всей компании</option>}
+            </select>
+          )}
           <button
             className="primary"
             disabled={!draft.trim()}
@@ -512,7 +518,7 @@ function MemoryTab() {
             Запомнить
           </button>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -630,7 +636,7 @@ function McpRow({ server, canEdit, onChanged }: { server: McpServer; canEdit: bo
 }
 
 // ---------------------------------------------------------------------------
-function SettingsTab({ models }: { models: ModelInfo[] }) {
+function SettingsTab({ models, agentMode }: { models: ModelInfo[]; agentMode: boolean }) {
   const [s, setS] = useState<AssistantSettings | null>(null);
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof fetchUsage>> | null>(null);
   const [saved, setSaved] = useState("");
@@ -651,10 +657,12 @@ function SettingsTab({ models }: { models: ModelInfo[] }) {
   };
   return (
     <div className="settings-tab">
-      <label className="field">
-        <span>Модель по умолчанию для новых чатов</span>
-        {s.can_edit ? <ModelPicker models={models} value={s.default_model} onChange={(id) => setS({ ...s, default_model: id })} /> : <div>{s.default_model}</div>}
-      </label>
+      {!agentMode && (
+        <label className="field">
+          <span>Модель по умолчанию для новых чатов</span>
+          {s.can_edit ? <ModelPicker models={models} value={s.default_model} onChange={(id) => setS({ ...s, default_model: id })} /> : <div>{s.default_model}</div>}
+        </label>
+      )}
       <label className="field">
         <span>Правила компании для ассистента</span>
         <textarea
@@ -666,10 +674,10 @@ function SettingsTab({ models }: { models: ModelInfo[] }) {
         />
       </label>
       <div className="grid2">
-        <label className="field">
+        {!agentMode && <label className="field">
           <span>Шагов агента на ответ</span>
           <input type="number" min={3} max={80} disabled={!s.can_edit} value={s.max_steps} onChange={(e) => setS({ ...s, max_steps: Number(e.target.value) })} />
-        </label>
+        </label>}
         <label className="field">
           <span>Бюджет «Всегда», символов</span>
           <input type="number" step={10000} disabled={!s.can_edit} value={s.always_budget_chars} onChange={(e) => setS({ ...s, always_budget_chars: Number(e.target.value) })} />
@@ -682,7 +690,8 @@ function SettingsTab({ models }: { models: ModelInfo[] }) {
         </div>
       )}
       {error && <div className="chat-error">{error}</div>}
-      {usage && usage.rows.length > 0 && (
+      {agentMode && <p className="small muted">Модели, инструменты, лимиты и расход — в настройках самого ассистента (меню в чате).</p>}
+      {!agentMode && usage && usage.rows.length > 0 && (
         <>
           <div className="mem-title">Расход за 30 дней</div>
           <table className="w-table">
