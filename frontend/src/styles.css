@@ -684,3 +684,7 @@ details.more > summary { cursor: pointer; color: var(--accent); font-weight: 500
 .attestation .plan-check { margin-top: 10px; }
 .attestation .plan-check > summary { cursor: pointer; }
 .attestation code.sub { font-size: 11px; word-break: break-word; }
+
+/* Заголовок раздела внутри вкладки (Журнал → «Отправка в Аршин» и т. п.) */
+.section-title { font-size: 17px; font-weight: 600; margin: 28px 0 12px; letter-spacing: -0.01em; }
+.arshin .scope + .scopes { margin-top: 16px; }

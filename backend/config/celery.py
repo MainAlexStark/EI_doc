@@ -17,4 +17,9 @@ app.conf.beat_schedule = {
         "task": "apps.tasks.tasks.generate_recurring_tasks",
         "schedule": crontab(hour=6, minute=0),
     },
+    # Загруженные в ЛК ФИФ пакеты: забрать номера опубликованных записей.
+    "arshin-reconcile": {
+        "task": "apps.arshin.tasks.reconcile_submissions",
+        "schedule": crontab(minute=25, hour="*/2"),
+    },
 }

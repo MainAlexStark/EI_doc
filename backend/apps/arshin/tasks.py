@@ -10,3 +10,11 @@ from apps.arshin.documents import fetch_type_documents
 @shared_task
 def download_type_documents(mit_uuid: str) -> int:
     return sum(1 for doc in fetch_type_documents(mit_uuid) if doc.file)
+
+
+@shared_task
+def reconcile_submissions() -> int:
+    """Сверка загруженных пакетов с открытым реестром ФИФ (раз в два часа)."""
+    from apps.arshin.submission import reconcile_pending
+
+    return reconcile_pending()

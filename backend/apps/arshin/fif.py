@@ -347,6 +347,15 @@ class FifClient:
         """Сырой ответ — для команды fif_probe."""
         return self._get("mit", {"search": f"*{query}*", "rows": limit, "start": 0})
 
+    # -- сведения о поверках ---------------------------------------------
+    def search_vri(self, params: dict) -> list[dict]:
+        """Записи о результатах поверки (GET /vri) — для сверки отправленных пакетов.
+
+        Открытый API отдаёт плоские строки: vri_id, mi_number,
+        verification_date, org_title и т. д. Обёртку снимает _rows.
+        """
+        return list(self._rows(self._get("vri", params)))
+
     # -- карточка типа ----------------------------------------------------
     def resolve_uuid(self, ident: str) -> str:
         """mit_uuid по самому uuid, ссылке на карточку или номеру в Госреестре."""

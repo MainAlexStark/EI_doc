@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Journal from "./Journal";
+import Arshin from "./Arshin";
 import Normocontrol from "./Normocontrol";
 
 type View = "protocols" | "arshin";
@@ -36,7 +37,15 @@ export default function JournalTab({ isManager, onOpenTypes }: { isManager: bool
           </button>
         </div>
       </div>
-      {view === "protocols" ? <Journal /> : <Normocontrol onOpenTypes={onOpenTypes} />}
+      {view === "protocols" ? (
+        <Journal />
+      ) : (
+        <>
+          <Normocontrol onOpenTypes={onOpenTypes} />
+          <h2 className="section-title">Отправка в Аршин</h2>
+          <Arshin />
+        </>
+      )}
     </>
   );
 }

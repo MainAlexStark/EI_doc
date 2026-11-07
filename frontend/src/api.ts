@@ -942,3 +942,80 @@ export async function openFifDocument(doc: FifDocument): Promise<void> {
     throw exc;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Аршин: пакеты результатов поверки (apps/arshin/api.py, docs/arshin.md)
+// ---------------------------------------------------------------------------
+export type ArshinQueueRow = {
+  protocol: number;
+  number: string;
+  verified_at: string;
+  si_name: string;
+  serial_number: string;
+  suitable: boolean;
+  problems: string[];
+};
+
+export type ArshinItem = {
+  id: number;
+  protocol: number;
+  number: string;
+  serial_number: string;
+  si_name: string;
+  status: "pending" | "sent" | "accepted" | "rejected";
+  status_display: string;
+  fif_record_number: string;
+  error: string;
+};
+
+export type ArshinSubmission = {
+  id: number;
+  status: "generated" | "uploaded" | "done" | "cancelled";
+  status_display: string;
+  created_at: string;
+  created_by: string;
+  uploaded_at: string | null;
+  reconciled_at: string | null;
+  sha256: string;
+  counts: Record<string, number>;
+  total: number;
+  items?: ArshinItem[];
+};
+
+export const fetchArshinQueue = () =>
+  json<{ sign_cipher: string; protocols: ArshinQueueRow[] }>("/api/arshin/queue/");
+
+export const fetchArshinSubmissions = () => json<ArshinSubmission[]>("/api/arshin/submissions/");
+
+export const fetchArshinSubmission = (id: number) => json<ArshinSubmission>(`/api/arshin/submissions/${id}/`);
+
+export const createArshinSubmission = (protocols?: number[]) =>
+  json<{ submission: ArshinSubmission; refused: { protocol: number; number: string; problems: string[] }[] }>(
+    "/api/arshin/submissions/",
+    { method: "POST", body: JSON.stringify(protocols ? { protocols } : {}) },
+  );
+
+export const arshinSubmissionAction = (id: number, action: "uploaded" | "cancel" | "reconcile") =>
+  json<ArshinSubmission & { submission?: ArshinSubmission; accepted?: number; waiting?: number }>(
+    `/api/arshin/submissions/${id}/${action}/`,
+    { method: "POST" },
+  );
+
+export const setArshinItemResult = (
+  id: number,
+  result: { accepted: true; fif_record_number: string } | { accepted: false; reason: string },
+) => json<ArshinItem>(`/api/arshin/items/${id}/result/`, { method: "POST", body: JSON.stringify(result) });
+
+/** Скачать файл с авторизацией (blob) — XML пакета, PDF и т. п. */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await call(path);
+  if (!response.ok) throw new ApiError(`Не удалось скачать файл (${response.status})`, response.status);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

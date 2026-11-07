@@ -225,6 +225,15 @@ FIF_DOCUMENTS_AUTO_DOWNLOAD = env.bool("FIF_DOCUMENTS_AUTO_DOWNLOAD", default=Tr
 # перед реализацией выгрузки сведений о поверке.
 ARSHIN_PUBLIC_KEY = env("ARSHIN_PUBLIC_KEY", default="")
 ARSHIN_PRIVATE_KEY = env("ARSHIN_PRIVATE_KEY", default="")
+# Отправка результатов поверки (apps/arshin/submission.py, docs/arshin.md).
+# Шифр знака поверки организации — выдаётся при аккредитации, без него пакет
+# не собирается. Пространство имён и предел строк — по действующей XSD из ЛК ФИФ.
+ARSHIN_SIGN_CIPHER = env("ARSHIN_SIGN_CIPHER", default="")
+ARSHIN_XML_NAMESPACE = env("ARSHIN_XML_NAMESPACE", default="")
+ARSHIN_BATCH_LIMIT = env.int("ARSHIN_BATCH_LIMIT", default=1000)
+# Экземпляр без прежних поверок в системе считать первичной поверкой (по
+# умолчанию — периодической: в квартирах почти всегда периодическая).
+ARSHIN_DEFAULT_PRIMARY = env.bool("ARSHIN_DEFAULT_PRIMARY", default=False)
 
 # --------------------------------------------------------------------------
 # Подсказка адресов (DaData) — этап 2, роутинг заявок по району
