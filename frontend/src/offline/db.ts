@@ -9,18 +9,8 @@
  */
 import Dexie, { type Table } from "dexie";
 
-export type CachedWorkOrder = {
-  id: number;
-  status: string;
-  status_display: string;
-  client: string;
-  site: string;
-  assigned_employee: string;
-  assigned_employee_id: number;
-  scheduled_date: string | null;
-  scheduled_time: string | null;
-  cached_at: number;
-};
+/** Наряд как его отдаёт сервер (api.WorkOrder) + когда закэширован. */
+export type CachedWorkOrder = import("../api").WorkOrder & { cached_at: number };
 
 export type SyncState = "pending" | "synced";
 

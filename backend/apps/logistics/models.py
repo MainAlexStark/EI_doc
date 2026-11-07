@@ -90,6 +90,7 @@ class TripStop(models.Model):
     status = models.CharField("состояние", max_length=10, choices=StopStatus.choices,
                               default=StopStatus.PLANNED)
     note = models.CharField("примечание", max_length=250, blank=True)
+    updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
     class Meta:
         verbose_name = "остановка"

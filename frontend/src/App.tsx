@@ -84,9 +84,25 @@ export default function App() {
       setMe(null);
       return;
     }
+    // Профиль кэшируется: без связи поверитель всё равно открывает свои выезды
+    // (наряды и поверки лежат в телефоне — offline/sync.ts).
     void fetchMe()
-      .then(setMe)
-      .catch(() => setMe(null));
+      .then((fresh) => {
+        setMe(fresh);
+        try {
+          localStorage.setItem("ei_doc_me", JSON.stringify(fresh));
+        } catch {
+          /* хранилище недоступно — не страшно */
+        }
+      })
+      .catch(() => {
+        try {
+          const cached = localStorage.getItem("ei_doc_me");
+          setMe(cached ? (JSON.parse(cached) as Me) : null);
+        } catch {
+          setMe(null);
+        }
+      });
   }, [authenticated]);
 
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
@@ -109,6 +125,11 @@ export default function App() {
 
   const signOut = () => {
     logout();
+    try {
+      localStorage.removeItem("ei_doc_me");
+    } catch {
+      /* ничего */
+    }
     setAuthenticated(false);
   };
 

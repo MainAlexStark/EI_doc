@@ -24,12 +24,15 @@ import SiTypeDocuments from "./FifDocuments";
 import SiTypePicker, { type PickedType } from "./SiTypePicker";
 import {
   addVerification,
+  cacheWorkOrders,
+  cachedWorkOrders,
   flush,
   isOnline,
   listVerifications,
   loadLayouts,
   outboxErrors,
   pendingCount,
+  pullChanges,
   refreshSiTypeCache,
   removeOutboxItem,
   saveMeasurements,
@@ -826,8 +829,18 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
     if (!isManager && !employeeId) return;
     setLoading(true);
     fetchWorkOrders(isManager ? {} : { assigned_employee: String(employeeId) })
-      .then(setOrders)
-      .catch((exc) => setError(exc instanceof Error ? exc.message : "Не удалось загрузить выезды"))
+      .then((fresh) => {
+        setOrders(fresh);
+        void cacheWorkOrders(fresh);
+        // Фоном — поверки по нарядам в телефон, чтобы работать и без связи.
+        void pullChanges().catch(() => undefined);
+      })
+      .catch(async (exc) => {
+        // Нет связи — наряды из телефона (их кладут прошлые загрузки и pullChanges).
+        const cached = await cachedWorkOrders(isManager ? null : employeeId);
+        if (cached.length) setOrders(cached);
+        else setError(exc instanceof Error ? exc.message : "Не удалось загрузить выезды");
+      })
       .finally(() => setLoading(false));
   }, [me, isManager]);
 

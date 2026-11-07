@@ -142,7 +142,51 @@ export async function json<T>(path: string, init: RequestInit = {}): Promise<T> 
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
+/** Постоянный идентификатор этого браузера/телефона — для входа с привязкой к устройству. */
+export function deviceId(): string {
+  const KEY = "ei_doc_device_id";
+  let value = localStorage.getItem(KEY);
+  if (!value) {
+    value =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(KEY, value);
+  }
+  return value;
+}
+
+function deviceLabel(): string {
+  const ua = navigator.userAgent;
+  const model = /\(([^;)]+);?[^)]*\)/.exec(ua)?.[1] ?? "";
+  return (model || "Браузер").slice(0, 120);
+}
+
+/**
+ * Вход. Сотрудник входит с привязкой к устройству (/api/auth/device-token/):
+ * refresh на 30 дней, отзыв устройства в админке выключает его сразу. У
+ * учётной записи без карточки сотрудника (наблюдатель, админ) — обычный вход.
+ */
 export async function login(email: string, password: string): Promise<void> {
+  const device = await fetch("/api/auth/device-token/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, device_id: deviceId(), label: deviceLabel() }),
+  });
+  if (device.ok) {
+    const data = await device.json();
+    tokens.set(data.access, data.refresh);
+    return;
+  }
+  let detail = "";
+  try {
+    detail = String((await device.json()).detail ?? "");
+  } catch {
+    /* не JSON */
+  }
+  if (/отозван|другим сотрудником/.test(detail)) throw new ApiError(detail, device.status);
+  if (!/сотрудник/.test(detail)) throw new ApiError("Неверная почта или пароль");
+
   const response = await fetch("/api/auth/token/", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -372,6 +416,17 @@ export type WorkOrder = {
   created_at: string;
   closed_at: string | null;
 };
+
+export type SyncPull = {
+  cursor: number;
+  more: boolean;
+  work_orders: WorkOrder[];
+  verifications: (FieldVerification & { work_order_id: number })[];
+  trip_stops: { id: number; trip_id: number; trip_title: string; work_order_id: number | null; day: string | null;
+                position: number; eta: string | null; address: string; status: string }[];
+};
+
+export const pullSync = (cursor: number) => json<SyncPull>(`/api/sync/pull/?cursor=${cursor}`);
 
 export type WorkOrderFilters = { status?: string; assigned_employee?: string; date_from?: string; date_to?: string };
 

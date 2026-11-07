@@ -18,6 +18,8 @@ import {
   fetchLayouts,
   fetchSiTypes,
   fetchWorkOrderVerifications,
+  pullSync,
+  type WorkOrder,
   suggestSiTypes,
   submitMeasurements,
   type FieldVerification,
@@ -367,4 +369,51 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", () => void flush());
   window.addEventListener("focus", () => void flush());
   void flush();
+}
+
+
+// ---------------------------------------------------------------------------
+// Дельта-синхронизация (apps/sync/api.py): наряды и поверки — в телефон
+// ---------------------------------------------------------------------------
+const CURSOR_KEY = "sync_cursor";
+
+/** Забрать с сервера всё изменённое с прошлого раза. Возвращает число строк. */
+export async function pullChanges(): Promise<number> {
+  const stored = await db.meta.get(CURSOR_KEY);
+  let cursor = typeof stored?.data === "number" ? stored.data : 0;
+  let total = 0;
+  for (let round = 0; round < 20; round += 1) {
+    const page = await pullSync(cursor);
+    const now = Date.now();
+    await db.transaction("rw", db.workOrders, db.verifications, db.meta, async () => {
+      await db.workOrders.bulkPut(page.work_orders.map((o) => ({ ...o, cached_at: now })));
+      for (const v of page.verifications) {
+        const local = await db.verifications.get(v.client_id);
+        // Неотправленное с телефона не затираем — сначала уйдёт очередь.
+        if (local?.sync_state === "pending") continue;
+        await db.verifications.put(fromServer(v));
+      }
+      await db.meta.put({ key: CURSOR_KEY, data: page.cursor, cached_at: now });
+    });
+    total += page.work_orders.length + page.verifications.length;
+    cursor = page.cursor;
+    if (!page.more) break;
+  }
+  if (total) notify();
+  return total;
+}
+
+export async function cacheWorkOrders(orders: WorkOrder[]): Promise<void> {
+  const now = Date.now();
+  await db.workOrders.bulkPut(orders.map((o) => ({ ...o, cached_at: now })));
+}
+
+/** Наряды из телефона — когда сервер недоступен. */
+export async function cachedWorkOrders(employeeId?: number | null): Promise<WorkOrder[]> {
+  const rows = employeeId
+    ? await db.workOrders.where("assigned_employee_id").equals(employeeId).toArray()
+    : await db.workOrders.toArray();
+  return rows
+    .filter((o) => o.status !== "cancelled")
+    .sort((a, b) => (a.scheduled_date ?? "9").localeCompare(b.scheduled_date ?? "9"));
 }

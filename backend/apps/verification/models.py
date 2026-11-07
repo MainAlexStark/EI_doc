@@ -523,6 +523,7 @@ class WorkOrder(models.Model):
     note = models.TextField("примечание", blank=True)
 
     created_at = models.DateTimeField("создан", auto_now_add=True)
+    updated_at = models.DateTimeField("изменён", auto_now=True, db_index=True)
     closed_at = models.DateTimeField("закрыт", null=True, blank=True)
 
     history = HistoricalRecords()

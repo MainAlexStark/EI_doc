@@ -18,6 +18,7 @@ from apps.catalog.api_types import (
 )
 from apps.core.api import EmployeeListView, MeView, PersonalDataView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
+from apps.sync.views import DeviceTokenView
 from apps.core.views import frontend_index, frontend_root_file, healthz, privacy_policy
 from apps.hub.api import (
     AddressSuggestView,
@@ -91,6 +92,8 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/auth/device-token/", DeviceTokenView.as_view(), name="device_token"),
+    path("api/sync/", include("apps.sync.urls")),
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
     path("api/catalog/si-types/", SiTypeListCreateView.as_view(), name="si_type_list"),
     path("api/catalog/si-types/presets/", SiTypePresetsView.as_view(), name="si_type_presets"),

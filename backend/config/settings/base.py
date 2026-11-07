@@ -127,7 +127,8 @@ AUTH_USER_MODEL = "core.User"
 # --------------------------------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        # JWT + отказ токенам отозванных полевых устройств (apps/sync/auth.py)
+        "apps.sync.auth.DeviceJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),
@@ -144,6 +145,7 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
+    "TOKEN_REFRESH_SERIALIZER": "apps.sync.auth.DeviceAwareRefreshSerializer",
 }
 
 # Полевые устройства: поверитель в недельной командировке не должен разлогиниться
