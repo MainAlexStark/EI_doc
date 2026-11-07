@@ -314,6 +314,10 @@ cmd_install() {
   step "сервер"
   compose_up
 
+  step "резервные копии"
+  deploy/backup.sh install-cron
+  [ -n "$(env_get RESTIC_REPOSITORY)" ] || say "!! RESTIC_REPOSITORY не задан — копии будут только на этом диске (см. deploy/backup.sh)"
+
   step "проверка"
   if ! wait_health; then
     say ""
@@ -356,6 +360,13 @@ cmd_update() {
   local before
   before="$(git rev-parse HEAD)"
 
+  step "резервная копия перед обновлением"
+  if $SUDO docker compose ps --status running postgres 2>/dev/null | grep -q postgres; then
+    deploy/backup.sh run || die "копия не снялась — обновление остановлено, ничего не тронуто"
+  else
+    say "postgres не запущен — копию пропускаю"
+  fi
+
   step "обновление исходников"
   git pull --ff-only
 
@@ -396,6 +407,8 @@ cmd_logs()    { $SUDO docker compose logs -f --tail 200; }
 cmd_restart() { $SUDO docker compose restart; }
 cmd_down()    { $SUDO docker compose down; }
 
+cmd_backup() { shift; deploy/backup.sh "${@:-run}"; }
+
 cmd_secrets() {
   [ -f "$ENV_FILE" ] || die "сервер здесь не развёрнут"
   DOMAIN="$(domain_from_env)"
@@ -413,6 +426,8 @@ ${APP} — развёртывание на VPS
   ./deploy.sh secrets     показать, где лежат пароли и адрес
   ./deploy.sh restart     перезапустить
   ./deploy.sh down        остановить
+  ./deploy.sh backup [run|check|list|restore <папка>]
+                          резервные копии (по умолчанию — снять копию)
 
 Перед первым запуском заведите A-запись ${APP_DNS_HINT} на адрес этого VPS.
 ${USAGE_EXTRA}
@@ -427,6 +442,7 @@ case "${1:-}" in
   secrets) cmd_secrets ;;
   restart) cmd_restart ;;
   down)    cmd_down ;;
+  backup)  cmd_backup "$@" ;;
   *)
     case "$1" in
       *.*) DOMAIN="$1" ;;

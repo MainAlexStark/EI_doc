@@ -1,0 +1,102 @@
+# Проверки на каждый push и pull request.
+#
+# Тесты гоняются дважды: на SQLite (быстро, как локально) и на PostgreSQL 16 —
+# нумерация протоколов держится на select_for_update и частичных уникальных
+# индексах, которых SQLite не проверяет (см. README, «Тесты»).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SECRET_KEY: ci-not-a-secret
+  DB_NAME: ei_doc
+  DB_USER: ei_doc
+  DB_PASSWORD: ei_doc
+  DB_HOST: localhost
+  DB_PORT: "5432"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.9.6
+      - run: ruff check backend/apps backend/config
+
+  backend-sqlite:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python manage.py makemigrations --check --dry-run
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+      - run: pytest -p no:cacheprovider
+
+  backend-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ei_doc
+          POSTGRES_USER: ei_doc
+          POSTGRES_PASSWORD: ei_doc
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ei_doc -d ei_doc"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -p no:cacheprovider
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test_postgres
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+
+  deploy-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n deploy.sh && bash -n deploy/backup.sh
+      - run: shellcheck -S error deploy.sh deploy/backup.sh
