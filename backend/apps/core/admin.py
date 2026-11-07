@@ -50,3 +50,21 @@ class DeviceAdmin(admin.ModelAdmin):
     def revoke(self, request, queryset):
         updated = queryset.update(is_revoked=True)
         self.message_user(request, f"Отозвано устройств: {updated}")
+
+
+from apps.core.models import PersonalDataEvent  # noqa: E402
+
+
+@admin.register(PersonalDataEvent)
+class PersonalDataEventAdmin(admin.ModelAdmin):
+    list_display = ["at", "action", "object_type", "object_id", "performed_by", "note"]
+    list_filter = ["action", "object_type"]
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False

@@ -22,4 +22,9 @@ app.conf.beat_schedule = {
         "task": "apps.arshin.tasks.reconcile_submissions",
         "schedule": crontab(minute=25, hour="*/2"),
     },
+    # 152-ФЗ: обезличить заявки с истёкшим сроком хранения.
+    "personal-data-purge": {
+        "task": "apps.core.tasks.purge_personal_data",
+        "schedule": crontab(hour=3, minute=40),
+    },
 }

@@ -43,8 +43,19 @@ class RequestAdmin(admin.ModelAdmin):
     list_filter = ["status", "source", "district", "is_priority_slot"]
     search_fields = ["contact_name", "contact_phone", "contact_email", "address"]
     date_hierarchy = "created_at"
-    readonly_fields = ["created_at", "routed_at", "confirmed_at", "ip_address", "honeypot_tripped"]
+    readonly_fields = ["created_at", "routed_at", "confirmed_at", "ip_address", "honeypot_tripped",
+                       "consent_given", "consent_at", "consent_policy_version", "anonymized_at"]
     inlines = [RequestItemInline]
+    actions = ["anonymize_selected"]
+
+    @admin.action(description="Обезличить персональные данные (запрос субъекта, 152-ФЗ)")
+    def anonymize_selected(self, request, queryset):
+        from apps.core.models import PersonalDataEvent
+        from apps.core.personal_data import anonymize_request
+
+        done = sum(anonymize_request(obj, action=PersonalDataEvent.Action.ANONYMIZE_REQUEST,
+                                     note="из админки", user=request.user) for obj in queryset)
+        self.message_user(request, f"Обезличено заявок: {done}")
 
     @admin.display(description="Статус")
     def status_badge(self, obj: Request):
@@ -60,3 +71,18 @@ class RequestAdmin(admin.ModelAdmin):
         return format_html(
             '<b style="color:{}">{}</b>', colours.get(obj.status, "#000"), obj.get_status_display()
         )
+
+
+from apps.hub.models import Contract, ContractTemplate  # noqa: E402
+
+
+@admin.register(ContractTemplate)
+class ContractTemplateAdmin(admin.ModelAdmin):
+    list_display = ["name", "client_kind", "is_active"]
+
+
+@admin.register(Contract)
+class ContractAdmin(admin.ModelAdmin):
+    list_display = ["__str__", "client", "total", "created_at"]
+    raw_id_fields = ["client", "request", "work_order"]
+    readonly_fields = ["sha256", "created_at"]

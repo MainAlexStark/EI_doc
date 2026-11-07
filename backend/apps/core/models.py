@@ -178,3 +178,32 @@ class Device(models.Model):
 
     def __str__(self) -> str:
         return self.label or self.device_id
+
+
+class PersonalDataEvent(models.Model):
+    """Журнал действий с персональными данными (152-ФЗ): обезличивание, выгрузка субъекту.
+
+    Сами данные сюда не пишутся — только что сделано, с чем и почему.
+    """
+
+    class Action(models.TextChoices):
+        ANONYMIZE_EXPIRED = "expired", "Обезличено: истёк срок хранения"
+        ANONYMIZE_REQUEST = "subject", "Обезличено по запросу субъекта"
+        EXPORT = "export", "Выгрузка сведений субъекту"
+
+    action = models.CharField("действие", max_length=10, choices=Action.choices)
+    object_type = models.CharField("что", max_length=40)
+    object_id = models.PositiveBigIntegerField("id")
+    note = models.CharField("основание", max_length=250, blank=True)
+    performed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name="кто"
+    )
+    at = models.DateTimeField("когда", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "действие с персональными данными"
+        verbose_name_plural = "журнал персональных данных"
+        ordering = ["-at"]
+
+    def __str__(self) -> str:
+        return f"{self.get_action_display()} · {self.object_type} #{self.object_id}"

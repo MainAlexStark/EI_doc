@@ -542,7 +542,8 @@ export default function PublicRequestForm() {
               style={{ marginTop: 3 }}
             />
             <span className="sub">
-              {CONSENT_TEXT}
+              {CONSENT_TEXT}{" "}
+              <a href="/privacy/" target="_blank" rel="noopener">Политика обработки персональных данных</a>
               <span className="req"> *</span>
             </span>
           </label>

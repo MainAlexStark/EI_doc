@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from django.conf import settings
-from apps.core.permissions import user_permissions
+from apps.core.permissions import HasPerm, user_permissions
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
@@ -103,3 +103,56 @@ class TelegramLinkCodeView(APIView):
             "bot_username": getattr(settings, "TELEGRAM_BOT_USERNAME", ""),
             "already_linked": bool(employee.telegram_chat_id),
         }).data)
+
+
+class PersonalDataView(APIView):
+    """Запрос субъекта ПДн (152-ФЗ): что о нём хранится и обезличивание.
+
+    GET ?phone=&email= — найденные заявки и клиенты (действие журналируется);
+    POST {phone, email, reason} — обезличить всё найденное.
+    """
+
+    permission_classes = [HasPerm.of("core.manage_personal_data")]
+
+    def _subject(self, data):
+        from apps.core import personal_data
+
+        phone = str(data.get("phone", "")).strip()
+        email = str(data.get("email", "")).strip()
+        if len("".join(ch for ch in phone if ch.isdigit())) < 10 and "@" not in email:
+            return None
+        return personal_data.find_subject(phone=phone, email=email)
+
+    def get(self, request):
+        from apps.core.models import PersonalDataEvent
+
+        found = self._subject(request.query_params)
+        if found is None:
+            return Response({"detail": "Нужен телефон (10 цифр) или email"}, status=400)
+        for kind, rows in (("hub.request", found["requests"]), ("verification.client", found["clients"])):
+            for row in rows:
+                PersonalDataEvent.objects.create(action=PersonalDataEvent.Action.EXPORT, object_type=kind,
+                                                 object_id=row["id"], performed_by=request.user,
+                                                 note="просмотр по запросу субъекта")
+        return Response(found)
+
+    def post(self, request):
+        from apps.core import personal_data
+        from apps.core.models import PersonalDataEvent
+        from apps.hub.models import Request
+        from apps.verification.models import Client
+
+        found = self._subject(request.data)
+        if found is None:
+            return Response({"detail": "Нужен телефон (10 цифр) или email"}, status=400)
+        reason = str(request.data.get("reason", "")).strip() or "отзыв согласия субъектом"
+        action = PersonalDataEvent.Action.ANONYMIZE_REQUEST
+        requests_done = sum(
+            personal_data.anonymize_request(r, action=action, note=reason, user=request.user)
+            for r in Request.objects.filter(pk__in=[row["id"] for row in found["requests"]])
+        )
+        clients_done = sum(
+            personal_data.anonymize_client(c, action=action, note=reason, user=request.user)
+            for c in Client.objects.filter(pk__in=[row["id"] for row in found["clients"]])
+        )
+        return Response({"requests": requests_done, "clients": clients_done})

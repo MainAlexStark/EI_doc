@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   confirmRequest,
+  downloadFile,
+  issueContract,
   fetchEmployees,
   fetchRequests,
   rejectRequest,
@@ -172,6 +174,22 @@ export default function RequestsInbox() {
               {request.contact_phone && request.contact_email ? " · " : ""}
               {request.contact_email}
             </p>
+
+            {!["rejected", "spam", "cancelled"].includes(request.status) && (
+              <div className="actions">
+                <button
+                  disabled={busy === request.id}
+                  title="Договор .docx по шаблону: клиент, приборы, сумма прописью"
+                  onClick={() =>
+                    void issueContract({ request_id: request.id })
+                      .then((c) => downloadFile(`/api/hub/contracts/${c.id}/file/`, `${c.number}.docx`))
+                      .catch((exc: unknown) => window.alert(exc instanceof Error ? exc.message : "Договор не выпустился"))
+                  }
+                >
+                  Договор
+                </button>
+              </div>
+            )}
 
             {(request.status === "new" || request.status === "routed") && (
               <div className="actions">

@@ -21,3 +21,4 @@ qrcode[pil]==7.4.2
 pypdfium2==4.30.0
 pypdf==6.21.0
 python-docx==1.2.0
+docxtpl==0.19.1

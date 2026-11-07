@@ -84,3 +84,16 @@ def frontend_root_file(request, filename: str):
         raise Http404
     content_type = _ROOT_FILE_CONTENT_TYPES.get(file_path.suffix, "application/octet-stream")
     return HttpResponse(file_path.read_bytes(), content_type=content_type)
+
+
+def privacy_policy(request):
+    """Публичная политика обработки персональных данных (ссылка с формы заявки)."""
+    from django.conf import settings
+    from django.shortcuts import render
+
+    return render(request, "core/privacy.html", {
+        "org": settings.ORG_REQUISITES,
+        "version": settings.PRIVACY_POLICY_VERSION,
+        "rejected_days": settings.PD_RETENTION_REJECTED_DAYS,
+        "retention_years": round(settings.PD_RETENTION_DAYS / 365),
+    })

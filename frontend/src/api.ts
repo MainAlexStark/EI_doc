@@ -1138,3 +1138,8 @@ export const fetchStandardOptions = (date_from: string, date_to: string) =>
   );
 export const unreserveStandard = (tripId: number, standardId: number) =>
   json<void>(`/api/logistics/trips/${tripId}/standards/?standard=${standardId}`, { method: "DELETE" });
+
+// Договоры (apps/hub/contracts.py, docs/contracts.md)
+export type ContractInfo = { id: number; number: string; client: string; total: string; created_at: string };
+export const issueContract = (input: { request_id?: number; work_order_id?: number }) =>
+  json<ContractInfo>("/api/hub/contracts/", { method: "POST", body: JSON.stringify(input) });

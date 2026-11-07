@@ -16,12 +16,14 @@ from apps.catalog.api_types import (
     SiTypeListCreateView,
     SiTypePresetsView,
 )
-from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
+from apps.core.api import EmployeeListView, MeView, PersonalDataView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
-from apps.core.views import frontend_index, frontend_root_file, healthz
+from apps.core.views import frontend_index, frontend_root_file, healthz, privacy_policy
 from apps.hub.api import (
     AddressSuggestView,
     CaptchaConfigView,
+    ContractFileView,
+    ContractListView,
     RequestConfirmView,
     RequestCreateView,
     RequestListView,
@@ -83,6 +85,8 @@ urlpatterns = [
     # обновлении, а APPEND_SLASH сделал бы редирект на "/healthz/",
     # который curl -fsS без -L считает не 200 и откатывает деплой.
     path("healthz", healthz, name="healthz"),
+    path("privacy/", privacy_policy, name="privacy_policy"),
+    path("api/core/personal-data/", PersonalDataView.as_view(), name="personal_data"),
     path("", frontend_index, name="frontend_index"),
     path("admin/", admin.site.urls),
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
@@ -147,6 +151,8 @@ urlpatterns = [
     path("api/hub/captcha-config/", CaptchaConfigView.as_view(), name="captcha_config"),
     path("api/hub/requests/", RequestCreateView.as_view(), name="request_create"),
     path("api/hub/requests/list/", RequestListView.as_view(), name="request_list"),
+    path("api/hub/contracts/", ContractListView.as_view(), name="contract_list"),
+    path("api/hub/contracts/<int:pk>/file/", ContractFileView.as_view(), name="contract_file"),
     path("api/hub/requests/<int:pk>/route/", RequestRouteView.as_view(), name="request_route"),
     path("api/hub/requests/<int:pk>/confirm/", RequestConfirmView.as_view(), name="request_confirm"),
     path("api/hub/requests/<int:pk>/reject/", RequestRejectView.as_view(), name="request_reject"),

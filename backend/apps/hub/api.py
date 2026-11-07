@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import re
 
+from django.conf import settings
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from apps.core.permissions import HasPerm
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -19,6 +20,7 @@ from rest_framework.views import APIView
 
 from apps.catalog.models import MeasurementFamily
 from apps.core.models import Employee
+from apps.core.permissions import HasPerm
 from apps.hub import captcha, routing, service
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
 from apps.hub.models import Request, RequestItem, RequestStatus
@@ -243,6 +245,8 @@ class RequestCreateView(APIView):
             is_priority_slot=effective_priority,
             estimated_price=price["total"] if items_input else None,
             discount_percent=price["discount_percent"] if items_input else 0,
+            consent_at=timezone.now(),
+            consent_policy_version=settings.PRIVACY_POLICY_VERSION,
             **data,
         )
         for item in items_input:
@@ -390,3 +394,69 @@ class RequestRejectView(APIView):
 def _notify_work_order_assigned(work_order: WorkOrder) -> None:
     """Совместимость: уведомление теперь живёт в apps.hub.service."""
     service.notify_work_order_assigned(work_order)
+
+
+# ---------------------------------------------------------------------------
+# Договоры
+# ---------------------------------------------------------------------------
+class ContractCreateSerializer(serializers.Serializer):
+    request_id = serializers.IntegerField(required=False)
+    work_order_id = serializers.IntegerField(required=False)
+
+    def validate(self, attrs):
+        if not attrs.get("request_id") and not attrs.get("work_order_id"):
+            raise serializers.ValidationError("Нужна заявка или наряд")
+        return attrs
+
+
+def _contract(contract) -> dict:
+    return {
+        "id": contract.pk, "number": contract.number, "client": str(contract.client),
+        "request_id": contract.request_id, "work_order_id": contract.work_order_id,
+        "total": contract.total, "created_at": contract.created_at, "sha256": contract.sha256,
+    }
+
+
+class ContractListView(APIView):
+    """GET /api/hub/contracts/?request=&work_order= ; POST — выпустить договор."""
+
+    permission_classes = [HasPerm.of("core.manage_contracts")]
+
+    def get(self, request):
+        from apps.hub.models import Contract
+
+        qs = Contract.objects.select_related("client")
+        if request.query_params.get("request"):
+            qs = qs.filter(request_id=request.query_params["request"])
+        if request.query_params.get("work_order"):
+            qs = qs.filter(work_order_id=request.query_params["work_order"])
+        return Response([_contract(c) for c in qs[:200]])
+
+    def post(self, request):
+        from apps.hub import contracts
+
+        payload = ContractCreateSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        req = get_object_or_404(Request, pk=data["request_id"]) if data.get("request_id") else None
+        wo = get_object_or_404(WorkOrder, pk=data["work_order_id"]) if data.get("work_order_id") else None
+        try:
+            contract = contracts.issue(request=req, work_order=wo, user=request.user)
+        except contracts.ContractError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(_contract(contract), status=status.HTTP_201_CREATED)
+
+
+class ContractFileView(APIView):
+    permission_classes = [HasPerm.of("core.manage_contracts")]
+
+    def get(self, request, pk: int):
+        from django_sendfile import sendfile
+
+        from apps.hub.models import Contract
+
+        contract = get_object_or_404(Contract, pk=pk)
+        return sendfile(
+            request, contract.file.path, attachment=True, attachment_filename=f"{contract.number}.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )

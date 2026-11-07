@@ -30,6 +30,17 @@ class ClientAdmin(admin.ModelAdmin):
     list_display = ["name", "kind", "inn", "phone"]
     list_filter = ["kind"]
     search_fields = ["name", "inn", "phone"]
+    readonly_fields = ["anonymized_at"]
+    actions = ["anonymize_selected"]
+
+    @admin.action(description="Обезличить персональные данные (запрос субъекта, 152-ФЗ)")
+    def anonymize_selected(self, request, queryset):
+        from apps.core.models import PersonalDataEvent
+        from apps.core.personal_data import anonymize_client
+
+        done = sum(anonymize_client(obj, action=PersonalDataEvent.Action.ANONYMIZE_REQUEST,
+                                    note="из админки", user=request.user) for obj in queryset)
+        self.message_user(request, f"Обезличено клиентов: {done}")
 
 
 @admin.register(Site)

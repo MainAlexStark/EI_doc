@@ -341,3 +341,34 @@ MAP_TILE_ATTRIBUTION = env("MAP_TILE_ATTRIBUTION", default="© OpenStreetMap con
 # PDF протокола при подписи (apps.verification.numbering._schedule_pdf):
 # celery — фоном, sync — сразу, off — не выпускать.
 PROTOCOL_PDF_MODE = env("PROTOCOL_PDF_MODE", default="celery")
+
+# Реквизиты организации для договоров (apps.hub.contracts). Пустые поля в
+# договоре печатаются чертой — впишите их в .env до первого договора.
+ORG_REQUISITES = {
+    "name": env("ORG_NAME", default='ООО "Единица Измерения"'),
+    "full_name": env("ORG_FULL_NAME", default='Общество с ограниченной ответственностью "ЕДИНИЦА ИЗМЕРЕНИЯ"'),
+    "inn": env("ORG_INN", default=""),
+    "kpp": env("ORG_KPP", default=""),
+    "ogrn": env("ORG_OGRN", default=""),
+    "address": env("ORG_ADDRESS", default="610008, г. Киров, ул. Гагарина, д. 20, кв. 62"),
+    "bank": env("ORG_BANK", default=""),
+    "bik": env("ORG_BIK", default=""),
+    "account": env("ORG_ACCOUNT", default=""),
+    "corr_account": env("ORG_CORR_ACCOUNT", default=""),
+    "director": env("ORG_DIRECTOR", default=""),
+    "accreditation": env("ORG_ACCREDITATION", default=""),
+    "phone": env("ORG_PHONE", default=""),
+    "email": env("ORG_EMAIL", default=""),
+}
+
+# --------------------------------------------------------------------------
+# Персональные данные, 152-ФЗ (apps.core.personal_data, docs/personal-data.md)
+# --------------------------------------------------------------------------
+# Редакция политики: меняется вместе с текстом apps/core/templates/core/privacy.html.
+# Согласие на форме заявки сохраняется с этой версией.
+PRIVACY_POLICY_VERSION = "2026-11-07"
+PRIVACY_POLICY_URL = env("PRIVACY_POLICY_URL", default="/privacy/")
+# Сроки хранения, дни. Отклонённые и спам — коротко; исполненные заявки —
+# по сроку исковой давности (3 года) после последнего события.
+PD_RETENTION_REJECTED_DAYS = env.int("PD_RETENTION_REJECTED_DAYS", default=30)
+PD_RETENTION_DAYS = env.int("PD_RETENTION_DAYS", default=3 * 365)

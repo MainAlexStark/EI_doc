@@ -30,6 +30,7 @@ class Client(models.Model):
     email = models.EmailField("email", blank=True)
     note = models.TextField("примечание", blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    anonymized_at = models.DateTimeField("персональные данные обезличены", null=True, blank=True)
 
     class Meta:
         verbose_name = "клиент"

@@ -192,6 +192,15 @@ class Request(models.Model):
         "согласие на обработку персональных данных", default=False,
         help_text="Отметка чекбокса на публичной форме — обязательна для отправки (ст. 9 152-ФЗ)",
     )
+    consent_at = models.DateTimeField("согласие дано", null=True, blank=True)
+    consent_policy_version = models.CharField(
+        "версия политики ПДн", max_length=20, blank=True,
+        help_text="С какой редакцией политики согласился заявитель (settings.PRIVACY_POLICY_VERSION)",
+    )
+    anonymized_at = models.DateTimeField(
+        "персональные данные обезличены", null=True, blank=True,
+        help_text="Истёк срок хранения или субъект отозвал согласие — см. apps.core.personal_data",
+    )
 
     suggested_employee = models.ForeignKey(
         "core.Employee", on_delete=models.SET_NULL, null=True, blank=True,
@@ -257,3 +266,73 @@ class RequestItem(models.Model):
     @property
     def subtotal(self):
         return self.unit_price * self.quantity
+
+
+# ---------------------------------------------------------------------------
+# Договоры (apps.hub.contracts, docs/contracts.md)
+# ---------------------------------------------------------------------------
+class ContractTemplate(models.Model):
+    """Шаблон договора в .docx с полями docxtpl ({{ client.name }} и т. п.).
+
+    Шаблон правит юрист в Word, система только подставляет данные. Без
+    загруженного шаблона используется встроенный (apps/hub/templates_docx/).
+    """
+
+    name = models.CharField("название", max_length=160)
+    client_kind = models.CharField(
+        "для клиентов", max_length=10, blank=True,
+        choices=[("person", "Частное лицо"), ("org", "Юридическое лицо")],
+        help_text="Пусто — для всех",
+    )
+    file = models.FileField("файл .docx", upload_to="contract_templates/")
+    is_active = models.BooleanField("используется", default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "шаблон договора"
+        verbose_name_plural = "шаблоны договоров"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class Contract(models.Model):
+    """Выпущенный договор. Номер сквозной в пределах года: Д-2026-0001."""
+
+    year = models.PositiveSmallIntegerField("год")
+    seq = models.PositiveIntegerField("порядковый номер")
+    client = models.ForeignKey(
+        "verification.Client", on_delete=models.PROTECT, related_name="contracts", verbose_name="клиент"
+    )
+    request = models.ForeignKey(
+        Request, on_delete=models.SET_NULL, null=True, blank=True, related_name="contracts", verbose_name="заявка"
+    )
+    work_order = models.ForeignKey(
+        "verification.WorkOrder", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="contracts", verbose_name="наряд",
+    )
+    template = models.ForeignKey(
+        ContractTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+        verbose_name="шаблон",
+    )
+    total = models.DecimalField("сумма, ₽", max_digits=10, decimal_places=2, default=0)
+    file = models.FileField("файл", upload_to="contracts/%Y/")
+    sha256 = models.CharField("SHA-256", max_length=64, blank=True)
+    created_by = models.ForeignKey(
+        "core.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name="выпустил"
+    )
+    created_at = models.DateTimeField("выпущен", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "договор"
+        verbose_name_plural = "договоры"
+        ordering = ["-year", "-seq"]
+        constraints = [models.UniqueConstraint(fields=["year", "seq"], name="contract_unique_number")]
+
+    def __str__(self) -> str:
+        return self.number
+
+    @property
+    def number(self) -> str:
+        return f"Д-{self.year}-{self.seq:04d}"
