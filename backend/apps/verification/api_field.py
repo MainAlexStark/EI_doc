@@ -21,6 +21,7 @@ from django.db import IntegrityError, transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
+from apps.core.permissions import HasPerm
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -68,6 +69,8 @@ class WorkOrderVerificationsView(APIView):
     GET — что уже заведено по наряду (не завести один прибор дважды).
     POST — завести поверку; идемпотентно по client_id.
     """
+
+    permission_classes = [HasPerm.of("verification.field_work", safe_perm="verification.view_journal")]
 
     @extend_schema(responses={200: FieldVerificationSerializer(many=True)})
     def get(self, request, pk: int):

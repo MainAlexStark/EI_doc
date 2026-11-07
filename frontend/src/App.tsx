@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
-import { fetchMe, isAuthenticated, logout, type Me } from "./api";
+import { can, fetchMe, isAuthenticated, logout, type Me } from "./api";
 import Attestations from "./components/Attestations";
 import Availability from "./components/Availability";
 import FieldWork from "./components/FieldWork";
@@ -19,7 +19,7 @@ const Assistant = lazy(() => import("./assistant/Assistant"));
  *   поверитель — только свои. */
 type Tab = "field-work" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
 
-type NavItem = { key: Tab; label: string; icon: ReactNode; managerOnly?: boolean };
+type NavItem = { key: Tab; label: string; icon: ReactNode; managerOnly?: boolean; perm?: string };
 
 const svg = (children: ReactNode) => (
   <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -40,7 +40,7 @@ const ICONS: Record<Tab, ReactNode> = {
 const WORK: NavItem[] = [
   { key: "field-work", label: "Поверки", icon: ICONS["field-work"] },
   { key: "journal", label: "Журнал", icon: ICONS.journal },
-  { key: "requests", label: "Заявки", icon: ICONS.requests, managerOnly: true },
+  { key: "requests", label: "Заявки", icon: ICONS.requests, perm: "hub.manage_requests" },
   { key: "availability", label: "График", icon: ICONS.availability },
   { key: "tasks", label: "Задачи", icon: ICONS.tasks },
   { key: "assistant", label: "Ассистент", icon: ICONS.assistant },
@@ -89,7 +89,8 @@ export default function App() {
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
 
   const isManager = isManagerRole(me?.role);
-  const visible = (items: NavItem[]) => items.filter((item) => isManager || !item.managerOnly);
+  const visible = (items: NavItem[]) =>
+    items.filter((item) => (isManager || !item.managerOnly) && (!item.perm || can(me, item.perm)));
   const work = visible(WORK);
   const reference = visible(REFERENCE);
   const all = [...work, ...reference];
@@ -176,7 +177,7 @@ export default function App() {
 
         <main>
           {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
-          {tab === "journal" && <JournalTab isManager={isManager} onOpenTypes={() => go("si-types")} />}
+          {tab === "journal" && <JournalTab isManager={can(me, "verification.normocontrol")} onOpenTypes={() => go("si-types")} />}
           {tab === "requests" && <RequestsInbox />}
           {tab === "availability" && <Availability />}
           {tab === "tasks" && <Tasks />}

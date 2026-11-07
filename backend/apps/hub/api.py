@@ -10,6 +10,7 @@ import re
 
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from apps.core.permissions import HasPerm
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -298,6 +299,8 @@ class RequestSerializer(serializers.Serializer):
 class RequestListView(APIView):
     """GET /api/hub/requests/?status=&district=&assigned_employee="""
 
+    permission_classes = [HasPerm.of("hub.manage_requests")]
+
     def get(self, request):
         qs = Request.objects.select_related(
             "district", "suggested_employee", "assigned_employee"
@@ -316,6 +319,8 @@ class RequestListView(APIView):
 
 class RequestRouteView(APIView):
     """POST /api/hub/requests/{id}/route/ — пересчитать рекомендацию вручную."""
+
+    permission_classes = [HasPerm.of("hub.manage_requests")]
 
     def post(self, request, pk: int):
         obj = get_object_or_404(Request, pk=pk)
@@ -339,6 +344,8 @@ class RequestConfirmView(APIView):
     иначе заводит новые из данных заявки — так подтверждение не блокируется
     поиском совпадений, но и не плодит дубли, когда они уже найдены.
     """
+
+    permission_classes = [HasPerm.of("hub.manage_requests")]
 
     @extend_schema(request=RequestConfirmSerializer, responses={201: None})
     def post(self, request, pk: int):
@@ -366,6 +373,8 @@ class RequestRejectSerializer(serializers.Serializer):
 
 class RequestRejectView(APIView):
     """POST /api/hub/requests/{id}/reject/"""
+
+    permission_classes = [HasPerm.of("hub.manage_requests")]
 
     @extend_schema(request=RequestRejectSerializer, responses={200: None})
     def post(self, request, pk: int):

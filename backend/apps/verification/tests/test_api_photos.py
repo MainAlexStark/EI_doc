@@ -8,7 +8,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.core.models import Employee, Role, User
-from apps.verification.models import Verification, VerificationPhoto
+from apps.verification.models import VerificationPhoto
 from apps.verification.tests import factories as f
 
 

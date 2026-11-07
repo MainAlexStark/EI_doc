@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections import defaultdict
 
 from django.utils import timezone
 from rest_framework import generics, serializers, status

@@ -19,6 +19,7 @@ from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django_sendfile import sendfile
 from drf_spectacular.utils import extend_schema
+from apps.core.permissions import ReadOnlyForObservers
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -53,6 +54,8 @@ class VerificationPhotosView(APIView):
     ни на результат, ни на протокол — чисто вспомогательный материал.
     """
 
+    permission_classes = [ReadOnlyForObservers]
+
     parser_classes = [MultiPartParser, FormParser]
 
     @extend_schema(responses={200: VerificationPhotoSerializer(many=True)})
@@ -85,6 +88,8 @@ class VerificationPhotosView(APIView):
 
 class VerificationPhotoDetailView(APIView):
     """DELETE /api/verification-photos/{id}/ — убрать неудачный/лишний снимок."""
+
+    permission_classes = [ReadOnlyForObservers]
 
     def delete(self, request, pk: int):
         obj = get_object_or_404(VerificationPhoto, pk=pk)

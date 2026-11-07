@@ -208,10 +208,15 @@ export const fetchEmployees = () => json<Employee[]>("/api/core/employees/");
 // ---------------------------------------------------------------------------
 // Текущий пользователь (для шапки — показать имя, а не только «Выйти»)
 // ---------------------------------------------------------------------------
+export const can = (me: { permissions?: string[] } | null | undefined, perm: string) =>
+  !!me?.permissions?.includes(perm);
+
 export type Me = {
   email: string;
   role: string;
   role_display: string;
+  /** Права из apps/core/permissions.py — по ним прячутся кнопки, которые сервер всё равно отклонит. */
+  permissions?: string[];
   employee: {
     id: number;
     full_name: string;

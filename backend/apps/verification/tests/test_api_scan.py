@@ -10,7 +10,6 @@ from __future__ import annotations
 from io import BytesIO
 from unittest import mock
 
-import numpy as np
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings

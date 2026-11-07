@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
+from apps.core.permissions import ReadOnlyForObservers
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -82,6 +83,8 @@ class VerificationMeasurementsView(APIView):
     Вердикт возвращается системой — отдельной «галочки годности» на входе нет.
     """
 
+    permission_classes = [ReadOnlyForObservers]
+
     @extend_schema(request=MeasurementsSerializer, responses={200: None})
     def post(self, request, pk: int):
         verification = get_object_or_404(
@@ -114,6 +117,8 @@ class VerificationConfirmRowsView(APIView):
     Экран сверки: человек подтверждает распознанные строки, глядя на фото.
     Пока есть неподтверждённые, поверка остаётся черновиком.
     """
+
+    permission_classes = [ReadOnlyForObservers]
 
     @extend_schema(request=ConfirmRowsSerializer, responses={200: None})
     def post(self, request, pk: int):

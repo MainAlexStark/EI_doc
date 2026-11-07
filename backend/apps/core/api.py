@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from apps.core.permissions import user_permissions
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
@@ -49,6 +50,7 @@ class MeSerializer(serializers.Serializer):
     email = serializers.EmailField()
     role = serializers.CharField()
     role_display = serializers.CharField()
+    permissions = serializers.ListField(child=serializers.CharField())
     employee = EmployeeMeSerializer(allow_null=True)
 
 
@@ -68,6 +70,7 @@ class MeView(APIView):
             "email": user.email,
             "role": user.role,
             "role_display": user.get_role_display(),
+            "permissions": user_permissions(user),
             "employee": None,
         }
         if employee is not None:

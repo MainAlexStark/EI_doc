@@ -24,6 +24,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django_sendfile import sendfile
 from drf_spectacular.utils import extend_schema
+from apps.core.permissions import ReadOnlyForObservers
 from rest_framework import serializers, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -104,6 +105,8 @@ class WorkOrderScansView(APIView):
     начинается с пустых полей, поверитель заполняет их вручную, глядя на то
     же фото.
     """
+
+    permission_classes = [ReadOnlyForObservers]
 
     parser_classes = [MultiPartParser, FormParser]
 
@@ -224,6 +227,8 @@ class ScanApplyView(APIView):
     client_id в apps.verification.api_field, только ключ идемпотентности
     здесь другой (один скан — одна поверка, а не UUID с устройства).
     """
+
+    permission_classes = [ReadOnlyForObservers]
 
     @extend_schema(request=ScanApplySerializer, responses={201: FieldVerificationSerializer})
     def post(self, request, pk: int):

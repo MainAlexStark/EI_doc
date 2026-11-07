@@ -44,6 +44,7 @@ THIRD_PARTY_APPS = [
     "django_filters",
     "simple_history",
     "drf_spectacular",
+    "rules.apps.AutodiscoverRulesConfig",
 ]
 
 LOCAL_APPS = [
@@ -75,6 +76,13 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
+]
+
+# django-rules: права ролей из apps/core/permissions.py работают через
+# обычный user.has_perm(), в том числе в админке.
+AUTHENTICATION_BACKENDS = [
+    "rules.permissions.ObjectPermissionBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 ROOT_URLCONF = "config.urls"

@@ -8,7 +8,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.catalog.models import SiType
-from apps.core.models import User
+from apps.core.models import Role, User
 from apps.verification import measurements as service
 from apps.verification.calculators import water_meter as wm
 from apps.verification.models import VerificationStatus
@@ -239,7 +239,7 @@ class ScanTestCase(TestCase):
 class ApiTestCase(TestCase):
     def setUp(self) -> None:
         self.client = APIClient()
-        self.client.force_authenticate(User.objects.create_user("p@ei.test", "pw"))
+        self.client.force_authenticate(User.objects.create_user("p@ei.test", "pw", role=Role.VERIFIER))
         self.family = f.make_family()
         self.employee = f.make_employee()
         f.attest(self.employee, self.family)

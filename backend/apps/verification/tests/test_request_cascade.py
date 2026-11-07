@@ -12,7 +12,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from apps.core.models import Employee, Role, User
+from apps.core.models import Role, User
 from apps.hub.models import Request, RequestStatus
 from apps.verification.models import Client, Site, Verification, VerificationStatus, WorkOrder, WorkOrderStatus
 from apps.verification.tests import factories as f

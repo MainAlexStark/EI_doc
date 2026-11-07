@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
+from apps.core.permissions import HasPerm
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -74,6 +75,8 @@ class WorkOrderCreateSerializer(serializers.Serializer):
 class WorkOrderCreateView(APIView):
     """POST /api/work-orders/ — наряд напрямую, не из заявки с сайта."""
 
+    permission_classes = [HasPerm.of("verification.manage_workorders")]
+
     @extend_schema(request=WorkOrderCreateSerializer, responses={201: WorkOrderSerializer})
     def post(self, request):
         payload = WorkOrderCreateSerializer(data=request.data)
@@ -97,6 +100,8 @@ class WorkOrderStatusView(APIView):
     без этого вызова заявка при отменённом наряде так и оставалась бы
     «Подтверждена», хотя по факту работа не состоится.
     """
+
+    permission_classes = [HasPerm.of("verification.manage_workorders")]
 
     @extend_schema(request=WorkOrderStatusSerializer, responses={200: WorkOrderSerializer})
     def post(self, request, pk: int):

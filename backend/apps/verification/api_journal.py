@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from apps.core.permissions import HasPerm
 from rest_framework import serializers, status
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
@@ -143,6 +144,8 @@ class JournalExportView(APIView):
 class NormocontrolScopesView(APIView):
     """GET /api/normocontrol/scopes/ — что ждёт нормоконтроля."""
 
+    permission_classes = [HasPerm.of("verification.normocontrol")]
+
     def get(self, request):
         scopes = NumberingScope.objects.select_related("series", "employee").order_by(
             "series__code", "employee__full_name", "-year"
@@ -155,6 +158,8 @@ class NumberingPreviewView(APIView):
 
     Показывает, какие номера присвоятся и что сдвинется, ничего не меняя.
     """
+
+    permission_classes = [HasPerm.of("verification.normocontrol")]
 
     def post(self, request, pk: int):
         scope = get_object_or_404(NumberingScope, pk=pk)
@@ -180,6 +185,8 @@ class NumberingPreviewView(APIView):
 
 class NumberingApplyView(APIView):
     """POST /api/normocontrol/scopes/{id}/assign/ — применить пересчёт."""
+
+    permission_classes = [HasPerm.of("verification.normocontrol")]
 
     def post(self, request, pk: int):
         scope = get_object_or_404(NumberingScope, pk=pk)
@@ -208,6 +215,8 @@ class SignProtocolsView(APIView):
     на дату поверки. Что не подписалось — возвращается с причиной, пачка
     целиком из-за одного протокола не падает.
     """
+
+    permission_classes = [HasPerm.of("verification.sign_protocol")]
 
     def post(self, request):
         payload = SignProtocolsSerializer(data=request.data)

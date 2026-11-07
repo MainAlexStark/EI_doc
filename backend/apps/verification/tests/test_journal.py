@@ -10,7 +10,7 @@ from django.urls import reverse
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
-from apps.core.models import User
+from apps.core.models import Role, User
 from apps.verification import journal, numbering
 from apps.verification import measurements as service
 from apps.verification.calculators import water_meter as wm
@@ -37,7 +37,7 @@ class JournalTestCaseMixin:
         self.family = f.make_family()
         self.employee = f.make_employee()
         f.attest(self.employee, self.family)
-        self.user = User.objects.create_user("j@ei.test", "pw")
+        self.user = User.objects.create_user("j@ei.test", "pw", role=Role.METROLOGIST)
         self.user.employee = self.employee
         self.employee.user = self.user
         self.employee.save()
@@ -255,7 +255,7 @@ class NormocontrolTestCase(JournalTestCaseMixin, TestCase):
         assert "без номера" in response.data["refused"][0]["detail"]
 
     def test_signing_without_an_employee_card_is_refused_clearly(self):
-        outsider = User.objects.create_user("outsider@ei.test", "pw")
+        outsider = User.objects.create_user("outsider@ei.test", "pw", role=Role.METROLOGIST)
         api = APIClient()
         api.force_authenticate(outsider)
 
