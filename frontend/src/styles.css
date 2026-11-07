@@ -688,3 +688,22 @@ details.more > summary { cursor: pointer; color: var(--accent); font-weight: 500
 /* Заголовок раздела внутри вкладки (Журнал → «Отправка в Аршин» и т. п.) */
 .section-title { font-size: 17px; font-weight: 600; margin: 28px 0 12px; letter-spacing: -0.01em; }
 .arshin .scope + .scopes { margin-top: 16px; }
+
+/* Выезды: карта, пины, остановки */
+.trip-map { width: 100%; border-radius: 14px; overflow: hidden; margin: 12px 0 16px; background: var(--surface-2, #eee); }
+.map-pin {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35);
+  color: #fff; font: 600 11px/18px -apple-system, system-ui, sans-serif; text-align: center; cursor: pointer;
+}
+.trips .legend { display: inline-flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+.trips .legend i, .day-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
+.trip-card { text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.stops { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 10px; }
+.stops .stop { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.stops .st-done { opacity: .55; }
+.stops .st-skipped { opacity: .55; text-decoration: line-through; }
+.checklist { display: grid; gap: 6px; }
+.checklist label { display: flex; gap: 8px; align-items: baseline; }
+.checklist label.muted { opacity: .55; }
+.hint { font-size: 12.5px; opacity: .7; }
+@media (max-width: 640px) { .trip-map { height: 300px !important; } }

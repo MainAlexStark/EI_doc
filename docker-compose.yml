@@ -79,7 +79,21 @@ services:
       - default
       - mcp-network
 
+  # Маршруты по дорогам для «Выездов» (apps.logistics.routing). Необязателен:
+  # без него расстояния считаются по прямой. Включается профилем:
+  #   deploy/osrm.sh volga-fed-district   # один раз: скачать и подготовить карту
+  #   docker compose --profile routing up -d osrm
+  # и LOGISTICS_OSRM_URL=http://osrm:5000 в .env.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    profiles: ["routing"]
+    command: ["osrm-routed", "--algorithm", "mld", "/data/region.osrm"]
+    volumes:
+      - osrmdata:/data
+    restart: unless-stopped
+
 volumes:
+  osrmdata:
   pgdata:
   redisdata:
   media:

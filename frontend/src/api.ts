@@ -1019,3 +1019,120 @@ export async function downloadFile(path: string, filename: string): Promise<void
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// ---------------------------------------------------------------------------
+// Командировки и маршруты (apps/logistics, docs/logistics.md)
+// ---------------------------------------------------------------------------
+export type MapPoint = { lat: number | null; lon: number | null };
+
+export type DemandPoint = MapPoint & {
+  kind: "work_order" | "request" | "expiring";
+  id: number | null;
+  label: string;
+  date: string | null;
+};
+
+export type DemandGroup = {
+  district_id: number | null;
+  district: string;
+  work_orders: number;
+  requests: number;
+  expiring: number;
+  total: number;
+  earliest: string | null;
+  center: { lat: number; lon: number } | null;
+  points: DemandPoint[];
+};
+
+export type TripStop = MapPoint & {
+  id: number;
+  address: string;
+  day: string | null;
+  position: number;
+  eta: string | null;
+  window_from: string | null;
+  window_to: string | null;
+  service_minutes: number;
+  status: "planned" | "done" | "skipped";
+  status_display: string;
+  note: string;
+  work_order: number | null;
+  work_order_status: string | null;
+  client: string;
+  restricted: boolean;
+};
+
+export type Trip = {
+  id: number;
+  title: string;
+  status: string;
+  status_display: string;
+  district: string;
+  district_id: number | null;
+  date_from: string;
+  date_to: string;
+  employees: { id: number; name: string }[];
+  vehicle: string;
+  budget: string | null;
+  actual_cost: string | null;
+  note: string;
+  stops_count: number;
+  stops?: TripStop[];
+  reservations?: { id: number; standard: number; name: string; number: string; date_from: string; date_to: string }[];
+  plan_fact?: {
+    stops_planned: number;
+    stops_done: number;
+    stops_skipped: number;
+    stops_left: number;
+    verifications: number;
+    verifications_accepted: number;
+    unsuitable: number;
+    cost_per_verification: string | null;
+  };
+  depot?: { lat: number; lon: number } | null;
+};
+
+export type TripInput = {
+  title?: string;
+  date_from?: string;
+  date_to?: string;
+  district_id?: number | null;
+  employee_ids?: number[];
+  work_order_ids?: number[];
+  vehicle?: string;
+  budget?: string | null;
+  actual_cost?: string | null;
+  note?: string;
+  status?: string;
+};
+
+export type MapConfig = { tile_url: string; attribution: string; depot: { lat: number; lon: number } | null };
+
+export const fetchMapConfig = () => json<MapConfig>("/api/logistics/map-config/");
+export const fetchDemand = (days = 60) =>
+  json<{ days: number; groups: DemandGroup[] }>(`/api/logistics/demand/?days=${days}`);
+export const fetchTrips = (active = false) => json<Trip[]>(`/api/logistics/trips/${active ? "?active=1" : ""}`);
+export const fetchTrip = (id: number) => json<Trip>(`/api/logistics/trips/${id}/`);
+export const createTrip = (input: TripInput) =>
+  json<Trip>("/api/logistics/trips/", { method: "POST", body: JSON.stringify(input) });
+export const updateTrip = (id: number, input: TripInput) =>
+  json<Trip>(`/api/logistics/trips/${id}/`, { method: "PATCH", body: JSON.stringify(input) });
+export const optimizeTrip = (id: number) =>
+  json<{ summary: { days: { day: string; stops: number; minutes: number; km: number | null; source: string; solver: string }[]; warnings: string[]; unlocated: string[] }; trip: Trip }>(
+    `/api/logistics/trips/${id}/optimize/`,
+    { method: "POST" },
+  );
+export const reserveStandards = (id: number, standard_ids: number[]) =>
+  json<{ refused: { standard: number; name: string; detail: string }[]; trip: Trip }>(
+    `/api/logistics/trips/${id}/standards/`,
+    { method: "POST", body: JSON.stringify({ standard_ids }) },
+  );
+export const updateStop = (id: number, input: { status?: string; day?: string | null; note?: string }) =>
+  json<TripStop>(`/api/logistics/stops/${id}/`, { method: "PATCH", body: JSON.stringify(input) });
+export const removeStop = (id: number) => json<void>(`/api/logistics/stops/${id}/`, { method: "DELETE" });
+export const fetchStandardOptions = (date_from: string, date_to: string) =>
+  json<{ id: number; name: string; number: string; valid_until: string; busy: { trip: number; title: string }[] }[]>(
+    `/api/logistics/standards/?${queryString({ date_from, date_to })}`,
+  );
+export const unreserveStandard = (tripId: number, standardId: number) =>
+  json<void>(`/api/logistics/trips/${tripId}/standards/?standard=${standardId}`, { method: "DELETE" });

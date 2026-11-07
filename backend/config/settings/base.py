@@ -320,3 +320,20 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "plain"}},
     "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")},
 }
+
+# --------------------------------------------------------------------------
+# Командировки и маршруты (apps.logistics, docs/logistics.md)
+# --------------------------------------------------------------------------
+# Откуда выезжают по умолчанию (офис). Пусто — от первой точки маршрута.
+LOGISTICS_DEPOT_LAT = env("LOGISTICS_DEPOT_LAT", default="")
+LOGISTICS_DEPOT_LON = env("LOGISTICS_DEPOT_LON", default="")
+# OSRM внутри compose (профиль routing): http://osrm:5000. Пусто — по прямой.
+LOGISTICS_OSRM_URL = env("LOGISTICS_OSRM_URL", default="")
+LOGISTICS_DAY_START = env("LOGISTICS_DAY_START", default="09:00")
+LOGISTICS_DAY_MINUTES = env.int("LOGISTICS_DAY_MINUTES", default=9 * 60)
+LOGISTICS_SPEED_KMH = env.float("LOGISTICS_SPEED_KMH", default=32.0)
+LOGISTICS_DETOUR_FACTOR = env.float("LOGISTICS_DETOUR_FACTOR", default=1.35)
+# Подложка карты. OSM просит не грузить их тайлы массово — для работы лучше
+# свой тайл-сервер или коммерческий провайдер (см. docs/logistics.md).
+MAP_TILE_URL = env("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+MAP_TILE_ATTRIBUTION = env("MAP_TILE_ATTRIBUTION", default="© OpenStreetMap contributors")

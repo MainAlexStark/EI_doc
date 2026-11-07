@@ -8,6 +8,7 @@ import Login from "./components/Login";
 import RequestsInbox from "./components/RequestsInbox";
 import SiTypes from "./components/SiTypes";
 import Tasks from "./components/Tasks";
+import Trips from "./components/Trips";
 
 // Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
 const Assistant = lazy(() => import("./assistant/Assistant"));
@@ -17,7 +18,7 @@ const Assistant = lazy(() => import("./assistant/Assistant"));
  *   журнал своих протоколов, у менеджера ещё нумерация и работа с Аршин;
  * - «Наряды» убраны — выезды живут во вкладке «Поверки»: менеджер видит все,
  *   поверитель — только свои. */
-type Tab = "field-work" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
+type Tab = "field-work" | "journal" | "requests" | "trips" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
 
 type NavItem = { key: Tab; label: string; icon: ReactNode; managerOnly?: boolean; perm?: string };
 
@@ -30,6 +31,7 @@ const ICONS: Record<Tab, ReactNode> = {
   "field-work": svg(<><circle cx="12" cy="12" r="9" /><path d="M8 12.5l2.7 2.7L16 9.8" /></>),
   journal: svg(<><rect x="5" y="3" width="14" height="18" rx="2.5" /><path d="M9 8h6M9 12h6M9 16h3" /></>),
   requests: svg(<><path d="M3 13h5l1.5 2.5h5L16 13h5" /><path d="M5 5h14l2 8v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" /></>),
+  trips: svg(<><path d="M12 21s-6-5.3-6-10a6 6 0 0 1 12 0c0 4.7-6 10-6 10z" /><circle cx="12" cy="11" r="2.2" /></>),
   availability: svg(<><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>),
   tasks: svg(<><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></>),
   assistant: svg(<path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z" />),
@@ -41,6 +43,7 @@ const WORK: NavItem[] = [
   { key: "field-work", label: "Поверки", icon: ICONS["field-work"] },
   { key: "journal", label: "Журнал", icon: ICONS.journal },
   { key: "requests", label: "Заявки", icon: ICONS.requests, perm: "hub.manage_requests" },
+  { key: "trips", label: "Выезды", icon: ICONS.trips, perm: "logistics.view_trips" },
   { key: "availability", label: "График", icon: ICONS.availability },
   { key: "tasks", label: "Задачи", icon: ICONS.tasks },
   { key: "assistant", label: "Ассистент", icon: ICONS.assistant },
@@ -113,6 +116,7 @@ export default function App() {
     "field-work": { title: isManager ? "Все поверки" : "Мои поверки", subtitle: todayLine() },
     journal: { title: "Журнал", subtitle: isManager ? "Протоколы всех поверителей" : "Мои протоколы" },
     requests: { title: "Заявки", subtitle: "С сайта и по телефону" },
+    trips: { title: "Выезды", subtitle: "Командировки и маршруты" },
     availability: { title: "График" },
     tasks: { title: "Задачи" },
     "si-types": { title: "Типы СИ" },
@@ -177,6 +181,7 @@ export default function App() {
 
         <main>
           {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
+          {tab === "trips" && <Trips me={me} />}
           {tab === "journal" && <JournalTab isManager={can(me, "verification.normocontrol")} onOpenTypes={() => go("si-types")} />}
           {tab === "requests" && <RequestsInbox />}
           {tab === "availability" && <Availability />}
