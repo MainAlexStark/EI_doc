@@ -30,6 +30,8 @@ from apps.hub.api import (
     RequestListView,
     RequestRejectView,
     RequestRouteView,
+    TenderDetailView,
+    TenderListView,
 )
 from apps.hub.api_availability import (
     AvailabilityBulkCreateView,
@@ -155,6 +157,8 @@ urlpatterns = [
     path("api/hub/requests/", RequestCreateView.as_view(), name="request_create"),
     path("api/hub/requests/list/", RequestListView.as_view(), name="request_list"),
     path("api/hub/contracts/", ContractListView.as_view(), name="contract_list"),
+    path("api/hub/tenders/", TenderListView.as_view(), name="tender_list"),
+    path("api/hub/tenders/<int:pk>/", TenderDetailView.as_view(), name="tender_detail"),
     path("api/hub/contracts/<int:pk>/file/", ContractFileView.as_view(), name="contract_file"),
     path("api/hub/requests/<int:pk>/route/", RequestRouteView.as_view(), name="request_route"),
     path("api/hub/requests/<int:pk>/confirm/", RequestConfirmView.as_view(), name="request_confirm"),
@@ -175,7 +179,7 @@ urlpatterns = [
         "api/work-orders/<int:pk>/verifications/",
         WorkOrderVerificationsView.as_view(), name="work_order_verifications",
     ),
-    # Бланк с QR и распознавание (второй срез офлайна, claude/scans.md)
+    # Бланк с QR и распознавание (второй срез офлайна, docs/measurements.md)
     path(
         "api/work-orders/<int:pk>/blank/",
         WorkOrderBlankView.as_view(), name="work_order_blank",

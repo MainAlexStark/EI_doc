@@ -35,9 +35,9 @@ USAGE_EXTRA='
 форма заявки защищена только honeypot-полем без виджета капчи, показывает
 обычное текстовое поле адреса вместо подсказки с районом, уведомления только
 пишутся в лог, фото бланка со скана заводится без распознавания — поверитель
-заполняет поля вручную, глядя на то же фото (см. claude/scans.md).
+заполняет поля вручную, глядя на то же фото (см. docs/measurements.md).
 
-Ассистент-метролог (вкладка «Ассистент», см. claude/assistant.md):
+Ассистент-метролог (вкладка «Ассистент», см. docs/assistant.md):
 OPENROUTER_API_KEY — модели OpenRouter; без него в выборе только модели Yandex
 AI Studio (те же YANDEX_VISION_*). RST_MCP_URL/RST_MCP_TOKEN — RSTMetrology_MCP
 по имени контейнера в mcp-network; веб-поиск — Yandex Search API (тот же
@@ -45,7 +45,7 @@ AI Studio (те же YANDEX_VISION_*). RST_MCP_URL/RST_MCP_TOKEN — RSTMetrolog
 отдельный контейнер assistant-worker (очередь Celery «assistant»).
 TELEGRAM_WEBHOOK_SECRET генерируется сам, как SECRET_KEY, — как только
 появится TELEGRAM_BOT_TOKEN, вебхук регистрируется сам при каждом запуске
-контейнера (см. claude/hub.md).'
+контейнера (см. apps/core/telegram.py).'
 
 set -euo pipefail
 

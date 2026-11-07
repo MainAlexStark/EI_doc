@@ -336,3 +336,60 @@ class Contract(models.Model):
     @property
     def number(self) -> str:
         return f"Д-{self.year}-{self.seq:04d}"
+
+
+# ---------------------------------------------------------------------------
+# Госзакупки (apps.hub.tenders, docs/tenders.md)
+# ---------------------------------------------------------------------------
+class TenderSearch(models.Model):
+    """Сохранённый поиск в ЕИС: что искать и где."""
+
+    query = models.CharField("что искать", max_length=200, help_text="Например: поверка счётчиков воды")
+    region = models.CharField(
+        "регион (код ЕИС)", max_length=10, blank=True,
+        help_text="Код субъекта в ЕИС, например 43 — Кировская область. Пусто — вся Россия",
+    )
+    laws = models.CharField("законы", max_length=20, default="44,223", help_text="44, 223 или оба через запятую")
+    is_active = models.BooleanField("искать", default=True)
+    last_run_at = models.DateTimeField("последний поиск", null=True, blank=True)
+    last_error = models.CharField("ошибка последнего поиска", max_length=250, blank=True)
+
+    class Meta:
+        verbose_name = "поиск закупок"
+        verbose_name_plural = "поиски закупок"
+
+    def __str__(self) -> str:
+        return self.query
+
+
+class TenderStatus(models.TextChoices):
+    NEW = "new", "Новая"
+    WATCHING = "watching", "Изучаем"
+    APPLIED = "applied", "Подали заявку"
+    WON = "won", "Выиграли"
+    LOST = "lost", "Не выиграли"
+    SKIPPED = "skipped", "Не интересно"
+
+
+class Tender(models.Model):
+    reg_number = models.CharField("реестровый номер", max_length=40, unique=True)
+    title = models.TextField("объект закупки")
+    url = models.URLField("ссылка в ЕИС", max_length=500)
+    customer = models.CharField("заказчик", max_length=500, blank=True)
+    law = models.CharField("закон", max_length=10, blank=True)
+    price = models.DecimalField("начальная цена, ₽", max_digits=14, decimal_places=2, null=True, blank=True)
+    published_at = models.DateTimeField("размещена", null=True, blank=True)
+    deadline = models.DateField("приём заявок до", null=True, blank=True)
+    search = models.ForeignKey(TenderSearch, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name="tenders", verbose_name="найдена поиском")
+    status = models.CharField("состояние", max_length=10, choices=TenderStatus.choices, default=TenderStatus.NEW)
+    note = models.TextField("заметка", blank=True)
+    found_at = models.DateTimeField("найдена", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "закупка"
+        verbose_name_plural = "закупки"
+        ordering = ["-published_at", "-found_at"]
+
+    def __str__(self) -> str:
+        return f"{self.reg_number} · {self.title[:60]}"

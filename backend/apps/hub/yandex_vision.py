@@ -2,7 +2,7 @@
 
 Второй сценарий офлайна: бланк печатается ``apps.verification.render.
 render_blank``, фото выравнивается ``apps.verification.scan.align()``, а
-здесь отдаётся модели с жёсткой JSON-схемой (см. `claude/scans.md`).
+здесь отдаётся модели с жёсткой JSON-схемой (см. `docs/measurements.md`).
 
 Без ключа (YANDEX_VISION_API_KEY/YANDEX_VISION_FOLDER_ID пусты) распознавание
 просто выключено: is_configured() сообщает об этом заранее, поверитель
@@ -32,7 +32,7 @@ CHAT_URL = "https://ai.api.cloud.yandex.net/v1/chat/completions"
 
 # Бланк поддерживает только короткую раскладку протокола (3 пролива —
 # Qнаим/Qперех/Qнаиб, wm.LAYOUT_COMPACT). Полная раскладка — только с
-# экрана, печатать под неё бланк не стали, см. claude/scans.md.
+# экрана, печатать под неё бланк не стали, см. docs/measurements.md.
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {

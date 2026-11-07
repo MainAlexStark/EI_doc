@@ -714,7 +714,7 @@ export const submitMeasurements = (verificationId: number, payload: Measurements
   });
 
 // ---------------------------------------------------------------------------
-// Бланк с QR и распознавание (второй срез офлайна, claude/scans.md)
+// Бланк с QR и распознавание (второй срез офлайна, docs/measurements.md)
 // ---------------------------------------------------------------------------
 
 /** Скачать печатный бланк — открывает PDF в новой вкладке (protected-эндпоинт,
@@ -1198,3 +1198,20 @@ export const unreserveStandard = (tripId: number, standardId: number) =>
 export type ContractInfo = { id: number; number: string; client: string; total: string; created_at: string };
 export const issueContract = (input: { request_id?: number; work_order_id?: number }) =>
   json<ContractInfo>("/api/hub/contracts/", { method: "POST", body: JSON.stringify(input) });
+
+// Госзакупки (apps/hub/tenders.py, docs/tenders.md)
+export type Tender = {
+  id: number; reg_number: string; title: string; url: string; customer: string; law: string;
+  price: string | null; published_at: string | null; deadline: string | null;
+  status: string; status_display: string; note: string; search: string;
+};
+export type TenderSearchInfo = {
+  id: number; query: string; region: string; laws: string; is_active: boolean;
+  last_run_at: string | null; last_error: string;
+};
+export const fetchTenders = (status = "") =>
+  json<{ searches: TenderSearchInfo[]; tenders: Tender[] }>(`/api/hub/tenders/${status ? `?status=${status}` : ""}`);
+export const addTenderSearch = (query: string, region: string) =>
+  json<{ found?: number; detail?: string }>("/api/hub/tenders/", { method: "POST", body: JSON.stringify({ query, region }) });
+export const updateTender = (id: number, input: { status?: string; note?: string }) =>
+  json<Tender>(`/api/hub/tenders/${id}/`, { method: "PATCH", body: JSON.stringify(input) });

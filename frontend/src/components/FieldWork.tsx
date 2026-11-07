@@ -733,7 +733,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
   const [queued, setQueued] = useState(0);
   const [outboxProblems, setOutboxProblems] = useState<OutboxItem[]>([]);
 
-  // Бланк с QR и распознавание — второй срез офлайна (claude/scans.md).
+  // Бланк с QR и распознавание — второй срез офлайна (docs/measurements.md).
   // В отличие от остального экрана это НЕ офлайн-функция: печать и
   // распознавание требуют связи, ими пользуются уже вернувшись с
   // режимного объекта, где телефон вообще нельзя было доставать.

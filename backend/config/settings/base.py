@@ -269,7 +269,7 @@ TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
 TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
 
 # --------------------------------------------------------------------------
-# Ассистент-метролог (чат с LLM, см. apps/assistant и claude/assistant.md)
+# Ассистент-метролог (чат с LLM, см. apps/assistant и docs/assistant.md)
 # --------------------------------------------------------------------------
 # OpenRouter — каталог сильных моделей (Claude, GPT, Gemini…). Пусто — в выборе
 # остаются только модели Yandex AI Studio (ключи YANDEX_VISION_* выше).
@@ -374,3 +374,6 @@ PRIVACY_POLICY_URL = env("PRIVACY_POLICY_URL", default="/privacy/")
 # по сроку исковой давности (3 года) после последнего события.
 PD_RETENTION_REJECTED_DAYS = env.int("PD_RETENTION_REJECTED_DAYS", default=30)
 PD_RETENTION_DAYS = env.int("PD_RETENTION_DAYS", default=3 * 365)
+
+# Госзакупки (apps.hub.tenders): прокси, если ЕИС не отвечает адресу сервера.
+TENDERS_PROXY = env("TENDERS_PROXY", default="")

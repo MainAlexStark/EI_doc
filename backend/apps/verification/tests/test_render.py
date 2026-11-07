@@ -124,7 +124,7 @@ class ContextTestCase(TestCase):
 
 
 class BlankFormTestCase(TestCase):
-    """Печатный бланк с QR — второй срез офлайна (claude/scans.md)."""
+    """Печатный бланк с QR — второй срез офлайна (docs/measurements.md)."""
 
     def setUp(self) -> None:
         self.family = f.make_family()

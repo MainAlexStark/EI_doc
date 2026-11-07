@@ -27,4 +27,9 @@ app.conf.beat_schedule = {
         "task": "apps.core.tasks.purge_personal_data",
         "schedule": crontab(hour=3, minute=40),
     },
+    # Госзакупки: новые закупки на поверку по сохранённым поискам.
+    "tenders-search": {
+        "task": "apps.hub.tasks.search_tenders",
+        "schedule": crontab(hour="8,13,17", minute=10),
+    },
 }

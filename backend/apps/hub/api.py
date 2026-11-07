@@ -460,3 +460,61 @@ class ContractFileView(APIView):
             request, contract.file.path, attachment=True, attachment_filename=f"{contract.number}.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
+
+
+# ---------------------------------------------------------------------------
+# Госзакупки
+# ---------------------------------------------------------------------------
+def _tender(t) -> dict:
+    return {"id": t.pk, "reg_number": t.reg_number, "title": t.title, "url": t.url, "customer": t.customer,
+            "law": t.law, "price": t.price, "published_at": t.published_at, "deadline": t.deadline,
+            "status": t.status, "status_display": t.get_status_display(), "note": t.note,
+            "search": t.search.query if t.search_id else ""}
+
+
+class TenderListView(APIView):
+    """GET /api/hub/tenders/?status= — найденные закупки; POST {query, region} — новый поиск."""
+
+    permission_classes = [HasPerm.of("hub.manage_requests")]
+
+    def get(self, request):
+        from apps.hub.models import Tender, TenderSearch
+
+        qs = Tender.objects.select_related("search")
+        if request.query_params.get("status"):
+            qs = qs.filter(status=request.query_params["status"])
+        searches = [{"id": s.pk, "query": s.query, "region": s.region, "laws": s.laws, "is_active": s.is_active,
+                     "last_run_at": s.last_run_at, "last_error": s.last_error} for s in TenderSearch.objects.all()]
+        return Response({"searches": searches, "tenders": [_tender(t) for t in qs[:300]]})
+
+    def post(self, request):
+        from apps.hub import tenders
+        from apps.hub.models import TenderSearch
+
+        query = str(request.data.get("query", "")).strip()
+        if len(query) < 3:
+            return Response({"detail": "Что искать — хотя бы 3 символа"}, status=status.HTTP_400_BAD_REQUEST)
+        search = TenderSearch.objects.create(query=query[:200], region=str(request.data.get("region", ""))[:10])
+        try:
+            found = tenders.run_search(search)
+        except tenders.TendersUnavailable as exc:
+            return Response({"detail": f"Поиск сохранён, но ЕИС сейчас не ответила: {exc}"},
+                            status=status.HTTP_202_ACCEPTED)
+        return Response({"found": len(found)}, status=status.HTTP_201_CREATED)
+
+
+class TenderDetailView(APIView):
+    permission_classes = [HasPerm.of("hub.manage_requests")]
+
+    def patch(self, request, pk: int):
+        from apps.hub.models import Tender, TenderStatus
+
+        tender = get_object_or_404(Tender, pk=pk)
+        if "status" in request.data:
+            if request.data["status"] not in TenderStatus.values:
+                return Response({"detail": "Неизвестное состояние"}, status=status.HTTP_400_BAD_REQUEST)
+            tender.status = request.data["status"]
+        if "note" in request.data:
+            tender.note = str(request.data["note"])[:5000]
+        tender.save()
+        return Response(_tender(tender))

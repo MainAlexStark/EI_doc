@@ -86,3 +86,18 @@ class ContractAdmin(admin.ModelAdmin):
     list_display = ["__str__", "client", "total", "created_at"]
     raw_id_fields = ["client", "request", "work_order"]
     readonly_fields = ["sha256", "created_at"]
+
+
+from apps.hub.models import Tender, TenderSearch  # noqa: E402
+
+
+@admin.register(TenderSearch)
+class TenderSearchAdmin(admin.ModelAdmin):
+    list_display = ["query", "region", "laws", "is_active", "last_run_at", "last_error"]
+
+
+@admin.register(Tender)
+class TenderAdmin(admin.ModelAdmin):
+    list_display = ["reg_number", "title", "customer", "price", "deadline", "status"]
+    list_filter = ["status", "law"]
+    search_fields = ["reg_number", "title", "customer"]
