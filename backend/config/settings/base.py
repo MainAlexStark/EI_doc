@@ -337,3 +337,7 @@ LOGISTICS_DETOUR_FACTOR = env.float("LOGISTICS_DETOUR_FACTOR", default=1.35)
 # свой тайл-сервер или коммерческий провайдер (см. docs/logistics.md).
 MAP_TILE_URL = env("MAP_TILE_URL", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 MAP_TILE_ATTRIBUTION = env("MAP_TILE_ATTRIBUTION", default="© OpenStreetMap contributors")
+
+# PDF протокола при подписи (apps.verification.numbering._schedule_pdf):
+# celery — фоном, sync — сразу, off — не выпускать.
+PROTOCOL_PDF_MODE = env("PROTOCOL_PDF_MODE", default="celery")

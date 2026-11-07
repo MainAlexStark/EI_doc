@@ -244,8 +244,41 @@ def render_pdf(
         return output.read_bytes()
 
 
-def render_for(verification, *, number: str) -> bytes:
-    return render_pdf(build_context(verification, number=number))
+def render_for(verification, *, number: str, signed_by=None) -> bytes:
+    """PDF протокола. С ``signed_by`` — с его графической подписью и клеймом."""
+    context = build_context(verification, number=number)
+    extra: dict[str, bytes] = {}
+    if signed_by is not None:
+        for field, name in (("signature_image", "signature"), ("stamp_image", "stamp")):
+            image = getattr(signed_by, field, None)
+            if image:
+                try:
+                    with image.open("rb") as handle:
+                        extra[f"{name}.png"] = handle.read()
+                    context[name] = True
+                except (OSError, ValueError):
+                    context[name] = False
+    return render_pdf(context, extra_files=extra)
+
+
+def issue_protocol_pdf(protocol) -> bool:
+    """Сверстать и сохранить PDF подписанного протокола — один раз и навсегда.
+
+    Подписанный протокол неизменен (docs/architecture.md, принцип 3): файл
+    пишется, только если его ещё нет; хэш хранится рядом. Перевыпуск — это
+    новая версия протокола через аннулирование, а не перезапись файла.
+    """
+    import hashlib
+
+    from django.core.files.base import ContentFile
+
+    if protocol.pdf or protocol.status not in ("signed", "published"):
+        return False
+    payload = render_for(protocol.verification, number=protocol.full_number, signed_by=protocol.signed_by)
+    protocol.sha256 = hashlib.sha256(payload).hexdigest()
+    protocol.pdf.save(f"{protocol.full_number}.pdf", ContentFile(payload), save=False)
+    protocol.save(update_fields=["pdf", "sha256"])
+    return True
 
 
 def template_source(name: str = DEFAULT_TEMPLATE) -> str:

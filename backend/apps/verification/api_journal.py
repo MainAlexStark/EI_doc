@@ -63,6 +63,8 @@ class JournalFilter(filters.FilterSet):
 class JournalRowSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     protocol_number = serializers.CharField()
+    protocol_id = serializers.IntegerField(allow_null=True)
+    protocol_has_pdf = serializers.BooleanField()
     protocol_status = serializers.CharField()
     verified_at = serializers.DateTimeField()
     next_verification_date = serializers.DateField(allow_null=True)
@@ -83,6 +85,8 @@ class JournalRowSerializer(serializers.Serializer):
         return {
             "id": verification.pk,
             "protocol_number": protocol.full_number if protocol else "",
+            "protocol_id": protocol.pk if protocol else None,
+            "protocol_has_pdf": bool(protocol and protocol.pdf),
             "protocol_status": protocol.status if protocol else "",
             "verified_at": verification.verified_at,
             "next_verification_date": verification.next_verification_date,
@@ -239,3 +243,38 @@ class SignProtocolsView(APIView):
                 signed.append({"protocol": protocol.pk, "number": protocol.full_number})
 
         return Response({"signed": signed, "refused": refused})
+
+
+class ProtocolPdfView(APIView):
+    """GET /api/protocols/{id}/pdf/ — PDF протокола.
+
+    Подписанный — выпущенный при подписи файл (с подписью и клеймом, хэш в
+    протоколе). Неподписанный — черновая вёрстка на лету, без подписи.
+    """
+
+    def get(self, request, pk: int):
+        from django_sendfile import sendfile
+
+        from apps.verification import render
+
+        protocol = get_object_or_404(
+            Protocol.objects.select_related("verification__instrument__si_type", "signed_by",
+                                            "scope__series", "scope__employee"),
+            pk=pk,
+        )
+        filename = f"{protocol.full_number or f'draft-{protocol.pk}'}.pdf"
+        if protocol.is_sealed and protocol.status != ProtocolStatus.VOID:
+            if not protocol.pdf:
+                try:
+                    render.issue_protocol_pdf(protocol)
+                except render.RenderError as exc:
+                    return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return sendfile(request, protocol.pdf.path, attachment=True, attachment_filename=filename,
+                            mimetype="application/pdf")
+        try:
+            payload = render.render_for(protocol.verification, number=protocol.full_number or "черновик")
+        except render.RenderError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        response = HttpResponse(payload, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response

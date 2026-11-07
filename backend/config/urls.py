@@ -52,6 +52,7 @@ from apps.verification.api_journal import (
     NormocontrolScopesView,
     NumberingApplyView,
     NumberingPreviewView,
+    ProtocolPdfView,
     SignProtocolsView,
 )
 from apps.verification.api_field import WorkOrderVerificationsView
@@ -118,6 +119,7 @@ urlpatterns = [
         NumberingApplyView.as_view(), name="numbering_apply",
     ),
     path("api/normocontrol/sign/", SignProtocolsView.as_view(), name="sign_protocols"),
+    path("api/protocols/<int:pk>/pdf/", ProtocolPdfView.as_view(), name="protocol_pdf"),
     path("api/verifications/layouts/", LayoutsView.as_view(), name="measurement_layouts"),
     path(
         "api/verifications/<int:pk>/measurements/",

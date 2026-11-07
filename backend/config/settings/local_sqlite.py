@@ -18,3 +18,4 @@ DATABASES = {
 }
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 ASSISTANT_RUN_MODE = "thread"
+PROTOCOL_PDF_MODE = "sync"

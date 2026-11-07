@@ -236,7 +236,33 @@ def seal(protocol: Protocol, *, signed_by, at=None) -> Protocol:
     protocol.signed_by = signed_by
     protocol.signed_at = at or timezone.now()
     protocol.save(update_fields=["status", "signed_by", "signed_at"])
+    _schedule_pdf(protocol.pk)
     return protocol
+
+
+def _schedule_pdf(protocol_id: int) -> None:
+    """PDF с подписью — после коммита, чтобы откат подписи не оставил файла.
+
+    PROTOCOL_PDF_MODE: celery (по умолчанию) — фоном, sync — сразу (тесты,
+    разработка), off — не выпускать (нет typst).
+    """
+    from django.conf import settings
+
+    mode = getattr(settings, "PROTOCOL_PDF_MODE", "celery")
+    if mode == "off":
+        return
+
+    def run() -> None:
+        if mode == "sync":
+            from apps.verification.tasks import issue_protocol_pdf
+
+            issue_protocol_pdf(protocol_id)
+        else:
+            from apps.verification.tasks import issue_protocol_pdf
+
+            issue_protocol_pdf.delay(protocol_id)
+
+    transaction.on_commit(run)
 
 
 @transaction.atomic

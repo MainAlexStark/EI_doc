@@ -16,3 +16,4 @@ FIF_DOCUMENTS_AUTO_DOWNLOAD = False
 ASSISTANT_RUN_MODE = "sync"
 OPENROUTER_API_KEY = "test-key"
 RST_MCP_URL = ""
+PROTOCOL_PDF_MODE = "off"  # тесты выпуска PDF включают его сами

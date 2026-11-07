@@ -12,6 +12,8 @@ const REFRESH = "ei_doc_refresh";
 export type JournalRow = {
   id: number;
   protocol_number: string;
+  protocol_id: number | null;
+  protocol_has_pdf: boolean;
   protocol_status: string;
   verified_at: string;
   next_verification_date: string | null;

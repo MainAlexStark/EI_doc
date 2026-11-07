@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  downloadFile,
   downloadJournal,
   fetchJournal,
   type JournalFilters,
@@ -132,7 +133,25 @@ export default function Journal() {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id}>
-                <td className="num">{row.protocol_number || "—"}</td>
+                <td className="num">
+                  {row.protocol_number || "—"}
+                  {row.protocol_id && (row.protocol_status === "signed" || row.protocol_status === "published") && (
+                    <div className="sub">
+                      <button
+                        type="button"
+                        className="link"
+                        title={row.protocol_has_pdf ? "PDF с подписью" : "PDF ещё выпускается — сверстать сейчас"}
+                        onClick={() =>
+                          void downloadFile(`/api/protocols/${row.protocol_id}/pdf/`, `${row.protocol_number}.pdf`).catch(
+                            (exc: unknown) => window.alert(exc instanceof Error ? exc.message : "Не удалось скачать PDF"),
+                          )
+                        }
+                      >
+                        PDF
+                      </button>
+                    </div>
+                  )}
+                </td>
                 <td className="num">{formatDate(row.verified_at)}</td>
                 <td>
                   {row.si_name}

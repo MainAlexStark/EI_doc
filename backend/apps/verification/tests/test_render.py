@@ -157,3 +157,62 @@ class BlankFormTestCase(TestCase):
         # Не строгая проверка числа страниц (не парсим PDF), но три экземпляра
         # заметно тяжелее одного — тот же QR и разметка трижды.
         assert len(three) > len(one)
+
+
+@pytest.mark.skipif(not render.typst_available(), reason="typst не установлен")
+class SignedPdfTestCase(ContextTestCase):
+    """Подпись выпускает PDF с графической подписью и клеймом — один раз."""
+
+    def sign(self):
+        import io
+
+        from django.core.files.base import ContentFile
+        from django.test import override_settings
+        from PIL import Image
+
+        from apps.verification import numbering
+
+        def png(color: str) -> bytes:
+            buffer = io.BytesIO()
+            Image.new("RGB", (120, 40), color).save(buffer, format="PNG")
+            return buffer.getvalue()
+
+        with override_settings(MEDIA_ROOT="/tmp/ei-doc-test-media"):
+            self.employee.signature_image.save("sig.png", ContentFile(png("navy")), save=False)
+            self.employee.stamp_image.save("stamp.png", ContentFile(png("purple")), save=True)
+        protocol = f.make_protocol(self.verification)
+        numbering.assign_numbers(protocol.scope)
+        protocol.refresh_from_db()
+        with self.captureOnCommitCallbacks(execute=True):
+            numbering.seal(protocol, signed_by=self.employee)
+        protocol.refresh_from_db()
+        return protocol
+
+    def test_signing_issues_a_pdf_with_signature_and_hash(self):
+        from django.test import override_settings
+
+        with override_settings(PROTOCOL_PDF_MODE="sync", MEDIA_ROOT="/tmp/ei-doc-test-media"):
+            protocol = self.sign()
+            assert protocol.pdf and len(protocol.sha256) == 64
+            data = protocol.pdf.read()
+            assert data.startswith(b"%PDF")
+            # подпись и клеймо — две картинки в файле
+            assert data.count(b"/Subtype /Image") + data.count(b"/Subtype/Image") >= 2
+            # повторный выпуск не перезаписывает файл
+            assert render.issue_protocol_pdf(protocol) is False
+
+    def test_pdf_endpoint_serves_the_issued_file(self):
+        from django.test import override_settings
+        from django.urls import reverse
+        from rest_framework.test import APIClient
+
+        from apps.core.models import User
+
+        with override_settings(PROTOCOL_PDF_MODE="sync", MEDIA_ROOT="/tmp/ei-doc-test-media",
+                               SENDFILE_ROOT="/tmp/ei-doc-test-media"):
+            protocol = self.sign()
+            api = APIClient()
+            api.force_authenticate(User.objects.create_user("o@ei.test", "pw"))
+            response = api.get(reverse("protocol_pdf", args=[protocol.pk]))
+            assert response.status_code == 200
+            assert b"".join(response.streaming_content if response.streaming else [response.content]).startswith(b"%PDF")

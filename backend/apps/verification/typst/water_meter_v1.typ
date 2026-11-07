@@ -157,12 +157,16 @@
   columns: (2.9cm, 3.4cm, 3.6cm, 3.4cm, 1fr),
   align: (left + bottom, center + bottom, left + bottom, left + bottom, left + bottom),
   [Поверитель],
-  [#box(width: 100%, stroke: (bottom: 0.5pt), height: 1.1em)],
+  // Графическая подпись поверителя (Employee.signature_image) — только в
+  // подписанном протоколе; оттиск клейма (stamp_image) — рядом с датой.
+  [#box(width: 100%, stroke: (bottom: 0.5pt), height: 1.1em,
+    if d.at("signature", default: false) { place(bottom + center, dy: 2.5mm, image("signature.png", width: 32mm, height: 11mm, fit: "contain")) })],
   [#h(0.3cm) #d.verifier],
   [Дата поверки],
   [#h(0.6cm) #d.date],
 )
 #grid(
   columns: (2.9cm, 3.4cm, 1fr),
-  [], align(center, text(size: 8pt)[(подпись)]), [],
+  [], align(center, text(size: 8pt)[(подпись)]),
+  [#if d.at("stamp", default: false) { place(top + left, dx: 6mm, dy: -5mm, image("stamp.png", width: 22mm, height: 22mm, fit: "contain")) }],
 )
