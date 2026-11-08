@@ -629,6 +629,11 @@ class VerificationTemplate(models.Model):
         help_text="Пусто — для всех типов семейства, у которых нет своего шаблона",
     )
     plan = models.JSONField("шаблон", default=dict, help_text="Формат — apps.verification.templates.clean_template")
+    kits = models.ManyToManyField(
+        "catalog.StandardKit", blank=True, related_name="verification_templates",
+        verbose_name="наборы эталонов",
+        help_text="Строки «Перечня применяемых эталонов» для этого вида поверки; поверитель выбирает свою",
+    )
     note = models.TextField("примечание", blank=True)
     sources = models.JSONField("источники", default=list, blank=True)
     plan_check = models.JSONField(

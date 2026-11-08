@@ -33,7 +33,8 @@ class SiTypeApiTestCase(TestCase):
         return client
 
     def create(self, user, **overrides):
-        body = {"registry_number": "55555-20", "name": "ТЕСТ-15", "manufacturer": "Завод", "limits": LIMITS}
+        body = {"registry_number": "55555-20", "name": "ТЕСТ-15", "manufacturer": "Завод", "limits": LIMITS,
+                "fif_uuid": "fif-55555"}
         body.update(overrides)
         return self.as_user(user).post(reverse("si_type_list"), body, format="json")
 
@@ -51,6 +52,12 @@ class SiTypeApiTestCase(TestCase):
         si_type = SiType.objects.get(registry_number="55555-20")
         assert not si_type.needs_review
         assert si_type.reviewed_by == self.metrologist
+
+    def test_verifier_cannot_create_type_outside_registry(self):
+        response = self.create(self.verifier, fif_uuid="")
+        assert response.status_code == 403
+        assert "Госреестр" in str(response.data)
+        assert self.create(self.metrologist, fif_uuid="").status_code == 201
 
     def test_observer_cannot_create(self):
         assert self.create(self.observer).status_code == 403

@@ -346,3 +346,89 @@ class District(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+
+class AuxInstrument(models.Model):
+    """Вспомогательное СИ, применяемое при поверке (термометр, барометр, секундомер…).
+
+    В журнал ФИФ (столбец U «СИ, применяемые при поверке») идёт ``designation`` в формате
+    «Номер по реестру типов СИ^Заводской номер^Инвентарный номер» — как в «Перечне
+    применяемых эталонов» компании.
+    """
+
+    name = models.CharField("наименование", max_length=250)
+    designation = models.CharField(
+        "обозначение для журнала", max_length=120, blank=True,
+        help_text="299-11^22^ — номер в Госреестре^заводской^инвентарный",
+    )
+    note = models.CharField("примечание", max_length=250, blank=True)
+    is_active = models.BooleanField("в работе", default=True)
+    sort = models.PositiveIntegerField("порядок", default=0)
+    updated_at = models.DateTimeField("изменён", auto_now=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        verbose_name = "вспомогательное СИ"
+        verbose_name_plural = "вспомогательные СИ"
+        ordering = ["sort", "name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class StandardKit(models.Model):
+    """Строка «Перечня применяемых эталонов»: что берут на поверку данного вида СИ.
+
+    Перечень часто меняется и правится метрологом (руками на вкладке «Эталоны» или через
+    ассистента), поэтому поля — как в самом документе, текстом: раздел, класс/диапазон,
+    эталоны, вспомогательные СИ, обозначение для столбца U журнала и номера эталонов в ФИФ ОЕИ.
+    Шаблон поверки ссылается на наборы своего вида (``VerificationTemplate.kits``); поверитель
+    выбирает строку под свой прибор, и она попадает в протокол и журнал.
+    """
+
+    section = models.CharField(
+        "раздел", max_length=250,
+        help_text="«Единый перечень для поверки манометров», «Перечень для поверки весов. Бурков Н. Е.»",
+    )
+    scope = models.TextField("класс точности / диапазон", blank=True)
+    employee = models.ForeignKey(
+        "core.Employee", on_delete=models.SET_NULL, null=True, blank=True, related_name="standard_kits",
+        verbose_name="закреплён за поверителем", help_text="Пусто — общий набор",
+    )
+    standards_text = models.TextField("эталоны (наименование)", blank=True)
+    aux_text = models.TextField("СИ, применяемые при поверке", blank=True)
+    journal_aux = models.TextField(
+        "обозначение для журнала (столбец U)", blank=True,
+        help_text="69551-17^871455^|2231-72^8787^| — вспомогательные СИ через «|»",
+    )
+    fif_numbers = models.JSONField(
+        "номера эталонов в ФИФ ОЕИ", default=list, blank=True,
+        help_text="[\"68984.17.4Р.01152950\", …]",
+    )
+    families = models.ManyToManyField(
+        MeasurementFamily, blank=True, related_name="standard_kits", verbose_name="семейства СИ",
+    )
+    note = models.TextField("примечание", blank=True)
+    sort = models.PositiveIntegerField("порядок", default=0)
+    is_active = models.BooleanField("используется", default=True)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="кто изменил",
+    )
+    updated_at = models.DateTimeField("изменён", auto_now=True)
+
+    history = HistoricalRecords(m2m_fields=[families])
+
+    class Meta:
+        verbose_name = "набор эталонов"
+        verbose_name_plural = "перечень применяемых эталонов"
+        ordering = ["sort", "pk"]
+
+    def __str__(self) -> str:
+        scope = " ".join(self.scope.split())[:80]
+        return f"{self.section} — {scope}" if scope else self.section
+
+    @property
+    def journal_standards(self) -> str:
+        return "|".join(self.fif_numbers or [])

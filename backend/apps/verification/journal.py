@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -37,6 +38,7 @@ COLUMN_MAP = {
     14: "temperature",
     15: "pressure",
     16: "humidity",
+    20: "aux_instruments",
     21: "standards",
     32: "address",
     34: "mark_on_si",
@@ -48,6 +50,15 @@ COLUMN_MAP = {
     47: "owner",
     48: "unit_type",
 }
+
+
+AUX_DESIGNATION = re.compile(r"[^\s|^]+\^[^\s|^]*\^[^\s|^]*")
+
+
+def aux_designations(text: str) -> str:
+    """«69551-17^871455^|2231-72^8787^|» из строки перечня — без пояснений вроде «+ (у электроконтактных)»."""
+    found = list(dict.fromkeys(AUX_DESIGNATION.findall(str(text or ""))))
+    return "|".join(found) + "|" if found else ""
 
 
 def columns() -> list[dict]:
@@ -73,6 +84,7 @@ def row_values(verification: Verification) -> dict[str, object]:
     protocol = getattr(verification, "protocol", None)
     results = verification.results or {}
     entered = verification.measurements or {}
+    kit = entered.get("kit") or {}
 
     readings = None
     rows = entered.get("rows") or []
@@ -92,7 +104,9 @@ def row_values(verification: Verification) -> dict[str, object]:
         "temperature": f"{verification.temperature} °C" if verification.temperature is not None else "",
         "pressure": f"{verification.pressure} кП" if verification.pressure is not None else "",
         "humidity": f"{verification.humidity} %" if verification.humidity is not None else "",
-        "standards": ", ".join(s.fif_number for s in verification.standards.all()),
+        "aux_instruments": aux_designations(kit.get("journal_aux", "")),
+        "standards": ", ".join(s.fif_number for s in verification.standards.all())
+        or "|".join(kit.get("fif_numbers") or []),
         "address": str(instrument.site) if instrument.site_id else "",
         "mark_on_si": "1",
         "verifier_name": verification.verifier.full_name,

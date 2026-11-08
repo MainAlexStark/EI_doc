@@ -321,3 +321,54 @@ class PendingAction(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class TemplateJob(models.Model):
+    """Фоновая работа агента: шаблон поверки (и аттестации, если это ИО) для нового типа СИ.
+
+    Заводится, когда тип выбран из Госреестра (``apps.assistant.template_jobs.start``). Агент получает
+    задачу через ``POST /api/run`` сервиса agentkit от имени того, кто завёл тип, собирает шаблон по
+    методике поверки, описанию типа и «Перечню применяемых эталонов» и сохраняет его инструментом
+    ``ei_template_job_save`` — только черновиком: метролог проверяет его на вкладке «Типы СИ».
+    """
+
+    class Status(models.TextChoices):
+        QUEUED = "queued", "в очереди"
+        RUNNING = "running", "агент работает"
+        DONE = "done", "готово"
+        FAILED = "failed", "не получилось"
+        SKIPPED = "skipped", "не нужен"
+
+    si_type = models.ForeignKey("catalog.SiType", on_delete=models.CASCADE, related_name="template_jobs",
+                                verbose_name="тип СИ")
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+                                     blank=True, related_name="+", verbose_name="кто запустил")
+    status = models.CharField("статус", max_length=10, choices=Status.choices, default=Status.QUEUED)
+    comment = models.TextField("пожелание к шаблону", blank=True)
+    session_id = models.CharField("разговор агента", max_length=120, blank=True)
+    verification_template = models.ForeignKey(
+        "verification.VerificationTemplate", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="шаблон поверки",
+    )
+    attestation_program = models.ForeignKey(
+        "equipment.AttestationProgram", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="шаблон аттестации",
+    )
+    summary = models.TextField("итог агента", blank=True)
+    error = models.TextField("ошибка", blank=True)
+    created_at = models.DateTimeField("создано", auto_now_add=True)
+    started_at = models.DateTimeField("начато", null=True, blank=True)
+    finished_at = models.DateTimeField("закончено", null=True, blank=True)
+    saved_at = models.DateTimeField("агент сохранил шаблон", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "шаблон от агента"
+        verbose_name_plural = "шаблоны от агента"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.si_type} — {self.get_status_display()}"
+
+    @property
+    def is_open(self) -> bool:
+        return self.status in (self.Status.QUEUED, self.Status.RUNNING)

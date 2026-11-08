@@ -756,6 +756,7 @@ def ei_verification_template_propose(ctx: ToolContext, args: dict) -> ToolResult
     if not sources:
         raise ToolFailure("Укажи sources — методика поверки (пункты), описание типа, ГОСТ: откуда точки, формулы и допуски")
     report = _verification_check(plan, args["example"]) if args.get("example") else None
+    kits = _kits(args.get("kits"))
 
     view = [
         ["Название", title], ["Семейство", family.name], ["Тип СИ", str(si_type) if si_type else "все типы семейства"],
@@ -767,6 +768,7 @@ def ei_verification_template_propose(ctx: ToolContext, args: dict) -> ToolResult
         ["Величины в точке", "; ".join(str(p.get("label") or p["key"]) for p in plan["points"])
          + f" × {plan['repeats']}"],
         ["Характеристики", "; ".join(str(c.get("label")) for c in plan["characteristics"])],
+        ["Наборы эталонов", "; ".join(str(k) for k in kits) or "не выбраны"],
         ["Сверка с примером", "нет" if report is None else ("сходится" if report["ok"] else "ЕСТЬ РАСХОЖДЕНИЯ")],
     ]
     action = PendingAction.objects.create(
@@ -774,7 +776,7 @@ def ei_verification_template_propose(ctx: ToolContext, args: dict) -> ToolResult
         title=("Обновить" if template_id else "Завести") + f" шаблон поверки: {title}",
         payload={"title": title, "family": family.pk, "si_type": si_type.pk if si_type else None, "plan": plan,
                  "note": str(args.get("note") or "")[:2000], "template_id": template_id or None,
-                 "plan_check": report, "view": view},
+                 "plan_check": report, "view": view, **({"kits": [k.pk for k in kits]} if kits else {})},
         sources=sources,
     )
     files = []
@@ -806,6 +808,145 @@ def ei_verification_template_propose(ctx: ToolContext, args: dict) -> ToolResult
     if report:
         ui["widgets"] = [_check_widget(report)]
     return ToolResult(note, ui)
+
+
+def _kits(raw) -> list:
+    """id строк «Перечня применяемых эталонов» → строки (только действующие)."""
+    from apps.catalog.models import StandardKit
+
+    if not raw:
+        return []
+    try:
+        ids = [int(x) for x in raw]
+    except (TypeError, ValueError) as exc:
+        raise ToolFailure("kits — список id строк перечня эталонов (ei_standard_kits)") from exc
+    kits = list(StandardKit.objects.filter(pk__in=ids, is_active=True))
+    if len(kits) != len(set(ids)):
+        raise ToolFailure("kits: часть id не найдена или строка выключена — посмотри ei_standard_kits")
+    return kits
+
+
+# ===========================================================================
+# Перечень применяемых эталонов (apps.catalog.standard_kits)
+# ===========================================================================
+def ei_standard_kits(ctx: ToolContext, args: dict) -> ToolResult:
+    from apps.catalog import standard_kits
+    from apps.catalog.models import AuxInstrument
+
+    qs = standard_kits.search_kits(args.get("query") or "", family=args.get("family") or None,
+                                   active_only=not args.get("all"))
+    rows = [{k: v for k, v in standard_kits.kit_dict(kit).items() if k not in ("updated_at", "sort")}
+            for kit in qs[: min(int(args.get("limit") or 40), 120)]]
+    payload = {"kits": rows}
+    if args.get("with_aux") or not str(args.get("query") or "").strip():
+        payload["aux_instruments"] = [standard_kits.aux_dict(a) for a in AuxInstrument.objects.all()
+                                      if a.is_active or args.get("all")]
+    if not rows and not payload.get("aux_instruments"):
+        return ToolResult("В перечне эталонов ничего не нашлось (попробуй другое слово: «весы», «манометр»).")
+    return ToolResult(_dump(payload), {"sources": [_source("ei", "Перечень применяемых эталонов EI_doc")]})
+
+
+def ei_standard_kits_propose(ctx: ToolContext, args: dict) -> ToolResult:
+    from apps.catalog import standard_kits
+    from apps.catalog.api_types import is_reviewer
+
+    if not is_reviewer(ctx.user):
+        raise ToolFailure("Перечень эталонов меняет метролог или руководитель — предложи человеку попросить их")
+    changes = args.get("changes")
+    # Проверка «на пробу»: те же правки в откатываемой транзакции — ошибку модель увидит сразу, до карточки.
+    from django.db import transaction
+
+    class _Dry(Exception):
+        pass
+
+    try:
+        with transaction.atomic():
+            done = standard_kits.apply_changes(changes, ctx.user)
+            raise _Dry
+    except _Dry:
+        pass
+    except standard_kits.KitError as exc:
+        raise ToolFailure(str(exc)) from exc
+    view = [[f"{i}.", line] for i, line in enumerate(done, start=1)]
+    action = PendingAction.objects.create(
+        conversation=ctx.conversation, kind="standard_kits_update",
+        title=f"Обновить перечень эталонов: {len(done)} правк{'а' if len(done) == 1 else 'и'}",
+        payload={"changes": changes, "view": view},
+        sources=[str(x) for x in (args.get("sources") or []) if str(x).strip()],
+    )
+    return ToolResult("Карточка с правками перечня показана человеку с кнопкой «Подтвердить».", {"action": action.pk})
+
+
+def ei_fif_document_read(ctx: ToolContext, args: dict) -> ToolResult:
+    """Текст методики поверки / описания типа из документов, скачанных EI_doc из ФГИС."""
+    from apps.arshin import documents as fif_documents
+    from apps.arshin.models import FifDocument
+    from apps.catalog.models import SiType
+
+    mit_uuid = str(args.get("mit_uuid") or "").strip()
+    if args.get("si_type"):
+        si_type = SiType.objects.filter(pk=args["si_type"]).first()
+        if si_type is None:
+            raise ToolFailure(f"Типа СИ {args['si_type']} нет в справочнике")
+        mit_uuid = si_type.fif_uuid
+    if not mit_uuid:
+        raise ToolFailure("Нужен si_type (id в EI_doc) с привязкой к ФГИС или mit_uuid")
+    docs = list(FifDocument.objects.filter(mit_uuid=mit_uuid))
+    if not docs:
+        docs = fif_documents.fetch_type_documents(mit_uuid)
+    kind = args.get("kind") or "meth"
+    chosen = [d for d in docs if d.kind == kind] or docs
+    if args.get("document_id"):
+        chosen = [d for d in docs if d.pk == args["document_id"]]
+    if not chosen:
+        return ToolResult("У типа в ФГИС нет документов. Обозначение методики — из get_type, текст — web_fetch/поиск.")
+    doc = chosen[0]
+    if not doc.file:
+        doc = fif_documents.download(doc)
+    listing = "; ".join(f"[{d.pk}] {d.get_kind_display()}: {d.title}" for d in docs)
+    if not doc.file:
+        return ToolResult(f"Документ «{doc.title}» не скачан ({doc.error or 'ФГИС не ответила'}). Ссылка: {doc.url}. "
+                          f"Все документы: {listing}")
+    with doc.file.open("rb") as fh:
+        content = fh.read()
+    text = _pdf_text(content)
+    if len(text.strip()) < 200:
+        return ToolResult(f"«{doc.title}» — скан без текстового слоя, прочитать текстом нельзя. Ссылка: {doc.url}. "
+                          f"Все документы: {listing}")
+    part, tail = _slice(text, args.get("offset") or 0, args.get("max_chars") or 30000)
+    head = f"{doc.get_kind_display()}: «{doc.title}» (документ [{doc.pk}]). Все документы: {listing}\n\n"
+    return ToolResult(head + part + tail, {"sources": [_source("fif", doc.title, url=doc.url)]})
+
+
+def _pdf_text(content: bytes) -> str:
+    try:
+        import pypdfium2 as pdfium
+
+        pdf = pdfium.PdfDocument(content)
+    except Exception:  # noqa: BLE001 — не PDF: пробуем как текст/Word ниже
+        return documents_text(content)
+    try:
+        pages = []
+        for index in range(len(pdf)):
+            page = pdf[index]
+            textpage = page.get_textpage()
+            pages.append(f"--- страница {index + 1} ---\n{textpage.get_text_range() or ''}")
+            textpage.close()
+            page.close()
+        return "\n".join(pages)
+    finally:
+        pdf.close()
+
+
+def documents_text(content: bytes) -> str:
+    try:
+        import io
+
+        import docx
+
+        return "\n".join(p.text for p in docx.Document(io.BytesIO(content)).paragraphs)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 # ===========================================================================
@@ -1048,8 +1189,43 @@ BUILTIN: list[Tool] = [
         _obj({
             "title": STR, "family": INT, "si_type": INT, "plan": {"type": "object"}, "note": STR, "template_id": INT,
             "example": {"type": "object"}, "sources": {"type": "array", "items": STR},
+            "kits": {"type": "array", "items": INT,
+                     "description": "id строк «Перечня применяемых эталонов» (ei_standard_kits) для этой поверки"},
         }, ["title", "family", "plan", "sources"]),
         ei_verification_template_propose,
+    ),
+    Tool(
+        "ei_standard_kits", "Смотрю перечень эталонов",
+        "«Перечень применяемых эталонов» компании: строки по видам поверки (раздел, класс/диапазон, эталоны, "
+        "вспомогательные СИ, обозначение для столбца U журнала «Номер в реестре^заводской^инвентарный», номера "
+        "эталонов в ФИФ ОЕИ, закреплён ли за поверителем) и список вспомогательных СИ. query — слова (вид СИ, "
+        "эталон, диапазон), family — id семейства, all=true — с выключенными, with_aux — вспомогательные СИ.",
+        _obj({"query": STR, "family": INT, "all": {"type": "boolean"}, "with_aux": {"type": "boolean"},
+              "limit": INT}),
+        ei_standard_kits,
+    ),
+    Tool(
+        "ei_standard_kits_propose", "Готовлю правку перечня эталонов",
+        "Изменить «Перечень применяемых эталонов» (метролог/руководитель; человек подтвердит карточкой). "
+        "Сначала ei_standard_kits — найди id строк. changes — список правок, применяются вместе: "
+        "{op: add|update|remove, target: kit|aux, id (для update/remove), …поля}. Поля строки (kit): section, "
+        "scope, standards_text, aux_text, journal_aux («69551-17^871455^|2231-72^8787^|»), fif_numbers "
+        "([«68984.17.4Р.01152950»]), families ([id]), employee (id сотрудника или null), note, is_active. "
+        "Поля вспомогательного СИ (aux): name, designation («299-11^22^»), note, is_active. remove — выключает "
+        "(история остаётся). Новый эталон в несколько видов поверки — update каждой строки, где он нужен. "
+        "Номера и обозначения переписывай символ в символ из слов человека.",
+        _obj({"changes": {"type": "array", "items": {"type": "object"}}, "sources": {"type": "array", "items": STR}},
+             ["changes"]),
+        ei_standard_kits_propose,
+    ),
+    Tool(
+        "ei_fif_document_read", "Читаю методику поверки",
+        "Текст документа утверждённого типа (методика поверки kind=meth или описание типа kind=spec), который "
+        "EI_doc скачал из ФГИС. si_type — id типа в EI_doc (или mit_uuid), document_id — конкретный документ из "
+        "списка, offset/max_chars — для длинных. Сканы без текста не читаются — тогда ссылка.",
+        _obj({"si_type": INT, "mit_uuid": STR, "kind": {"type": "string", "enum": ["meth", "spec"]},
+              "document_id": INT, "offset": INT, "max_chars": INT}),
+        ei_fif_document_read,
     ),
     Tool(
         "ui_show", "Показываю виджет",

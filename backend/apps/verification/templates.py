@@ -274,6 +274,26 @@ def _template(verification: Verification, template_id) -> VerificationTemplate:
     return template
 
 
+def _kit(template: VerificationTemplate, verification: Verification, kit_id) -> dict | None:
+    """Строка «Перечня применяемых эталонов», выбранная поверителем, — снимком в поверку.
+
+    Не выбрал, а набор у шаблона один — берём его; наборов нет — поверка без набора (как раньше).
+    """
+    from apps.catalog import standard_kits
+
+    options = standard_kits.kits_for(verification.instrument.si_type, template)
+    if kit_id:
+        chosen = next((k for k in options if str(k.pk) == str(kit_id)), None)
+        if chosen is None:
+            raise MeasurementInputError("Этот набор эталонов не для этого шаблона — выберите из списка")
+        return standard_kits.snapshot(chosen)
+    if len(options) == 1:
+        return standard_kits.snapshot(options[0])
+    if len(options) > 1:
+        raise MeasurementInputError("Выберите набор эталонов — какой брали на эту поверку")
+    return None
+
+
 @transaction.atomic
 def apply(verification: Verification, payload: dict) -> dict:
     """Записать данные поверителя по шаблону и посчитать результат.
@@ -300,6 +320,7 @@ def apply(verification: Verification, payload: dict) -> dict:
     kind = payload.get("kind") or "periodic"
     if kind not in KINDS:
         raise MeasurementInputError("вид поверки — periodic | primary")
+    kit = _kit(template, verification, payload.get("kit"))
     manual = bool(payload.get("manual_unsuitable"))
     manual_reason = str(payload.get("manual_unsuitability_reason") or "").strip()
     if manual and not manual_reason:
@@ -362,7 +383,7 @@ def apply(verification: Verification, payload: dict) -> dict:
         "kind": kind, "params": {k: str(v) for k, v in values.items()}, "plan": plan,
         "operations": operations, "readings": clean, "conditions": conditions,
         "manual_unsuitable": manual, "manual_unsuitability_reason": manual_reason,
-        "source": payload.get("source") or "manual",
+        "kit": kit, "source": payload.get("source") or "manual",
     }
     verification.results = {
         "engine": ENGINE, "modes": (computed or {}).get("modes", []), "suitable": suitable,
@@ -400,11 +421,25 @@ def _equipment(instrument) -> dict:
 def _standards(verification: Verification | None) -> list[dict]:
     if verification is None or verification.pk is None:
         return []
-    return [
+    rows = [
         {"name": s.name, "serial_number": s.serial_number, "characteristics": "",
          "verification": f"рег. № в ФИФ {s.fif_number}", "valid_until": s.valid_until.isoformat()}
         for s in verification.standards.all()
     ]
+    kit = (verification.measurements or {}).get("kit") or {}
+    if not rows and kit:
+        # Набор из перечня компании: эталоны — со своими номерами в ФИФ ОЕИ, затем вспомогательные СИ.
+        numbers = ", ".join(kit.get("fif_numbers") or [])
+        for line in str(kit.get("standards_text") or "").split("\n"):
+            if line.strip():
+                rows.append({"name": line.strip().rstrip(";"), "serial_number": "", "characteristics": "",
+                             "verification": f"рег. № в ФИФ {numbers}" if numbers else "", "valid_until": ""})
+                numbers = ""
+        for line in str(kit.get("aux_text") or "").split("\n"):
+            if line.strip():
+                rows.append({"name": line.strip().rstrip(";"), "serial_number": "", "characteristics": "",
+                             "verification": "", "valid_until": ""})
+    return rows
 
 
 def protocol_spec(verification: Verification, *, draft: bool | None = None) -> dict:
@@ -464,7 +499,8 @@ def render(spec: dict, fmt: str) -> bytes:
 # Заведение шаблона (экран и карточка ассистента)
 # ---------------------------------------------------------------------------
 def save_template(user, data: dict, *, sources=None, plan_check=None, template_id=None,
-                  via_assistant: bool = False) -> VerificationTemplate:
+                  via_assistant: bool = False, force_review: bool = False) -> VerificationTemplate:
+    """Сохранить шаблон. ``force_review`` — черновик от агента: ждёт метролога, даже если запустил метролог."""
     from rest_framework.exceptions import PermissionDenied
 
     from apps.catalog.api_types import can_create, is_reviewer
@@ -484,7 +520,13 @@ def save_template(user, data: dict, *, sources=None, plan_check=None, template_i
             raise TemplateError(f"типа СИ {data['si_type']} нет в справочнике")
         if si_type.family_id != family.pk:
             raise TemplateError(f"тип «{si_type}» из другого семейства")
-    reviewer = is_reviewer(user)
+    from apps.catalog.models import StandardKit
+
+    kit_ids = [int(k) for k in (data.get("kits") or []) if str(k).strip().isdigit()]
+    kits = list(StandardKit.objects.filter(pk__in=kit_ids, is_active=True))
+    if len(kits) != len(set(kit_ids)):
+        raise TemplateError("kits — id строк «Перечня применяемых эталонов» (ei_standard_kits), только действующие")
+    reviewer = is_reviewer(user) and not force_review
     with transaction.atomic():
         if template_id:
             template = VerificationTemplate.objects.select_for_update().filter(pk=template_id).first()
@@ -504,6 +546,8 @@ def save_template(user, data: dict, *, sources=None, plan_check=None, template_i
         template.reviewed_at = timezone.now() if reviewer else None
         template.is_active = True
         template.save()
+        if "kits" in data:
+            template.kits.set(kits)
     return template
 
 

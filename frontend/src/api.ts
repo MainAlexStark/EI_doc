@@ -679,6 +679,7 @@ export type VerificationTemplate = {
   updated_at: string;
   created_via_assistant: boolean;
   note: string;
+  kits?: { id: number; section: string; scope: string; standards_text: string; employee_name: string }[];
   plan: {
     si_kind: string;
     method: string;
@@ -703,6 +704,7 @@ export type TemplateReadings = Record<string, { readings: Record<string, string[
 export type TemplateForVerification = {
   engine: "template" | "water_meter";
   template: VerificationTemplate | null;
+  kits?: TemplateKit[];
   params?: Record<string, string>;
   params_from_type?: string[];
   missing?: string[];
@@ -714,7 +716,19 @@ export type TemplateForVerification = {
     conditions?: Record<string, string>;
     manual_unsuitable?: boolean;
     manual_unsuitability_reason?: string;
+    kit?: { id: number; section: string; scope: string } | null;
   } | null;
+};
+
+/** Строка перечня эталонов, из которой поверитель выбирает, что брал на поверку. */
+export type TemplateKit = {
+  id: number;
+  section: string;
+  scope: string;
+  standards_text: string;
+  aux_text: string;
+  employee_name: string;
+  own: boolean;
 };
 
 export type TemplateMeasurementsPayload = {
@@ -726,6 +740,7 @@ export type TemplateMeasurementsPayload = {
   conditions?: Record<string, string>;
   manual_unsuitable?: boolean;
   manual_unsuitability_reason?: string;
+  kit?: number | null;
 };
 
 export const fetchVerificationTemplates = (all = false) =>
@@ -938,7 +953,76 @@ export type SiType = {
   reviewed_at: string | null;
   label: string;
   existing?: boolean;
+  template_job?: TemplateJob | null;
+  templates?: { id: number; title: string; needs_review: boolean; own: boolean; kits: string[] }[];
 };
+
+/** Работа агента: шаблон поверки (и аттестации для ИО) для нового типа (apps/assistant/template_jobs.py). */
+export type TemplateJob = {
+  id: number;
+  status: "queued" | "running" | "done" | "failed" | "skipped";
+  status_display: string;
+  comment: string;
+  summary: string;
+  error: string;
+  created_at: string;
+  finished_at: string | null;
+  verification_template: { id: number; title: string; needs_review: boolean } | null;
+  attestation_program: { id: number; title: string; needs_review: boolean } | null;
+  session_id: string;
+};
+
+export const startTemplateJob = (siTypeId: number, comment = "") =>
+  json<TemplateJob>(`/api/catalog/si-types/${siTypeId}/template-jobs/`, {
+    method: "POST",
+    body: JSON.stringify({ comment }),
+  });
+
+// ---------------------------------------------------------------------------
+// «Перечень применяемых эталонов» (apps/catalog/api_kits.py)
+// ---------------------------------------------------------------------------
+export type StandardKit = {
+  id: number;
+  section: string;
+  scope: string;
+  employee: number | null;
+  employee_name: string;
+  standards_text: string;
+  aux_text: string;
+  journal_aux: string;
+  fif_numbers: string[];
+  families: number[];
+  family_names: string[];
+  note: string;
+  sort: number;
+  is_active: boolean;
+};
+
+export type AuxInstrument = { id: number; name: string; designation: string; note: string; is_active: boolean };
+
+export type StandardKitsResponse = { kits: StandardKit[]; aux: AuxInstrument[]; can_edit: boolean };
+
+export const fetchStandardKits = (all = false) =>
+  json<StandardKitsResponse>(`/api/catalog/standard-kits/${all ? "?all=1" : ""}`);
+
+export const saveStandardKit = (id: number | null, payload: Partial<StandardKit>) =>
+  id
+    ? json<StandardKit>(`/api/catalog/standard-kits/${id}/`, { method: "PATCH", body: JSON.stringify(payload) })
+    : json<StandardKit>("/api/catalog/standard-kits/", { method: "POST", body: JSON.stringify(payload) });
+
+export const saveAuxInstrument = (id: number | null, payload: Partial<AuxInstrument>) =>
+  id
+    ? json<AuxInstrument>(`/api/catalog/aux-instruments/${id}/`, { method: "PATCH", body: JSON.stringify(payload) })
+    : json<AuxInstrument>("/api/catalog/aux-instruments/", { method: "POST", body: JSON.stringify(payload) });
+
+export async function importStandardKits(file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return json<{ kits_created: number; kits_updated: number; kits_disabled: number; aux: number; aux_disabled: number }>(
+    "/api/catalog/standard-kits/import/",
+    { method: "POST", body },
+  );
+}
 
 export type SiTypeInput = {
   family?: number | null;
@@ -968,6 +1052,7 @@ export type SiTypePresets = {
   families: { id: number; name: string; calculator_key: string }[];
   default_family: number | null;
   can_review: boolean;
+  can_manual: boolean;
 };
 
 export const fetchSiTypes = (params: { needs_review?: boolean; q?: string } = {}) =>
@@ -1018,6 +1103,7 @@ export type FifCard = {
   documents: FifDocument[];
   already_added: { id: number; name: string; needs_review: boolean }[];
   limits_reader: boolean;
+  family_guess: number | null;
 };
 
 export type FifLimitsResult = {

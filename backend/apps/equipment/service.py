@@ -212,13 +212,14 @@ def clean_program(data: dict) -> dict:
 
 
 def save_program(user, data: dict, *, sources=None, plan_check: dict | None = None,
-                 program_id: int | None = None, via_assistant: bool = True) -> AttestationProgram:
+                 program_id: int | None = None, via_assistant: bool = True,
+                 force_review: bool = False) -> AttestationProgram:
     """Завести или обновить шаблон аттестации. Шаблон от поверителя ждёт проверки метролога;
     любая правка снимает отметку о проверке, если правит не метролог."""
     if not can_edit(user):
         raise PermissionDenied("Нет права заводить шаблоны аттестации (наблюдатель)")
     card = clean_program(data)
-    reviewer = is_reviewer(user)
+    reviewer = is_reviewer(user) and not force_review  # черновик агента ждёт метролога в любом случае
     with transaction.atomic():
         if program_id:
             program = AttestationProgram.objects.select_for_update().filter(pk=program_id).first()

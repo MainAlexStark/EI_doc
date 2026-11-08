@@ -121,7 +121,21 @@ def _verification_template_save(action: PendingAction, user) -> dict:
             "updated": bool(payload.get("template_id"))}
 
 
+def _standard_kits_update(action: PendingAction, user) -> dict:
+    from apps.catalog import standard_kits
+    from apps.catalog.api_types import is_reviewer
+
+    if not is_reviewer(user):
+        raise ActionError("Перечень эталонов меняет метролог или руководитель")
+    try:
+        done = standard_kits.apply_changes(action.payload.get("changes"), user)
+    except standard_kits.KitError as exc:
+        raise ActionError(str(exc)) from exc
+    return {"done": done}
+
+
 EXECUTORS = {
+    "standard_kits_update": _standard_kits_update,
     "attestation_create": _attestation_create,
     "attestation_template_save": _attestation_template_save,
     "verification_template_save": _verification_template_save,
@@ -131,6 +145,7 @@ EXECUTORS = {
 }
 
 DONE_TEXT = {
+    "standard_kits_update": lambda r: "Перечень эталонов обновлён: " + "; ".join(r.get("done") or []) + ".",
     "attestation_create": lambda r: (
         f"Аттестация заведена (id {r['id']}): {r['label']}. Измерения и условия человек вносит на вкладке "
         "«Аттестация ИО»" + ("." if r.get("plan_approved") else "; план ждёт проверки метролога.")

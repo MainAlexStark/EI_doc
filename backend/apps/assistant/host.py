@@ -42,7 +42,7 @@ from rest_framework.exceptions import APIException
 
 from apps.assistant import actions, prompt, web
 from apps.assistant.models import Attachment, Conversation, MemoryItem, PendingAction, Scope
-from apps.assistant.tools import STR, Tool, ToolContext, ToolFailure, ToolResult, _obj, builtin_tools
+from apps.assistant.tools import STR, Tool, ToolContext, ToolFailure, ToolResult, _kits, _obj, builtin_tools
 
 log = logging.getLogger(__name__)
 
@@ -92,7 +92,100 @@ def company_memory_delete(ctx: ToolContext, args: dict) -> ToolResult:
     return ToolResult("Ждёт подтверждения.", {"action": action.pk})
 
 
+def template_job_save(ctx: ToolContext, args: dict) -> ToolResult:
+    """Черновик шаблона по фоновой работе EI_doc — без карточки: его всё равно проверяет метролог.
+
+    Писать можно только в открытую работу, которую поставил сам EI_doc от имени этого же сотрудника, —
+    так агент не может сохранить что-то «мимо» проверки.
+    """
+    from apps.assistant.models import TemplateJob
+    from apps.equipment import service
+    from apps.verification import templates
+
+    job = TemplateJob.objects.select_related("si_type").filter(pk=args.get("job_id") or 0).first()
+    if job is None or job.status != TemplateJob.Status.RUNNING or job.requested_by_id != ctx.user.pk:
+        raise ToolFailure("Нет такой фоновой работы в процессе. Этот инструмент — только для задач «ФОНОВАЯ РАБОТА "
+                          "EI_doc»; в обычном разговоре — ei_verification_template_propose / "
+                          "ei_attestation_template_propose")
+    kind = args.get("kind")
+    sources = [str(x) for x in (args.get("sources") or []) if str(x).strip()]
+    if not sources:
+        raise ToolFailure("Укажи sources — методика поверки с пунктами, описание типа, перечень эталонов")
+    if kind == "verification":
+        if job.si_type.family.calculator_key == "water_meter":
+            raise ToolFailure("Счётчики воды считает встроенный калькулятор — шаблон поверки им не нужен")
+        from apps.verification.models import VerificationTemplate
+
+        other = args.get("template_id")
+        if other and other != job.verification_template_id:
+            # Готовый шаблон (часто — общий на семейство и уже проверенный) подходит и этому типу:
+            # его не переписываем и не снимаем с проверки, только добавляем наборы эталонов.
+            template = VerificationTemplate.objects.filter(pk=other, is_active=True).first()
+            if template is None or template.family_id != job.si_type.family_id:
+                raise ToolFailure(f"Шаблона поверки {other} нет или он другого семейства")
+            if args.get("plan"):
+                raise ToolFailure("Чужой шаблон здесь не переписывается: передай template_id и kits (без plan), "
+                                  "чтобы использовать его как есть, или сделай свой черновик без template_id")
+            new_kits = _kits(args.get("kits"))
+            template.kits.add(*new_kits)
+            job.verification_template = template
+            job.saved_at = timezone.now()
+            job.save(update_fields=["verification_template", "saved_at"])
+            return ToolResult(f"Тип будет поверяться по готовому шаблону «{template.title}» (id {template.pk}); "
+                              f"добавлены наборы эталонов: {', '.join(map(str, new_kits)) or 'нет'}.")
+        if not args.get("plan"):
+            raise ToolFailure("plan — шаблон поверки (или template_id готового шаблона, чтобы взять его как есть)")
+        template_id = job.verification_template_id
+        data = {"title": args.get("title"), "family": job.si_type.family_id,
+                "si_type": None if args.get("for_family") else job.si_type.pk,
+                "plan": args.get("plan"), "note": args.get("note") or ""}
+        if "kits" in args:
+            data["kits"] = args.get("kits") or []
+        try:
+            report = templates.check_example(templates.clean_template(args.get("plan")), args["example"]) \
+                if args.get("example") else None
+            template = templates.save_template(ctx.user, data, sources=sources, plan_check=report,
+                                               template_id=template_id, via_assistant=True, force_review=True)
+        except templates.TemplateError as exc:
+            raise ToolFailure(f"шаблон: {exc}") from exc
+        job.verification_template = template
+        job.saved_at = timezone.now()
+        job.save(update_fields=["verification_template", "saved_at"])
+        kits = ", ".join(str(k) for k in template.kits.all()) or "не выбраны"
+        return ToolResult(f"Черновик шаблона поверки сохранён (id {template.pk}, «{template.title}»), наборы эталонов: "
+                          f"{kits}. Ждёт проверки метролога.")
+    if kind == "attestation":
+        card = {k: args.get(k) for k in ("title", "equipment_kind", "plan", "note")}
+        try:
+            program = service.save_program(ctx.user, card, sources=sources,
+                                           program_id=args.get("program_id") or job.attestation_program_id,
+                                           via_assistant=True, force_review=True)
+        except service.AttestationError as exc:
+            raise ToolFailure(f"шаблон аттестации: {exc}") from exc
+        job.attestation_program = program
+        job.saved_at = timezone.now()
+        job.save(update_fields=["attestation_program", "saved_at"])
+        return ToolResult(f"Черновик шаблона аттестации сохранён (id {program.pk}, «{program.title}»). "
+                          "Ждёт проверки метролога.")
+    raise ToolFailure("kind — verification | attestation")
+
+
 HOST_ONLY = [
+    Tool("ei_template_job_save", "Сохраняю черновик шаблона",
+         "ТОЛЬКО для задач «ФОНОВАЯ РАБОТА EI_doc» (job_id из задачи): сохранить черновик шаблона для нового типа "
+         "СИ — без карточки, метролог проверит его на вкладке «Типы СИ». kind=verification: title, plan (формат — "
+         "как в ei_verification_template_propose), kits — id строк перечня эталонов (ei_standard_kits), note, "
+         "example (сверка), for_family=true — шаблон на всё семейство, а не на тип; template_id готового шаблона "
+         "БЕЗ plan — взять его для этого типа как есть (добавятся только kits). "
+         "kind=attestation (только испытательное оборудование): title, equipment_kind, plan (как в "
+         "ei_attestation_template_propose), note, program_id. sources — обязательно. Повторный вызов обновляет "
+         "тот же черновик.",
+         _obj({"job_id": {"type": "integer"}, "kind": {"type": "string", "enum": ["verification", "attestation"]},
+               "title": STR, "plan": {"type": "object"}, "kits": {"type": "array", "items": {"type": "integer"}},
+               "note": STR, "example": {"type": "object"}, "for_family": {"type": "boolean"},
+               "template_id": {"type": "integer"}, "equipment_kind": STR, "program_id": {"type": "integer"},
+               "sources": {"type": "array", "items": STR}}, ["job_id", "kind", "sources"]),
+         template_job_save),
     Tool("ei_company_memory_propose", "Запоминаю для всей компании",
          "Записать правило или факт в ОБЩУЮ память компании (видят все сотрудники и ассистент у каждого). "
          "Человек подтверждает карточкой; менять общую память может метролог или руководитель. Личное — "

@@ -36,6 +36,9 @@ def template_json(t: VerificationTemplate, *, full: bool = False) -> dict:
         "si_type": t.si_type_id, "si_type_name": str(t.si_type) if t.si_type_id else "",
         "needs_review": t.needs_review, "is_active": t.is_active, "updated_at": t.updated_at,
         "created_via_assistant": t.created_via_assistant, "note": t.note,
+        "kits": [{"id": k.pk, "section": k.section, "scope": k.scope, "standards_text": k.standards_text,
+                  "employee_name": k.employee.full_name if k.employee_id else ""}
+                 for k in t.kits.filter(is_active=True).select_related("employee")],
         "plan": {
             "si_kind": plan["si_kind"], "method": plan["method"], "quantity": plan.get("quantity", ""),
             "unit": plan.get("unit", ""), "repeats": plan["repeats"], "params": plan["params"],
@@ -147,12 +150,21 @@ class VerificationTemplateView(APIView):
                 for m in plan["modes"]
             ]
         saved = verification.measurements if (verification.measurements or {}).get("engine") == templates.ENGINE else {}
+        from apps.catalog import standard_kits
+
+        employee = getattr(verification.verifier, "pk", None)
+        kits = [
+            {"id": k.pk, "section": k.section, "scope": k.scope, "standards_text": k.standards_text,
+             "aux_text": k.aux_text, "employee_name": k.employee.full_name if k.employee_id else "",
+             "own": bool(employee and k.employee_id == employee)}
+            for k in standard_kits.kits_for(verification.instrument.si_type, template)
+        ]
         return Response({
-            "engine": templates.ENGINE, "template": template_json(template),
+            "engine": templates.ENGINE, "template": template_json(template), "kits": kits,
             "params": {k: str(v) for k, v in values.items()}, "params_from_type": sorted(from_type),
             "missing": [p["key"] for p in missing], "modes": modes,
             "saved": {k: saved.get(k) for k in ("kind", "operations", "readings", "conditions", "manual_unsuitable",
-                                                 "manual_unsuitability_reason")} if saved else None,
+                                                 "manual_unsuitability_reason", "kit")} if saved else None,
         })
 
     def get(self, request, pk: int):

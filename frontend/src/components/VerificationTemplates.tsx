@@ -134,6 +134,14 @@ export default function VerificationTemplates({ canReview }: { canReview: boolea
                   <span className="k">Характеристики</span>
                   <span className="v">{open.plan.characteristics.map((c) => `${c.label} (${c.text})`).join("; ")}</span>
                 </div>
+                <div>
+                  <span className="k">Эталоны (из перечня)</span>
+                  <span className="v">
+                    {open.kits && open.kits.length > 0
+                      ? open.kits.map((k) => `${k.scope || k.section}${k.employee_name ? ` (${k.employee_name})` : ""}`).join("; ")
+                      : "не выбраны — поверитель отметит эталоны сам"}
+                  </span>
+                </div>
                 {open.sources && open.sources.length > 0 && (
                   <div>
                     <span className="k">Источники</span>

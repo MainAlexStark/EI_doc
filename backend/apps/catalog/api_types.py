@@ -150,6 +150,8 @@ class SiTypeSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     reviewed_by_name = serializers.SerializerMethodField()
     label = serializers.SerializerMethodField()
+    template_job = serializers.SerializerMethodField()
+    templates = serializers.SerializerMethodField()
 
     class Meta:
         model = SiType
@@ -158,6 +160,7 @@ class SiTypeSerializer(serializers.ModelSerializer):
             "manufacturer", "verification_interval_months", "limits", "fif_url",
             "fif_uuid", "type_title", "certificate_valid_to",
             "needs_review", "created_by_name", "reviewed_by_name", "reviewed_at", "label",
+            "template_job", "templates",
         ]
         read_only_fields = ["needs_review", "reviewed_at"]
 
@@ -166,6 +169,22 @@ class SiTypeSerializer(serializers.ModelSerializer):
 
     def get_reviewed_by_name(self, obj: SiType) -> str:
         return _user_name(obj.reviewed_by)
+
+    def get_template_job(self, obj: SiType) -> dict | None:
+        from apps.assistant.template_jobs import job_dict, latest
+
+        return job_dict(latest(obj))
+
+    def get_templates(self, obj: SiType) -> list[dict]:
+        """Шаблоны поверки, по которым поверяется тип: свой или общий на семейство."""
+        from apps.verification.templates import template_for
+
+        template = template_for(obj)
+        if template is None:
+            return []
+        return [{"id": template.pk, "title": template.title, "needs_review": template.needs_review,
+                 "own": template.si_type_id == obj.pk,
+                 "kits": [str(k) for k in template.kits.filter(is_active=True)]}]
 
     def get_label(self, obj: SiType) -> str:
         parts = [obj.name]
@@ -205,7 +224,12 @@ class SiTypeWriteSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
-        family = attrs.get("family") or (self.instance.family if self.instance else default_family())
+        family = attrs.get("family") or (self.instance.family if self.instance else None)
+        if family is None and attrs.get("type_title"):
+            from apps.catalog.standard_kits import guess_family
+
+            family = guess_family(f"{attrs['type_title']} {attrs.get('name', '')}")
+        family = family or default_family()
         if family is None:
             raise serializers.ValidationError("В справочнике нет ни одного семейства СИ")
         attrs["family"] = family
@@ -251,6 +275,12 @@ class SiTypeListCreateView(APIView):
         payload = SiTypeWriteSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
+        if not data.get("fif_uuid", "").strip() and not is_reviewer(request.user):
+            # Тип СИ обязан быть в Госреестре: поверитель выбирает его из подсказок ФИФ.
+            raise PermissionDenied(
+                "Тип заводится выбором из Госреестра (ФИФ). Нет в реестре или реестр не отвечает — "
+                "попросите метролога завести тип вручную"
+            )
 
         # Тот же тип уже есть — просто вернуть его: двое поверителей могли
         # завести один и тот же счётчик почти одновременно.
@@ -296,6 +326,10 @@ class SiTypeListCreateView(APIView):
             from apps.catalog.api_fif import schedule_documents
 
             transaction.on_commit(lambda: schedule_documents(si_type.fif_uuid))
+        if request.data.get("make_templates", True) not in (False, "false", "0", 0):
+            from apps.assistant.template_jobs import start
+
+            start(si_type, request.user)
         return Response(SiTypeSerializer(si_type).data, status=status.HTTP_201_CREATED)
 
 
@@ -348,6 +382,29 @@ class SiTypeConfirmView(APIView):
         si_type.reviewed_at = timezone.now()
         si_type.save(update_fields=["needs_review", "reviewed_by", "reviewed_at"])
         return Response(SiTypeSerializer(si_type).data)
+
+
+class SiTypeTemplateJobsView(APIView):
+    """GET — история работ агента по типу; POST {comment} — «Переделать шаблон» (или сделать впервые)."""
+
+    @extend_schema(responses={200: dict})
+    def get(self, request, pk: int):
+        from apps.assistant.template_jobs import job_dict
+
+        si_type = get_object_or_404(SiType, pk=pk)
+        return Response([job_dict(job) for job in si_type.template_jobs.all()[:20]])
+
+    @extend_schema(request=dict, responses={201: dict})
+    def post(self, request, pk: int):
+        from apps.assistant.template_jobs import job_dict, reap_stale, start
+
+        si_type = get_object_or_404(SiType, pk=pk)
+        own_unreviewed = si_type.needs_review and si_type.created_by_id == request.user.pk
+        if not (is_reviewer(request.user) or own_unreviewed):
+            raise PermissionDenied("Шаблон для проверенного типа заказывает метролог")
+        reap_stale()
+        job = start(si_type, request.user, comment=str(request.data.get("comment") or ""))
+        return Response(job_dict(job), status=status.HTTP_201_CREATED)
 
 
 def _limits_key(limits: dict) -> tuple | None:
@@ -417,4 +474,6 @@ class SiTypePresetsView(APIView):
             ],
             "default_family": family.pk if family else None,
             "can_review": is_reviewer(request.user),
+            # Вручную, без Госреестра, тип заводит только метролог/руководитель.
+            "can_manual": is_reviewer(request.user),
         })

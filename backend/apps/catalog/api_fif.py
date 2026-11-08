@@ -77,6 +77,10 @@ class FifTypeCardView(APIView):
         body["already_added"] = [
             {"id": t.id, "name": t.name, "needs_review": t.needs_review} for t in existing
         ]
+        from apps.catalog.standard_kits import guess_family
+
+        family = guess_family(f"{card.title} {' '.join(card.variants[:3])}")
+        body["family_guess"] = family.pk if family else None
         body["limits_reader"] = bool(
             getattr(settings, "YANDEX_VISION_API_KEY", "") and getattr(settings, "YANDEX_VISION_FOLDER_ID", "")
         )

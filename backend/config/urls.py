@@ -4,6 +4,13 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.catalog.api import FamilyOptionsView, SiTypeSuggestView
+from apps.catalog.api_kits import (
+    AuxInstrumentDetailView,
+    AuxInstrumentsView,
+    StandardKitDetailView,
+    StandardKitsImportView,
+    StandardKitsView,
+)
 from apps.catalog.api_fif import (
     FifDocumentFileView,
     FifTypeCardView,
@@ -12,6 +19,7 @@ from apps.catalog.api_fif import (
 )
 from apps.catalog.api_types import (
     SiTypeConfirmView,
+    SiTypeTemplateJobsView,
     SiTypeDetailView,
     SiTypeListCreateView,
     SiTypePresetsView,
@@ -96,9 +104,15 @@ urlpatterns = [
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
     path("api/catalog/si-types/", SiTypeListCreateView.as_view(), name="si_type_list"),
+    path("api/catalog/standard-kits/", StandardKitsView.as_view(), name="standard_kits"),
+    path("api/catalog/standard-kits/import/", StandardKitsImportView.as_view(), name="standard_kits_import"),
+    path("api/catalog/standard-kits/<int:pk>/", StandardKitDetailView.as_view(), name="standard_kit_detail"),
+    path("api/catalog/aux-instruments/", AuxInstrumentsView.as_view(), name="aux_instruments"),
+    path("api/catalog/aux-instruments/<int:pk>/", AuxInstrumentDetailView.as_view(), name="aux_instrument_detail"),
     path("api/catalog/si-types/presets/", SiTypePresetsView.as_view(), name="si_type_presets"),
     path("api/catalog/si-types/<int:pk>/", SiTypeDetailView.as_view(), name="si_type_detail"),
     path("api/catalog/si-types/<int:pk>/confirm/", SiTypeConfirmView.as_view(), name="si_type_confirm"),
+    path("api/catalog/si-types/<int:pk>/template-jobs/", SiTypeTemplateJobsView.as_view(), name="si_type_template_jobs"),
     path("api/catalog/si-types/<int:pk>/documents/", SiTypeDocumentsView.as_view(), name="si_type_documents"),
     path("api/catalog/fif/types/<str:ident>/", FifTypeCardView.as_view(), name="fif_type_card"),
     path("api/catalog/fif/types/<str:ident>/limits/", FifTypeLimitsView.as_view(), name="fif_type_limits"),
