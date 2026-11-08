@@ -1,36 +1,50 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { confirmSiType, fetchSiTypes, type Me, type SiType } from "../api";
 import { rememberSiType } from "../offline/sync";
+import Icon from "../ui/Icon";
+import { Modal } from "../ui/Modal";
+import { Alert, EmptyState, PageActions, SearchField, Segmented, Spinner } from "../ui/controls";
 import SiTypeForm from "./SiTypeForm";
 import VerificationTemplates from "./VerificationTemplates";
 
 const REVIEWER_ROLES = new Set(["owner", "head", "metrologist"]);
 
+type View = "pending" | "all" | "templates";
+
 /**
  * Справочник типов СИ — вместо раздела в админке.
  *
- * Метролог открывает вкладку «Ждут проверки», сверяет характеристики с
- * описанием типа в Госреестре, при необходимости правит и подтверждает.
+ * Метролог открывает «Ждут проверки», сверяет характеристики с описанием типа
+ * в Госреестре, при необходимости правит и подтверждает. Карточка типа — в окне.
  */
-export default function SiTypes({ me }: { me: Me | null }) {
+export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: () => void }) {
   const canReview = REVIEWER_ROLES.has(me?.role ?? "");
-  const [onlyPending, setOnlyPending] = useState(canReview);
-  const [showTemplates, setShowTemplates] = useState(false);
+  const [view, setViewState] = useState<View>(canReview ? "pending" : "all");
+  const touched = useRef(false);
+  const setView = (next: View) => {
+    touched.current = true;
+    setViewState(next);
+  };
+  // Роль приходит после первой отрисовки — метролог по умолчанию попадает в «Ждут проверки».
+  useEffect(() => {
+    if (canReview && !touched.current) setViewState("pending");
+  }, [canReview]);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<SiType[]>([]);
   const [pendingTotal, setPendingTotal] = useState(0);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [open, setOpen] = useState<SiType | null>(null);
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
+    if (view === "templates") return;
     setLoading(true);
     setError("");
     try {
       const [list, pending] = await Promise.all([
-        fetchSiTypes({ needs_review: onlyPending, q: query.trim() }),
+        fetchSiTypes({ needs_review: view === "pending", q: query.trim() }),
         fetchSiTypes({ needs_review: true }),
       ]);
       setItems(list);
@@ -40,12 +54,12 @@ export default function SiTypes({ me }: { me: Me | null }) {
     } finally {
       setLoading(false);
     }
-  }, [onlyPending, query]);
+  }, [view, query]);
 
   useEffect(() => {
-    const timer = setTimeout(() => void load(), 250);
+    const timer = setTimeout(() => void load(), query ? 250 : 0);
     return () => clearTimeout(timer);
-  }, [load]);
+  }, [load, query]);
 
   const confirm = async (item: SiType) => {
     setBusy(item.id);
@@ -53,8 +67,9 @@ export default function SiTypes({ me }: { me: Me | null }) {
     try {
       const saved = await confirmSiType(item.id);
       void rememberSiType(saved);
-      setOpenId(null);
+      setOpen(null);
       await load();
+      onChanged?.();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось подтвердить");
     } finally {
@@ -62,109 +77,105 @@ export default function SiTypes({ me }: { me: Me | null }) {
     }
   };
 
+  const saved = (item: SiType) => {
+    void rememberSiType(item);
+    setAdding(false);
+    setOpen(null);
+    void load();
+    onChanged?.();
+  };
+
   return (
-    <div className="narrow">
-      <div className="toolbar">
-        <div className="segmented">
-          <button
-            type="button"
-            className={onlyPending && !showTemplates ? "active" : ""}
-            onClick={() => { setOnlyPending(true); setShowTemplates(false); }}
-          >
-            Ждут проверки{pendingTotal > 0 ? ` · ${pendingTotal}` : ""}
-          </button>
-          <button
-            type="button"
-            className={!onlyPending && !showTemplates ? "active" : ""}
-            onClick={() => { setOnlyPending(false); setShowTemplates(false); }}
-          >
-            Все типы
-          </button>
-          <button type="button" className={showTemplates ? "active" : ""} onClick={() => setShowTemplates(true)}>
-            Шаблоны поверки
-          </button>
-        </div>
-        <input
-          className="grow"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск по названию, номеру, изготовителю"
-        />
+    <div className="narrow" style={{ maxWidth: 920 }}>
+      <PageActions>
         <button type="button" className="primary" onClick={() => setAdding(true)}>
-          + Новый тип
+          <Icon name="plus" size={16} strokeWidth={2.2} />
+          Новый тип
         </button>
+      </PageActions>
+
+      <div className="toolbar">
+        <Segmented
+          value={view}
+          onChange={setView}
+          options={[
+            ...(canReview || pendingTotal > 0 ? [{ value: "pending" as View, label: "Ждут проверки", count: pendingTotal }] : []),
+            { value: "all" as View, label: "Все типы" },
+            { value: "templates" as View, label: "Шаблоны поверки" },
+          ]}
+        />
+        {view !== "templates" && (
+          <SearchField className="grow" value={query} onChange={setQuery} placeholder="Название, номер в Госреестре, изготовитель" />
+        )}
       </div>
 
-      {showTemplates ? (
+      {view === "templates" ? (
         <VerificationTemplates canReview={canReview} />
       ) : (
         <>
-      {adding && (
-        <SiTypeForm
-          title="Новый тип СИ"
-          onSaved={(saved) => {
-            void rememberSiType(saved);
-            setAdding(false);
-            void load();
-          }}
-          onCancel={() => setAdding(false)}
-        />
-      )}
+          {error && <Alert>{error}</Alert>}
+          {loading && <Spinner />}
+          {!loading && items.length === 0 && (
+            view === "pending" && !query ? (
+              <EmptyState icon="checkCircle" title="Всё проверено">
+                Новые типы, которые заведут поверители или ассистент, появятся здесь.
+              </EmptyState>
+            ) : (
+              <EmptyState icon="search" title="Ничего не нашлось">
+                Попробуйте номер в Госреестре — например, 16078-13.
+              </EmptyState>
+            )
+          )}
 
-      {error && <div className="error">{error}</div>}
-      {loading && <div className="loading">Загружаю…</div>}
-      {!loading && items.length === 0 && (
-        <div className="empty">{onlyPending ? "Новых типов на проверку нет" : "Ничего не нашлось"}</div>
-      )}
-
-      <div className="card-list">
-        {items.map((item) => (
-          <div className="card" key={item.id}>
-            <div className="card-head">
-              <div className="grow">
-                <b>{item.name}</b>
-                <div className="sub">
-                  № {item.registry_number} · {item.manufacturer || "изготовитель не указан"} · МПИ{" "}
-                  {item.verification_interval_months} мес.
-                </div>
-                {item.needs_review ? (
-                  <div className="sub">
-                    <span className="pill warn">ждёт проверки</span> завёл {item.created_by_name || "—"}
+          {!loading && items.length > 0 && (
+            <div className="card-list">
+              {items.map((item) => (
+                <div className="card type-row" key={item.id}>
+                  <div className="grow">
+                    <b>{item.name}</b>
+                    {item.needs_review && <span className="pill warn" style={{ marginLeft: 8 }}>ждёт проверки</span>}
+                    <div className="meta">
+                      <span>№ <span className="cell-mono">{item.registry_number}</span></span>
+                      <span>{item.manufacturer || "изготовитель не указан"}</span>
+                      <span>МПИ {item.verification_interval_months} мес.</span>
+                      {item.needs_review ? (
+                        <span>завёл {item.created_by_name || "—"}</span>
+                      ) : (
+                        item.reviewed_by_name && <span><Icon name="check" size={12} /> проверил {item.reviewed_by_name}</span>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  item.reviewed_by_name && <div className="sub">проверил {item.reviewed_by_name}</div>
-                )}
-              </div>
-              <div className="actions">
-                {canReview && item.needs_review && (
-                  <button type="button" className="primary" disabled={busy === item.id} onClick={() => void confirm(item)}>
-                    Всё верно
-                  </button>
-                )}
-                {(canReview || item.needs_review) && (
-                  <button type="button" onClick={() => setOpenId(openId === item.id ? null : item.id)}>
-                    {openId === item.id ? "Свернуть" : "Открыть"}
-                  </button>
-                )}
-              </div>
+                  <div className="row">
+                    {canReview && item.needs_review && (
+                      <button type="button" className="primary sm" disabled={busy === item.id} onClick={() => void confirm(item)}>
+                        <Icon name="check" size={14} /> Всё верно
+                      </button>
+                    )}
+                    {(canReview || item.needs_review) && (
+                      <button type="button" className="sm" onClick={() => setOpen(item)}>
+                        Открыть
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-            {openId === item.id && (
-              <SiTypeForm
-                key={item.id}
-                existing={item}
-                onSaved={(saved) => {
-                  void rememberSiType(saved);
-                  setOpenId(null);
-                  void load();
-                }}
-                onCancel={() => setOpenId(null)}
-              />
-            )}
-          </div>
-        ))}
-      </div>
+          )}
         </>
       )}
+
+      <Modal open={adding} onClose={() => setAdding(false)} size="lg" title="Новый тип СИ" subtitle="Номер в Госреестре подтянет наименование, изготовителя и методику">
+        <SiTypeForm onSaved={saved} onCancel={() => setAdding(false)} />
+      </Modal>
+      <Modal
+        open={open != null}
+        onClose={() => setOpen(null)}
+        size="lg"
+        title={open?.name}
+        subtitle={open ? `№ ${open.registry_number}${open.needs_review ? ` · ждёт проверки, завёл ${open.created_by_name || "—"}` : ""}` : undefined}
+      >
+        {open && <SiTypeForm key={open.id} existing={open} onSaved={saved} onCancel={() => setOpen(null)} />}
+      </Modal>
     </div>
   );
 }

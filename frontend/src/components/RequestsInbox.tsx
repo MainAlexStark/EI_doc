@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   confirmRequest,
   fetchEmployees,
@@ -7,40 +7,69 @@ import {
   type Employee,
   type HubRequest,
 } from "../api";
+import Icon from "../ui/Icon";
+import { confirmDialog, promptDialog } from "../ui/Modal";
+import { Alert, EmptyState, SearchField, Segmented, Spinner } from "../ui/controls";
+import { PHONE, useMediaQuery } from "../ui/hooks";
 
 const money = (value: string | number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Number(value));
 
-const STATUS_LABELS: Record<string, string> = {
-  new: "новая", routed: "подобран исполнитель", confirmed: "подтверждена",
-  done: "выполнена", cancelled: "отменена",
-  rejected: "отклонена", spam: "спам / дубль",
+const STATUS: Record<string, { label: string; tone: string }> = {
+  new: { label: "Новая", tone: "info" },
+  routed: { label: "Подобран исполнитель", tone: "info" },
+  confirmed: { label: "Подтверждена", tone: "ok" },
+  done: { label: "Выполнена", tone: "ok" },
+  cancelled: { label: "Отменена", tone: "muted" },
+  rejected: { label: "Отклонена", tone: "bad" },
+  spam: { label: "Спам / дубль", tone: "muted" },
+};
+const SOURCE: Record<string, string> = { site: "с сайта", phone: "по телефону", email: "по почте", manual: "внесена вручную" };
+
+type Box = "inbox" | "confirmed" | "archive" | "spam";
+const BOX_STATUSES: Record<Box, string[]> = {
+  inbox: ["new", "routed"],
+  confirmed: ["confirmed"],
+  archive: ["done", "cancelled", "rejected"],
+  spam: ["spam"],
 };
 
 const formatDate = (value: string | null) =>
-  value ? new Date(value).toLocaleDateString("ru-RU") : "—";
+  value ? new Date(value).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "—";
 
-/** Диспетчерская очередь заявок с сайта: рекомендация -> подтверждение -> наряд. */
-export default function RequestsInbox() {
-  const [status, setStatus] = useState("");
+function receivedAt(value: string): string {
+  const date = new Date(value);
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "вчера";
+  return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "");
+}
+
+const itemsLine = (request: HubRequest) =>
+  request.items.length
+    ? request.items.map((item) => `${item.family}${item.quantity > 1 ? ` × ${item.quantity}` : ""}`).join(", ")
+    : request.si_description || "Приборы не указаны";
+
+/** Диспетчерская очередь заявок с сайта: рекомендация → подтверждение → наряд. Как «Почта»:
+ * список слева, заявка справа; на телефоне — список, по нажатию заявка. */
+export default function RequestsInbox({ onChanged }: { onChanged?: () => void }) {
+  const phone = useMediaQuery(PHONE);
+  const [box, setBox] = useState<Box>("inbox");
+  const [query, setQuery] = useState("");
   const [requests, setRequests] = useState<HubRequest[]>([]);
+  const [spam, setSpam] = useState<HubRequest[] | null>(null);
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [open, setOpen] = useState<number | null>(null);
-  const [pickEmployee, setPickEmployee] = useState<Record<number, string>>({});
-  const [pickDate, setPickDate] = useState<Record<number, string>>({});
-  const [pickTime, setPickTime] = useState<Record<number, string>>({});
-  const [busy, setBusy] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [flash, setFlash] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (currentStatus: string) => {
-    setLoading(true);
+  const load = useCallback(async () => {
     setError("");
     try {
-      const [rows, staff] = await Promise.all([
-        fetchRequests(currentStatus ? { status: currentStatus } : {}),
-        employees.length ? Promise.resolve(employees) : fetchEmployees(),
-      ]);
+      const [rows, staff] = await Promise.all([fetchRequests({}), fetchEmployees()]);
       setRequests(rows);
       setEmployees(staff);
     } catch (exc) {
@@ -48,202 +77,325 @@ export default function RequestsInbox() {
     } finally {
       setLoading(false);
     }
-    // employees намеренно не в зависимостях — грузим справочник один раз
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    void load(status);
-  }, [status, load]);
+    void load();
+  }, [load]);
 
-  const startConfirm = (request: HubRequest) => {
-    setOpen(request.id);
-    setPickEmployee((current) => ({
-      ...current,
-      [request.id]: current[request.id] ?? (request.suggested_employee_id?.toString() ?? ""),
-    }));
-    setPickDate((current) => ({ ...current, [request.id]: current[request.id] ?? (request.desired_date ?? "") }));
-    setPickTime((current) => ({ ...current, [request.id]: current[request.id] ?? (request.desired_time ?? "") }));
+  useEffect(() => {
+    if (box === "spam" && spam === null) {
+      void fetchRequests({ status: "spam" }).then(setSpam).catch(() => setSpam([]));
+    }
+  }, [box, spam]);
+
+  const source = box === "spam" ? spam ?? [] : requests;
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return source
+      .filter((r) => BOX_STATUSES[box].includes(r.status))
+      .filter((r) => !q || `${r.id} ${r.contact_name} ${r.contact_phone} ${r.address} ${r.comment}`.toLowerCase().includes(q));
+  }, [source, box, query]);
+
+  const counts = useMemo(
+    () => ({
+      inbox: requests.filter((r) => BOX_STATUSES.inbox.includes(r.status)).length,
+      confirmed: requests.filter((r) => r.status === "confirmed").length,
+    }),
+    [requests],
+  );
+
+  // На широком экране сразу открыта первая заявка в ящике — как в «Почте».
+  useEffect(() => {
+    if (phone || loading) return;
+    if (!shown.some((r) => r.id === openId)) setOpenId(shown[0]?.id ?? null);
+  }, [shown, phone, loading, openId]);
+
+  const open = shown.find((r) => r.id === openId) ?? source.find((r) => r.id === openId) ?? null;
+
+  const afterChange = async (message?: string) => {
+    setSpam(null);
+    if (message) setFlash(message);
+    await load();
+    onChanged?.();
   };
 
-  const confirm = async (request: HubRequest) => {
-    const employeeId = pickEmployee[request.id];
-    if (!employeeId) {
-      setError("Выберите исполнителя");
-      return;
-    }
-    setBusy(request.id);
-    setError("");
-    try {
-      await confirmRequest(request.id, {
-        employee_id: Number(employeeId),
-        scheduled_date: pickDate[request.id] || null,
-        scheduled_time: pickTime[request.id] || null,
-      });
-      setOpen(null);
-      await load(status);
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Не удалось подтвердить заявку");
-    } finally {
-      setBusy(null);
-    }
-  };
+  useEffect(() => {
+    if (!flash) return;
+    const timer = window.setTimeout(() => setFlash(""), 8000);
+    return () => window.clearTimeout(timer);
+  }, [flash]);
 
-  const reject = async (request: HubRequest, spam: boolean) => {
-    const reason = spam ? "" : window.prompt("Причина отклонения") ?? "";
-    setBusy(request.id);
-    setError("");
-    try {
-      await rejectRequest(request.id, { reason, spam });
-      await load(status);
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Не удалось отклонить заявку");
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  if (loading && requests.length === 0) return <div className="loading">Загружаю…</div>;
+  if (loading) return <Spinner />;
 
   return (
-    <>
-      <div className="filters">
-        <div className="field">
-          <label htmlFor="req-status">Статус</label>
-          <select id="req-status" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="">все, кроме спама</option>
-            <option value="new">новые</option>
-            <option value="routed">подобран исполнитель</option>
-            <option value="confirmed">подтверждены</option>
-            <option value="done">выполнены</option>
-            <option value="cancelled">отменены</option>
-            <option value="rejected">отклонены</option>
-            <option value="spam">спам / дубли</option>
-          </select>
+    <div className={`split ${open && phone ? "has-detail" : ""}`}>
+      <div className="split-list">
+        <div className="split-list-head">
+          <Segmented
+            size="sm"
+            value={box}
+            onChange={(next) => {
+              setBox(next);
+              setOpenId(null);
+            }}
+            options={[
+              { value: "inbox", label: "Входящие", count: counts.inbox },
+              { value: "confirmed", label: "В работе", count: counts.confirmed },
+              { value: "archive", label: "Архив" },
+              { value: "spam", label: "Спам" },
+            ]}
+          />
+          <SearchField value={query} onChange={setQuery} placeholder="Имя, телефон, адрес, №" />
+        </div>
+        <div className="split-list-body">
+          {error && <Alert>{error}</Alert>}
+          {shown.length === 0 && (
+            <EmptyState icon="inbox" title={box === "inbox" ? "Новых заявок нет" : "Пусто"}>
+              {box === "inbox" ? "Заявки с сайта появятся здесь — с рекомендованным исполнителем и ценой." : query ? "Под запрос ничего не нашлось" : null}
+            </EmptyState>
+          )}
+          <div className="mail-list">
+            {shown.map((request) => (
+              <button
+                type="button"
+                key={request.id}
+                className={`mail-item ${request.id === openId ? "active" : ""}`}
+                onClick={() => setOpenId(request.id)}
+              >
+                {request.status === "new" && <span className="unread" aria-label="новая" />}
+                <span className="mail-top">
+                  <b>{request.contact_name}</b>
+                  <span className="mail-date">{receivedAt(request.created_at)}</span>
+                </span>
+                <span className="sub">{itemsLine(request)}{request.estimated_price ? ` · ${money(request.estimated_price)} ₽` : ""}</span>
+                <span className="mail-meta">{request.address}</span>
+                {(box !== "inbox" || request.status === "routed" || request.desired_date) && (
+                  <span className="mail-tags">
+                    {box !== "inbox" && <span className={`pill ${STATUS[request.status]?.tone ?? "muted"}`}>{STATUS[request.status]?.label ?? request.status}</span>}
+                    {request.desired_date && <span className="tag"><Icon name="calendar" size={11} />{formatDate(request.desired_date)}{request.desired_time ? `, ${request.desired_time.slice(0, 5)}` : ""}</span>}
+                    {request.status === "routed" && request.suggested_employee && <span className="tag info"><Icon name="user" size={11} />{request.suggested_employee}</span>}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
-
-      {requests.length === 0 && <div className="empty">Заявок под этот фильтр нет</div>}
-
-      <div className="scopes">
-        {requests.map((request) => (
-          <div className="scope" key={request.id}>
-            <h3>№{request.id} — {request.contact_name}</h3>
-            <div className="who">
-              {request.address}
-              {request.district ? ` · ${request.district}` : ""}
-            </div>
-
-            <div className="counts">
-              <span className="pill muted">{STATUS_LABELS[request.status] ?? request.status}</span>
-              {request.suggested_employee && (
-                <span className="pill ok">рекомендован: {request.suggested_employee}</span>
-              )}
-              {request.assigned_employee && (
-                <span className="pill ok">исполнитель: {request.assigned_employee}</span>
-              )}
-              {request.desired_date && (
-                <span className="pill muted">
-                  желаемая дата: {formatDate(request.desired_date)}
-                  {request.desired_time ? `, ${request.desired_time.slice(0, 5)}` : ""}
-                </span>
-              )}
-              {request.is_priority_slot && <span className="pill ok">приоритетный слот</span>}
-              {request.estimated_price && (
-                <span className="pill muted">≈ {money(request.estimated_price)} ₽</span>
-              )}
-            </div>
-
-            {request.items.length > 0 && (
-              <ul className="request-items">
-                {request.items.map((item) => (
-                  <li key={item.id}>
-                    {item.family} × {item.quantity} — {money(item.subtotal)} ₽
-                  </li>
-                ))}
-              </ul>
-            )}
-            {request.si_description && <p>{request.si_description}</p>}
-            {request.comment && <p className="sub">{request.comment}</p>}
-            <p className="sub">
-              {request.contact_phone}
-              {request.contact_phone && request.contact_email ? " · " : ""}
-              {request.contact_email}
-            </p>
-
-            {(request.status === "new" || request.status === "routed") && (
-              <div className="actions">
-                <button disabled={busy === request.id} onClick={() => startConfirm(request)}>
-                  Подтвердить
-                </button>
-                <button disabled={busy === request.id} onClick={() => void reject(request, false)}>
-                  Отклонить
-                </button>
-                <button disabled={busy === request.id} onClick={() => void reject(request, true)}>
-                  Спам
-                </button>
-              </div>
-            )}
-
-            {open === request.id && (
-              <div className="preview">
-                <h4>Подтверждение — создаст наряд</h4>
-                <div className="field-row">
-                  <div className="field">
-                    <label htmlFor={`emp-${request.id}`}>Исполнитель</label>
-                    <select
-                      id={`emp-${request.id}`}
-                      value={pickEmployee[request.id] ?? ""}
-                      onChange={(event) =>
-                        setPickEmployee((current) => ({ ...current, [request.id]: event.target.value }))
-                      }
-                    >
-                      <option value="">выберите</option>
-                      {employees.map((employee) => (
-                        <option key={employee.id} value={employee.id}>
-                          {employee.full_name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`date-${request.id}`}>Дата выезда</label>
-                    <input
-                      id={`date-${request.id}`}
-                      type="date"
-                      value={pickDate[request.id] ?? ""}
-                      onChange={(event) =>
-                        setPickDate((current) => ({ ...current, [request.id]: event.target.value }))
-                      }
-                    />
-                  </div>
-                  <div className="field">
-                    <label htmlFor={`time-${request.id}`}>Время</label>
-                    <input
-                      id={`time-${request.id}`}
-                      type="time"
-                      value={pickTime[request.id] ?? ""}
-                      onChange={(event) =>
-                        setPickTime((current) => ({ ...current, [request.id]: event.target.value }))
-                      }
-                    />
-                  </div>
-                </div>
-                <div className="actions">
-                  <button className="primary" disabled={busy === request.id} onClick={() => void confirm(request)}>
-                    Создать наряд
-                  </button>
-                  <button disabled={busy === request.id} onClick={() => setOpen(null)}>
-                    Отмена
-                  </button>
-                </div>
-              </div>
-            )}
+      <div className="split-detail">
+        {flash && (
+          <div className="split-detail-inner" style={{ paddingBottom: 0 }}>
+            <Alert tone="ok" onClose={() => setFlash("")}>{flash}</Alert>
           </div>
-        ))}
+        )}
+        {open ? (
+          <RequestDetail
+            key={open.id}
+            request={open}
+            employees={employees}
+            onBack={phone ? () => setOpenId(null) : undefined}
+            onChanged={afterChange}
+          />
+        ) : (
+          !phone && <EmptyState icon="inbox" title="Заявка не выбрана">Выберите заявку в списке слева.</EmptyState>
+        )}
       </div>
-    </>
+    </div>
+  );
+}
+
+function RequestDetail({
+  request, employees, onBack, onChanged,
+}: {
+  request: HubRequest;
+  employees: Employee[];
+  onBack?: () => void;
+  onChanged: (message?: string) => Promise<void>;
+}) {
+  const [employee, setEmployee] = useState(request.suggested_employee_id?.toString() ?? "");
+  const [date, setDate] = useState(request.desired_date ?? "");
+  const [time, setTime] = useState(request.desired_time?.slice(0, 5) ?? "");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const actionable = request.status === "new" || request.status === "routed";
+  const status = STATUS[request.status] ?? { label: request.status, tone: "muted" };
+
+  const confirm = async () => {
+    if (!employee) {
+      setError("Выберите исполнителя");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const result = await confirmRequest(request.id, {
+        employee_id: Number(employee),
+        scheduled_date: date || null,
+        scheduled_time: time || null,
+        note: note || undefined,
+      });
+      const who = employees.find((e) => String(e.id) === employee)?.full_name ?? "исполнителя";
+      await onChanged(`Заявка №${request.id} подтверждена, создан наряд №${result.work_order_id}. Исполнитель — ${who}: выезд уже в его «Поверках» и графике.`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось подтвердить заявку");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reject = async (spam: boolean) => {
+    let reason = "";
+    if (spam) {
+      if (!(await confirmDialog({ title: "Пометить как спам?", text: "Заявка уйдёт в «Спам» — её можно будет найти там.", ok: "В спам" }))) return;
+    } else {
+      const answer = await promptDialog({ title: "Отклонить заявку", text: "Причину увидят коллеги в архиве заявок.", ok: "Отклонить", placeholder: "Например, не наш район" });
+      if (answer === null) return;
+      reason = answer;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await rejectRequest(request.id, { reason, spam });
+      await onChanged(spam ? `Заявка №${request.id} перенесена в «Спам».` : `Заявка №${request.id} отклонена.`);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось отклонить заявку");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const total = request.items.reduce((sum, item) => sum + Number(item.subtotal), 0);
+  const mapUrl = `https://yandex.ru/maps/?text=${encodeURIComponent(request.address)}`;
+
+  return (
+    <div className="split-detail-inner">
+      {onBack && (
+        <button type="button" className="back" onClick={onBack}>
+          <Icon name="chevronLeft" size={20} /> Заявки
+        </button>
+      )}
+      <div className="detail-head">
+        <div className="titles">
+          <div className="sub">
+            Заявка №{request.id} · {new Date(request.created_at).toLocaleString("ru-RU", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })} · {SOURCE[request.source] ?? request.source}
+          </div>
+          <h2>{request.contact_name}</h2>
+        </div>
+        <span className={`pill ${status.tone}`}>{status.label}</span>
+      </div>
+
+      <div className="contact-row">
+        {request.contact_phone && (
+          <a className="contact-chip" href={`tel:${request.contact_phone}`}><Icon name="phone" size={15} />{request.contact_phone}</a>
+        )}
+        {request.contact_email && (
+          <a className="contact-chip" href={`mailto:${request.contact_email}`}><Icon name="mail" size={15} />{request.contact_email}</a>
+        )}
+        <a className="contact-chip" href={mapUrl} target="_blank" rel="noreferrer" title="Открыть на карте">
+          <Icon name="mapPin" size={15} />
+          {request.address}
+          {request.district ? <span className="muted">· {request.district}</span> : null}
+        </a>
+      </div>
+
+      {!request.is_address_confirmed && (
+        <Alert tone="warn">Адрес введён вручную, не из подсказки — район мог определиться неточно.</Alert>
+      )}
+
+      <h3 className="section-title" style={{ margin: "8px 4px 8px" }}>Что поверить</h3>
+      <ul className="lines">
+        {request.items.map((item) => (
+          <li key={item.id}>
+            <span className="grow">{item.family}</span>
+            <span className="num muted">{item.quantity} × {money(item.unit_price)} ₽</span>
+            <span className="num" style={{ minWidth: 80, textAlign: "right" }}>{money(item.subtotal)} ₽</span>
+          </li>
+        ))}
+        {request.items.length === 0 && <li className="muted">Приборы не указаны</li>}
+        {request.estimated_price && (
+          <li className="total">
+            <span className="grow">
+              Итого{Number(request.discount_percent) > 0 ? ` со скидкой ${Number(request.discount_percent)} %` : ""}
+            </span>
+            <span className="num">≈ {money(request.estimated_price)} ₽</span>
+          </li>
+        )}
+        {!request.estimated_price && request.items.length > 0 && (
+          <li className="total"><span className="grow">Итого</span><span className="num">{money(total)} ₽</span></li>
+        )}
+      </ul>
+
+      {(request.si_description || request.comment) && (
+        <>
+          <h3 className="section-title" style={{ margin: "20px 4px 8px" }}>Комментарий заявителя</h3>
+          <div className="quote">{[request.si_description, request.comment].filter(Boolean).join("\n\n")}</div>
+        </>
+      )}
+
+      <h3 className="section-title" style={{ margin: "20px 4px 8px" }}>Выезд</h3>
+      <div className="kv" style={{ marginBottom: 0 }}>
+        <div>
+          <span className="k">Желаемое время</span>
+          <span className="v">
+            {request.desired_date ? `${formatDate(request.desired_date)}${request.desired_time ? `, ${request.desired_time.slice(0, 5)}` : ""}` : "не выбрано"}
+            {request.is_priority_slot && <span className="pill ok" style={{ marginLeft: 8 }}>приоритетный слот</span>}
+          </span>
+        </div>
+        {request.suggested_employee && (
+          <div><span className="k">Рекомендован</span><span className="v">{request.suggested_employee}</span></div>
+        )}
+        {request.assigned_employee && (
+          <div><span className="k">Исполнитель</span><span className="v">{request.assigned_employee}</span></div>
+        )}
+        {request.reject_reason && (
+          <div><span className="k">Причина отказа</span><span className="v">{request.reject_reason}</span></div>
+        )}
+        <div><span className="k">Согласие на ПДн</span><span className="v">{request.consent_given ? "получено" : <span className="warn-text">нет</span>}</span></div>
+      </div>
+
+      {actionable && (
+        <div className="confirm-box">
+          <h4>Подтвердить и создать наряд</h4>
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="req-emp">Исполнитель</label>
+              <select id="req-emp" value={employee} onChange={(e) => setEmployee(e.target.value)}>
+                <option value="">выберите</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.full_name}{e.id === request.suggested_employee_id ? " — рекомендован" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="req-date">Дата выезда</label>
+              <input id="req-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="req-time">Время</label>
+              <input id="req-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            <div className="field span-all">
+              <label htmlFor="req-note">Примечание для поверителя <span className="opt">— необязательно</span></label>
+              <input id="req-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Подъезд, код домофона, кто встретит…" />
+            </div>
+          </div>
+          {error && <Alert>{error}</Alert>}
+          <div className="actions" style={{ marginTop: 0 }}>
+            <button type="button" className="primary" disabled={busy} onClick={() => void confirm()}>
+              <Icon name="check" size={16} /> {busy ? "Создаю…" : "Создать наряд"}
+            </button>
+            <span className="grow" />
+            <button type="button" className="ghost" disabled={busy} onClick={() => void reject(false)}>Отклонить</button>
+            <button type="button" className="ghost danger" disabled={busy} onClick={() => void reject(true)}>
+              <Icon name="ban" size={15} /> Спам
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, call, json, type Me } from "../api";
+import Icon from "../ui/Icon";
+import { Modal } from "../ui/Modal";
+import { Alert, EmptyState, PageActions, SearchField, Spinner } from "../ui/controls";
 
 /**
  * Аттестация испытательного оборудования (холодильники, термостаты, шкафы…).
@@ -128,19 +131,28 @@ function AttestationList({ me, onOpen }: { me: Me | null; onOpen: (id: number) =
 
   return (
     <div className="narrow attestation">
+      {canCreate && (
+        <PageActions>
+          <button type="button" className="primary" onClick={() => setCreating(true)}>
+            <Icon name="plus" size={16} strokeWidth={2.2} /> Новая аттестация
+          </button>
+        </PageActions>
+      )}
       <div className="toolbar">
-        <input className="grow" value={query} onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск по наименованию, заводскому номеру, владельцу" />
-        {canCreate && <button type="button" className="primary" onClick={() => setCreating(true)}>Новая аттестация</button>}
+        <SearchField className="grow" value={query} onChange={setQuery} placeholder="Наименование, заводской номер, владелец" />
       </div>
-      <p className="sub">
+      <Alert tone="info">
         Быстрее всего — попросить ассистента: «заведи аттестацию холодильника ХФ-140 зав. № …» с фото шильдика
         или прошлым протоколом. Он соберёт карточку и план, измерения вносятся здесь.
-      </p>
-      {creating && <CreateForm onCreated={(id) => { setCreating(false); onOpen(id); }} onCancel={() => setCreating(false)} />}
-      {error && <div className="error">{error}</div>}
-      {loading && !items.length ? <div className="loading">Загрузка…</div> : !items.length ? (
-        <div className="empty">Аттестаций пока нет</div>
+      </Alert>
+      <Modal open={creating} onClose={() => setCreating(false)} size="lg" title="Новая аттестация" subtitle="Карточку оборудования можно дополнить позже">
+        <CreateForm onCreated={(id) => { setCreating(false); onOpen(id); }} onCancel={() => setCreating(false)} />
+      </Modal>
+      {error && <Alert>{error}</Alert>}
+      {loading && !items.length ? <Spinner /> : !items.length ? (
+        <EmptyState icon="shield" title={query ? "Ничего не нашлось" : "Аттестаций пока нет"}>
+          {!query && "Испытательное оборудование (холодильники, термостаты, шкафы) аттестуется здесь — по программе и с расчётом."}
+        </EmptyState>
       ) : (
         <div className="card-list">
           {items.map((a) => (
@@ -208,8 +220,7 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (id: number) => void; 
   };
 
   return (
-    <div className="card">
-      <h3>Новая аттестация</h3>
+    <div className="create-attestation">
       <div className="form-grid">
         <div className="field wide">
           <label>Программа (заготовка плана)</label>
@@ -232,9 +243,11 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (id: number) => void; 
         ))}
       </div>
       {error && <div className="error">{error}</div>}
-      <div className="actions">
-        <button type="button" className="primary" disabled={busy || !program} onClick={() => void submit()}>Создать</button>
+      <div className="actions end">
         <button type="button" onClick={onCancel}>Отмена</button>
+        <button type="button" className="primary" disabled={busy || !program} onClick={() => void submit()}>
+          {busy ? "Создаю…" : "Создать"}
+        </button>
       </div>
     </div>
   );
@@ -269,19 +282,20 @@ function AttestationView({ id, onBack }: { id: number; onBack: () => void }) {
     }
   };
 
-  if (!data) return <div className="narrow">{error ? <div className="error">{error}</div> : <div className="loading">Загрузка…</div>}</div>;
+  if (!data) return <div className="narrow">{error ? <Alert>{error}</Alert> : <Spinner />}</div>;
 
   const post = (path: string, body: unknown = {}) =>
     json<Detail>(`/api/attestations/${id}/${path}`, { method: "POST", body: JSON.stringify(body) });
 
   return (
     <div className="narrow attestation wide-narrow">
-      <div className="toolbar">
-        <button type="button" onClick={onBack}>← Все аттестации</button>
-        <div className="grow" />
-        <button type="button" disabled={busy} onClick={() => void run(() => download(id, "docx"))}>Word</button>
-        <button type="button" disabled={busy} onClick={() => void run(() => download(id, "pdf"))}>PDF</button>
-      </div>
+      <PageActions>
+        <button type="button" disabled={busy} onClick={() => void run(() => download(id, "docx"))}><Icon name="download" size={16} /> Word</button>
+        <button type="button" disabled={busy} onClick={() => void run(() => download(id, "pdf"))}><Icon name="download" size={16} /> PDF</button>
+      </PageActions>
+      <button type="button" className="back" onClick={onBack}>
+        <Icon name="chevronLeft" size={20} /> Все аттестации
+      </button>
       <div className="card">
         <div className="card-head">
           <div className="grow">

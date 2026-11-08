@@ -486,8 +486,23 @@ export type AvailabilityPayload = {
   note?: string;
 };
 
-export const fetchMyAvailability = (filters: { date_from?: string; date_to?: string } = {}) =>
+export const fetchMyAvailability = (filters: { date_from?: string; date_to?: string; employee?: number } = {}) =>
   json<Page<AvailabilitySlot>>(`/api/hub/availability/?${queryString(filters)}`);
+
+/** Все страницы графика за период — в календаре месяц на нескольких людей легко больше 50 слотов. */
+export async function fetchAvailabilityAll(
+  filters: { date_from?: string; date_to?: string; employee?: number } = {},
+): Promise<AvailabilitySlot[]> {
+  const out: AvailabilitySlot[] = [];
+  let page: Page<AvailabilitySlot> = await fetchMyAvailability(filters);
+  out.push(...page.results);
+  for (let guard = 0; page.next && guard < 20; guard += 1) {
+    const next = new URL(page.next, window.location.origin);
+    page = await json<Page<AvailabilitySlot>>(`${next.pathname}${next.search}`);
+    out.push(...page.results);
+  }
+  return out;
+}
 
 export const createAvailability = (payload: AvailabilityPayload) =>
   json<AvailabilitySlot>("/api/hub/availability/", { method: "POST", body: JSON.stringify(payload) });

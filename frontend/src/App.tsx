@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
-import { fetchMe, isAuthenticated, logout, type Me } from "./api";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { fetchMe, fetchRequests, fetchSiTypes, isAuthenticated, logout, type Me } from "./api";
 import Attestations from "./components/Attestations";
 import Availability from "./components/Availability";
 import FieldWork from "./components/FieldWork";
@@ -8,6 +8,9 @@ import Login from "./components/Login";
 import RequestsInbox from "./components/RequestsInbox";
 import SiTypes from "./components/SiTypes";
 import Tasks from "./components/Tasks";
+import Icon, { type IconName } from "./ui/Icon";
+import { DialogHost } from "./ui/Modal";
+import { PageActionsContext, Spinner } from "./ui/controls";
 
 // Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
 const Assistant = lazy(() => import("./assistant/Assistant"));
@@ -16,46 +19,37 @@ const Assistant = lazy(() => import("./assistant/Assistant"));
  * - «Журнал» и «Нормоконтроль» — одна вкладка «Журнал»: у поверителя просто
  *   журнал своих протоколов, у менеджера ещё нумерация и работа с Аршин;
  * - «Наряды» убраны — выезды живут во вкладке «Поверки»: менеджер видит все,
- *   поверитель — только свои. */
+ *   поверитель — только свои.
+ * Раздел хранится в адресе (#/journal) — переживает перезагрузку, работает «Назад». */
 type Tab = "field-work" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
 
-type NavItem = { key: Tab; label: string; icon: ReactNode; managerOnly?: boolean };
-
-const svg = (children: ReactNode) => (
-  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{children}</svg>
-);
-
-const ICONS: Record<Tab, ReactNode> = {
-  "field-work": svg(<><circle cx="12" cy="12" r="9" /><path d="M8 12.5l2.7 2.7L16 9.8" /></>),
-  journal: svg(<><rect x="5" y="3" width="14" height="18" rx="2.5" /><path d="M9 8h6M9 12h6M9 16h3" /></>),
-  requests: svg(<><path d="M3 13h5l1.5 2.5h5L16 13h5" /><path d="M5 5h14l2 8v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" /></>),
-  availability: svg(<><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>),
-  tasks: svg(<><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2" /></>),
-  assistant: svg(<path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z" />),
-  "si-types": svg(<><circle cx="12" cy="12" r="8" /><path d="M12 12l4-3" /></>),
-  attestations: svg(<path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z" />),
-};
+type NavItem = { key: Tab; label: string; icon: IconName; managerOnly?: boolean };
 
 const WORK: NavItem[] = [
-  { key: "field-work", label: "Поверки", icon: ICONS["field-work"] },
-  { key: "journal", label: "Журнал", icon: ICONS.journal },
-  { key: "requests", label: "Заявки", icon: ICONS.requests, managerOnly: true },
-  { key: "availability", label: "График", icon: ICONS.availability },
-  { key: "tasks", label: "Задачи", icon: ICONS.tasks },
-  { key: "assistant", label: "Ассистент", icon: ICONS.assistant },
+  { key: "field-work", label: "Поверки", icon: "checkCircle" },
+  { key: "journal", label: "Журнал", icon: "doc" },
+  { key: "requests", label: "Заявки", icon: "inbox", managerOnly: true },
+  { key: "availability", label: "График", icon: "calendar" },
+  { key: "tasks", label: "Задачи", icon: "tasks" },
+  { key: "assistant", label: "Ассистент", icon: "sparkle" },
 ];
 
 const REFERENCE: NavItem[] = [
-  { key: "si-types", label: "Типы СИ", icon: ICONS["si-types"] },
-  { key: "attestations", label: "Аттестация ИО", icon: ICONS.attestations, managerOnly: true },
+  { key: "si-types", label: "Типы СИ", icon: "gauge" },
+  { key: "attestations", label: "Аттестация ИО", icon: "shield", managerOnly: true },
 ];
+
+const ALL_TABS = new Set<Tab>([...WORK, ...REFERENCE].map((item) => item.key));
+
+/** Разделы во всю высоту окна — без отступов main: календарь, заявки, ассистент. */
+const FLUSH: Tab[] = ["availability", "requests", "assistant"];
 
 /** На телефоне в таб-баре — три главных, остальное под «Ещё». */
 const PHONE_TABS: Tab[] = ["field-work", "journal", "availability"];
 
 /** Кто видит фирму целиком. Поверитель — только своё. */
 const isManagerRole = (role: string | undefined) => !!role && role !== "verifier";
+const REVIEWER_ROLES = new Set(["owner", "head", "metrologist"]);
 
 const initials = (name: string) =>
   name
@@ -65,16 +59,33 @@ const initials = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("") || "?";
 
+/** «Стариков Сергей Владимирович» → «Стариков С. В.» — в боковой панели полное ФИО не помещается. */
+const shortName = (name: string) => {
+  const [last, ...rest] = name.split(/\s+/).filter(Boolean);
+  if (!last || rest.length === 0) return name;
+  return `${last} ${rest.map((part) => `${part[0]}.`).join(" ")}`;
+};
+
 const todayLine = () => {
   const text = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
+const tabFromHash = (): Tab => {
+  const key = window.location.hash.replace(/^#\/?/, "") as Tab;
+  return ALL_TABS.has(key) ? key : "field-work";
+};
+
 export default function App() {
   const [authenticated, setAuthenticated] = useState(isAuthenticated());
-  const [tab, setTab] = useState<Tab>("field-work");
+  const [tab, setTab] = useState<Tab>(tabFromHash);
   const [me, setMe] = useState<Me | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
+  const [counts, setCounts] = useState<Partial<Record<Tab, number>>>({});
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!authenticated) {
@@ -86,9 +97,48 @@ export default function App() {
       .catch(() => setMe(null));
   }, [authenticated]);
 
-  if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   const isManager = isManagerRole(me?.role);
+
+  // Счётчики в боковой панели: новые заявки и типы СИ на проверке.
+  const refreshCounts = useCallback(() => {
+    if (!me) return;
+    const next: Partial<Record<Tab, number>> = {};
+    const jobs: Promise<unknown>[] = [];
+    if (isManagerRole(me.role)) {
+      jobs.push(fetchRequests({ status: "new" }).then((list) => (next.requests = list.length)).catch(() => undefined));
+    }
+    if (REVIEWER_ROLES.has(me.role)) {
+      jobs.push(fetchSiTypes({ needs_review: true }).then((list) => (next["si-types"] = list.length)).catch(() => undefined));
+    }
+    void Promise.all(jobs).then(() => setCounts(next));
+  }, [me]);
+
+  useEffect(() => {
+    refreshCounts();
+    const timer = window.setInterval(refreshCounts, 120_000);
+    return () => window.clearInterval(timer);
+  }, [refreshCounts, tab]);
+
+  // Высота шапки — для разделов во всю высоту окна (календарь, заявки, ассистент).
+  useLayoutEffect(() => {
+    const head = headRef.current;
+    const workspace = workspaceRef.current;
+    if (!head || !workspace) return;
+    const apply = () => workspace.style.setProperty("--head-top", `${head.getBoundingClientRect().height}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(head);
+    return () => observer.disconnect();
+  }, [authenticated, tab]);
+
+  if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
+
   const visible = (items: NavItem[]) => items.filter((item) => isManager || !item.managerOnly);
   const work = visible(WORK);
   const reference = visible(REFERENCE);
@@ -98,132 +148,210 @@ export default function App() {
   const roleName = me?.role_display ?? "";
 
   const go = (next: Tab) => {
-    setTab(next);
     setMoreOpen(false);
+    setMenuOpen(false);
+    if (next !== tab) {
+      window.history.pushState(null, "", `#/${next}`);
+      setTab(next);
+    }
     window.scrollTo({ top: 0 });
   };
 
   const signOut = () => {
     logout();
+    setMenuOpen(false);
+    setMoreOpen(false);
     setAuthenticated(false);
   };
 
-  const heads: Partial<Record<Tab, { title: string; subtitle?: string }>> = {
+  const heads: Record<Tab, { title: string; subtitle?: string }> = {
     "field-work": { title: isManager ? "Все поверки" : "Мои поверки", subtitle: todayLine() },
     journal: { title: "Журнал", subtitle: isManager ? "Протоколы всех поверителей" : "Мои протоколы" },
     requests: { title: "Заявки", subtitle: "С сайта и по телефону" },
-    availability: { title: "График" },
+    availability: { title: "График", subtitle: "Когда я могу выезжать — заявители на сайте видят эти дни" },
     tasks: { title: "Задачи" },
-    "si-types": { title: "Типы СИ" },
-    attestations: { title: "Аттестация ИО" },
+    assistant: { title: "Ассистент", subtitle: "Метролог-помощник: ФГИС «Аршин», методики, файлы компании" },
+    "si-types": { title: "Типы СИ", subtitle: "Справочник средств измерений и шаблоны поверки" },
+    attestations: { title: "Аттестация ИО", subtitle: "Испытательное оборудование" },
   };
   const head = heads[tab];
+  const flush = FLUSH.includes(tab);
 
-  const sideItem = (item: NavItem) => (
-    <button
-      type="button"
-      key={item.key}
-      className={`side-item ${tab === item.key ? "active" : ""}`}
-      aria-current={tab === item.key ? "page" : undefined}
-      onClick={() => go(item.key)}
-    >
-      {item.icon}
-      <span className="label">{item.label}</span>
-    </button>
-  );
-
-  const meCard = displayName && (
-    <div className="side-me">
-      <div className="avatar">{initials(displayName)}</div>
-      <div className="who">
-        <b>{displayName}</b>
-        <span>{roleName}</span>
-      </div>
-      <button type="button" onClick={signOut}>
-        Выйти
+  const sideItem = (item: NavItem) => {
+    const count = counts[item.key];
+    return (
+      <button
+        type="button"
+        key={item.key}
+        className={`side-item ${tab === item.key ? "active" : ""}`}
+        aria-current={tab === item.key ? "page" : undefined}
+        onClick={() => go(item.key)}
+      >
+        <Icon name={item.icon} />
+        <span className="label">{item.label}</span>
+        {count ? <span className={`count ${item.key === "requests" ? "badge" : ""}`}>{count}</span> : null}
       </button>
+    );
+  };
+
+  const meButton = displayName && (
+    <div className="side-me">
+      <button
+        type="button"
+        className="side-me-btn"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        <span className="avatar">{initials(displayName)}</span>
+        <span className="who">
+          <b title={displayName}>{shortName(displayName)}</b>
+          <span>{roleName}</span>
+        </span>
+        <Icon name="chevronDown" size={14} />
+      </button>
+      {menuOpen && (
+        <AccountMenu
+          name={displayName}
+          email={me?.email ?? ""}
+          onClose={() => setMenuOpen(false)}
+          onSignOut={signOut}
+        />
+      )}
     </div>
   );
 
   const phoneTabs = all.filter((item) => PHONE_TABS.includes(item.key));
   const phoneMore = all.filter((item) => !PHONE_TABS.includes(item.key));
   const moreActive = phoneMore.some((item) => item.key === tab);
+  const moreCount = phoneMore.reduce((sum, item) => sum + (item.key === "requests" ? counts.requests ?? 0 : 0), 0);
 
   return (
-    <div className="app">
-      <nav className="sidebar" aria-label="Разделы">
-        <div className="brand">
-          <div className="brand-mark">ЕИ</div>
-          <div className="brand-name">EI_doc</div>
-        </div>
-        <div className="side-group">Работа</div>
-        {work.map(sideItem)}
-        <div className="side-group">Справочники</div>
-        {reference.map(sideItem)}
-        <div className="spacer" />
-        {meCard}
-      </nav>
+    <PageActionsContext.Provider value={actionsSlot}>
+      <div className="app">
+        <nav className="sidebar" aria-label="Разделы">
+          <div className="brand">
+            <div className="brand-mark">ЕИ</div>
+            <div className="brand-name">
+              EI_doc
+              <small>Единица Измерения</small>
+            </div>
+          </div>
+          <div className="side-group">Работа</div>
+          {work.map(sideItem)}
+          <div className="side-group">Справочники</div>
+          {reference.map(sideItem)}
+          <div className="spacer" />
+          {meButton}
+        </nav>
 
-      <div className="workspace">
-        {head && (
-          <header className="page-head">
+        <div className="workspace" ref={workspaceRef}>
+          <header className={`page-head ${flush ? "compact" : ""}`} ref={headRef}>
             <div className="titles">
               <h1>{head.title}</h1>
               {head.subtitle && <div className="subtitle">{head.subtitle}</div>}
             </div>
+            <div className="page-actions" ref={setActionsSlot} />
           </header>
+
+          <main className={flush ? "flush" : ""}>
+            {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
+            {tab === "journal" && <JournalTab isManager={isManager} onOpenTypes={() => go("si-types")} />}
+            {tab === "requests" && <RequestsInbox onChanged={refreshCounts} />}
+            {tab === "availability" && <Availability me={me} />}
+            {tab === "tasks" && <Tasks me={me} />}
+            {tab === "si-types" && <SiTypes me={me} onChanged={refreshCounts} />}
+            {tab === "attestations" && <Attestations me={me} />}
+            {tab === "assistant" && (
+              <Suspense fallback={<Spinner label="Загружаю ассистента…" />}>
+                <Assistant />
+              </Suspense>
+            )}
+          </main>
+        </div>
+
+        {moreOpen && (
+          <>
+            <div className="more-backdrop" onClick={() => setMoreOpen(false)} />
+            <div className="more-sheet glass" role="menu">
+              {phoneMore.map(sideItem)}
+              <div className="menu-sep" />
+              {displayName && (
+                <button type="button" className="side-item" onClick={signOut}>
+                  <Icon name="logout" />
+                  <span className="label">Выйти · {shortName(displayName)}</span>
+                </button>
+              )}
+            </div>
+          </>
         )}
 
-        <main>
-          {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
-          {tab === "journal" && <JournalTab isManager={isManager} onOpenTypes={() => go("si-types")} />}
-          {tab === "requests" && <RequestsInbox />}
-          {tab === "availability" && <Availability />}
-          {tab === "tasks" && <Tasks />}
-          {tab === "si-types" && <SiTypes me={me} />}
-          {tab === "attestations" && <Attestations me={me} />}
-          {tab === "assistant" && (
-            <Suspense fallback={<div className="loading">Загрузка ассистента…</div>}>
-              <Assistant />
-            </Suspense>
-          )}
-        </main>
-      </div>
-
-      {moreOpen && (
-        <>
-          <div className="more-backdrop" onClick={() => setMoreOpen(false)} />
-          <div className="more-sheet glass" role="menu">
-            {phoneMore.map(sideItem)}
-            {meCard}
-          </div>
-        </>
-      )}
-
-      <div className="tabbar">
-        <div className="tabs glass">
-          {phoneTabs.map((item) => (
+        <div className="tabbar">
+          <div className="tabs glass">
+            {phoneTabs.map((item) => (
+              <button
+                type="button"
+                key={item.key}
+                className={`tab ${tab === item.key && !moreOpen ? "active" : ""}`}
+                onClick={() => go(item.key)}
+              >
+                <Icon name={item.icon} size={22} />
+                {item.label}
+              </button>
+            ))}
             <button
               type="button"
-              key={item.key}
-              className={`tab ${tab === item.key && !moreOpen ? "active" : ""}`}
-              onClick={() => go(item.key)}
+              className={`tab ${moreActive || moreOpen ? "active" : ""}`}
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((open) => !open)}
             >
-              {item.icon}
-              {item.label}
+              <span className="tab-icon">
+                <Icon name="more" size={22} />
+                {moreCount > 0 && <span className="tab-badge">{moreCount}</span>}
+              </span>
+              Ещё
             </button>
-          ))}
-          <button
-            type="button"
-            className={`tab ${moreActive || moreOpen ? "active" : ""}`}
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen((open) => !open)}
-          >
-            {svg(<><circle cx="5" cy="12" r="1.3" /><circle cx="12" cy="12" r="1.3" /><circle cx="19" cy="12" r="1.3" /></>)}
-            Ещё
-          </button>
+          </div>
         </div>
+        <DialogHost />
       </div>
+    </PageActionsContext.Provider>
+  );
+}
+
+function AccountMenu({
+  name, email, onClose, onSignOut,
+}: {
+  name: string;
+  email: string;
+  onClose: () => void;
+  onSignOut: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.parentElement?.contains(event.target as Node)) onClose();
+    };
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  return (
+    <div className="menu" ref={ref} role="menu" style={{ bottom: "calc(100% + 6px)", left: 0, right: 0 }}>
+      <div className="menu-head">
+        <b>{name}</b>
+        {email}
+      </div>
+      <div className="menu-sep" />
+      <button type="button" className="menu-item" role="menuitem" onClick={onSignOut}>
+        <Icon name="logout" size={16} />
+        Выйти
+      </button>
     </div>
   );
 }
+

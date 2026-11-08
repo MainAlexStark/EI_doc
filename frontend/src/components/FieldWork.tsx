@@ -23,6 +23,9 @@ import {
   type VerificationPhoto,
   type WorkOrder,
 } from "../api";
+import Icon from "../ui/Icon";
+import { confirmDialog } from "../ui/Modal";
+import { EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
 import ScanReview from "./ScanReview";
 import SiTypeDocuments from "./FifDocuments";
 import SiTypePicker, { type PickedType } from "./SiTypePicker";
@@ -165,16 +168,24 @@ function PhotosPanel({ verification }: { verification: CachedVerification }) {
               {urls[photo.id] ? (
                 <img src={urls[photo.id]} alt={photo.caption || "фото СИ"} />
               ) : (
-                <span className="sub">загрузка…</span>
+                <span className="photo-thumb-empty"><span className="spinner sm" /></span>
               )}
-              <button type="button" onClick={() => void handleDelete(photo.id)} disabled={busy}>
-                Удалить
+              <button
+                type="button"
+                className="icon-btn"
+                title="Удалить фото"
+                aria-label="Удалить фото"
+                onClick={() => void handleDelete(photo.id)}
+                disabled={busy}
+              >
+                <Icon name="trash" size={14} />
               </button>
             </div>
           ))}
         </div>
       )}
       <button type="button" className="big" onClick={() => fileInput.current?.click()} disabled={busy}>
+        <Icon name="camera" />
         {busy ? "Загружаю…" : "Сфотографировать"}
       </button>
       <input
@@ -302,31 +313,6 @@ const LAYOUT_LABELS: Record<string, string> = {
   compact3: "3 пролива (обычная)",
   extended9: "9 проливов (полная)",
 };
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div className="segmented">
-      {options.map((option) => (
-        <button
-          type="button"
-          key={option.value}
-          className={value === option.value ? "active" : ""}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function NumberInput({
   label,
@@ -476,7 +462,7 @@ function MeasurementForm({
     <form className="card" onSubmit={submit}>
       <h3>Измерения</h3>
 
-      <div className="form-grid">
+      <div className="seg-row">
         <div className="field">
           <label>Вода</label>
           <Segmented
@@ -516,7 +502,7 @@ function MeasurementForm({
           options={[
             { value: "readings", label: "по показаниям" },
             { value: "pulses", label: "по импульсам" },
-            { value: "direct", label: "вписываю сам" },
+            { value: "direct", label: "вручную" },
           ]}
         />
       </div>
@@ -919,8 +905,8 @@ function ProtocolDownloads({ verification, wordToo }: { verification: CachedVeri
   return (
     <div className="card">
       <div className="actions">
-        <button type="button" onClick={() => void get("pdf")}>Протокол PDF</button>
-        {wordToo && <button type="button" onClick={() => void get("docx")}>Протокол Word</button>}
+        <button type="button" onClick={() => void get("pdf")}><Icon name="download" size={16} /> Протокол PDF</button>
+        {wordToo && <button type="button" onClick={() => void get("docx")}><Icon name="download" size={16} /> Протокол Word</button>}
       </div>
       {error && <div className="error">{error}</div>}
     </div>
@@ -990,13 +976,16 @@ function SyncBar({
 }) {
   return (
     <>
-      <div className={`sync-bar ${online ? "ok" : "off"}`}>
-        <span>{online ? "● На связи" : "● Нет связи — всё сохраняется в телефоне"}</span>
-        {queued > 0 && <span>Ждут отправки: {queued}</span>}
+      <div className={`sync-bar ${online ? "ok" : "off"} ${queued > 0 ? "has-queue" : ""}`}>
+        <Icon name={online ? (queued > 0 ? "upload" : "wifi") : "wifiOff"} size={17} />
+        <span className="grow">
+          {online ? "" : "Нет связи — всё сохраняется в телефоне. "}
+          {queued > 0 && `Ждут отправки: ${queued}`}
+        </span>
         {queued > 0 && (
           // Не завязано на online — статус связи браузера ненадёжен, а сама
           // попытка отправки сама разберётся, есть сеть или нет (см. flush()).
-          <button type="button" onClick={() => void flush()}>
+          <button type="button" className="sm" onClick={() => void flush()}>
             Отправить сейчас
           </button>
         )}
@@ -1012,7 +1001,7 @@ function SyncBar({
                   {" — "}
                   <span className="sub">{item.last_error || "не удалось отправить"}</span>
                 </span>
-                <button type="button" onClick={() => onRemove(item.id)}>
+                <button type="button" className="sm" onClick={() => onRemove(item.id)}>
                   Убрать
                 </button>
               </li>
@@ -1059,11 +1048,9 @@ function groupOrders(list: WorkOrder[], period: Period): { title: string; orders
   ].filter((g) => g.orders.length > 0);
 }
 
-function orderLine(o: WorkOrder, isManager: boolean, withDate: boolean): string {
-  const when = [withDate ? formatDate(o.scheduled_date) : "", o.scheduled_time ? o.scheduled_time.slice(0, 5) : ""]
-    .filter(Boolean)
-    .join(", ");
-  return [when, o.client, isManager ? o.assigned_employee : "", o.note].filter(Boolean).join(" · ");
+/** Строка под адресом выезда. Время показано отдельной колонкой слева — здесь только кто и что. */
+function orderLine(o: WorkOrder, isManager: boolean): string {
+  return [o.client, isManager ? o.assigned_employee : "", o.note].filter(Boolean).join(" · ");
 }
 
 export default function FieldWork({ me, isManager = false }: { me: Me | null; isManager?: boolean }) {
@@ -1183,7 +1170,13 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
   }, [me, isManager]);
 
   const cancelOrder = async (target: WorkOrder) => {
-    if (!window.confirm(`Отменить выезд «${target.site || `№${target.id}`}»?`)) return;
+    const ok = await confirmDialog({
+      title: "Отменить выезд?",
+      text: `${target.site || `Выезд №${target.id}`} — выезд пропадёт у поверителя, заявка станет отменённой.`,
+      ok: "Отменить выезд",
+      danger: true,
+    });
+    if (!ok) return;
     setError("");
     try {
       const updated = await setWorkOrderStatus(target.id, "cancelled");
@@ -1208,21 +1201,30 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
     window.scrollTo({ top: 0 });
   }, [selectedOrder, selectedVerification]);
 
-  if (!me) return <div className="loading">Загружаю…</div>;
+  if (!me) return <Spinner />;
   if (!isManager && !me.employee) {
-    return <div className="empty">Экран доступен только сотрудникам с привязанной учётной записью</div>;
+    return (
+      <EmptyState icon="lock" title="Нет привязки к сотруднику">
+        Экран доступен сотрудникам с привязанной учётной записью — попросите руководителя связать её с вашей карточкой.
+      </EmptyState>
+    );
   }
 
   const order = orders.find((o) => o.id === selectedOrder) ?? null;
   const activeVerification = verifications.find((v) => v.client_id === selectedVerification) ?? null;
 
   const syncBar = (
+    <>
+    <PageActions>
+      <span className={`status-dot ${online ? "" : "off"}`}>{online ? "На связи" : "Нет связи"}</span>
+    </PageActions>
     <SyncBar
       online={online}
       queued={queued}
       problems={outboxProblems}
       onRemove={(id) => void removeOutboxItem(id).then(refreshQueueCount)}
     />
+    </>
   );
 
   // --- Шаг 1: выезды ---------------------------------------------------
@@ -1243,30 +1245,43 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
           />
         </div>
         {error && <div className="error">{error}</div>}
-        {loading && <div className="loading">Загружаю…</div>}
+        {loading && <Spinner />}
         {!loading && shown.length === 0 && (
-          <div className="empty">
-            {period === "closed"
+          <EmptyState icon={period === "closed" ? "checkCircle" : "car"} title={
+            period === "closed"
               ? "Завершённых выездов пока нет"
               : isManager
                 ? "Открытых выездов нет"
-                : "Открытых выездов на вас нет"}
-          </div>
+                : "Открытых выездов на вас нет"
+          }>
+            {period === "active" && (isManager ? "Выезды появляются, когда заявку подтверждают в «Заявках»." : "Когда диспетчер назначит выезд, он появится здесь и в «Графике».")}
+          </EmptyState>
         )}
         {sections.map((section) => (
           <div key={section.title}>
-            <div className="list-section">{section.title}</div>
+            <div className={`list-section ${section.title === "Просрочены" ? "crit" : ""}`}>
+              {section.title} <span className="count">{section.orders.length}</span>
+            </div>
             <div className="card-list">
               {section.orders.map((o) => (
                 <button type="button" className="card tap" key={o.id} onClick={() => setSelectedOrder(o.id)}>
-                  <div className="card-head">
+                  <div className="order-row">
+                    <div className="order-time">
+                      {o.scheduled_time ? o.scheduled_time.slice(0, 5) : section.withDate && o.scheduled_date ? "" : "—"}
+                      {section.withDate && o.scheduled_date && (
+                        <small>{new Date(o.scheduled_date).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "")}</small>
+                      )}
+                    </div>
                     <div className="grow">
                       <b>{o.site || "Адрес не указан"}</b>
-                      <div className="sub">{orderLine(o, isManager, section.withDate)}</div>
+                      <div className="sub">{orderLine(o, isManager)}</div>
                     </div>
-                    <div className="when sub">
-                      {o.verifications_accepted} из {o.verifications_total}
-                    </div>
+                    {o.verifications_total > 0 && (
+                      <div className="order-progress">
+                        {o.verifications_accepted} из {o.verifications_total}
+                        <div className="mini-bar"><i style={{ width: `${(o.verifications_accepted / o.verifications_total) * 100}%` }} /></div>
+                      </div>
+                    )}
                   </div>
                 </button>
               ))}
@@ -1283,7 +1298,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
       <div className="narrow">
         {syncBar}
         <button type="button" className="back" onClick={() => setSelectedVerification(null)}>
-          ‹ {order?.site || "Все счётчики"}
+          <Icon name="chevronLeft" size={20} /> {order?.site || "Все счётчики"}
         </button>
         <div className="card">
           <div className="card-head">
@@ -1303,7 +1318,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
         />
         <PhotosPanel verification={activeVerification} />
         <button type="button" className="big wide" onClick={() => { setSelectedVerification(null); setAdding(true); }}>
-          + Следующий счётчик
+          <Icon name="plus" /> Следующий счётчик
         </button>
       </div>
     );
@@ -1314,7 +1329,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
     <div className="narrow">
       {syncBar}
       <button type="button" className="back" onClick={() => { setSelectedOrder(null); setAdding(false); }}>
-        ‹ Поверки
+        <Icon name="chevronLeft" size={20} /> Поверки
       </button>
       <div className="detail-title">
         {order && (
@@ -1335,18 +1350,20 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
           <div>
             <span className="k">Состояние</span>
             <span className="v">{order.status_display}</span>
-            {isManager && OPEN_STATUSES.includes(order.status) && (
-              <button type="button" className="link danger" onClick={() => void cancelOrder(order)}>
-                Отменить выезд
-              </button>
-            )}
           </div>
+        </div>
+      )}
+      {order && isManager && OPEN_STATUSES.includes(order.status) && (
+        <div className="row" style={{ justifyContent: "flex-end", margin: "-8px 0 8px" }}>
+          <button type="button" className="sm ghost danger" onClick={() => void cancelOrder(order)}>
+            <Icon name="ban" size={14} /> Отменить выезд
+          </button>
         </div>
       )}
       {error && <div className="error">{error}</div>}
 
-      <h2>Счётчики · {verifications.length}</h2>
-      {verifications.length === 0 && !adding && <div className="empty">Пока ни одного — добавьте первый</div>}
+      <h2>Приборы <span className="count">{verifications.length}</span></h2>
+      {verifications.length === 0 && !adding && <div className="empty small" style={{ textAlign: "left", padding: "0 4px 12px" }}>Пока ни одного — добавьте первый</div>}
       {verifications.length > 0 && (
         <p className="hint" style={{ margin: "-8px 4px 14px" }}>Выезд закроется сам, когда все протоколы примут в журнале.</p>
       )}
@@ -1376,7 +1393,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
         />
       ) : (
         <button type="button" className="primary big wide" onClick={() => setAdding(true)}>
-          + Добавить счётчик
+          <Icon name="plus" /> Добавить прибор
         </button>
       )}
 
@@ -1387,8 +1404,9 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
           система распознает цифры, вы только сверите.
         </p>
         <div className="actions">
-          <button type="button" onClick={handlePrintBlank}>Распечатать бланк</button>
+          <button type="button" onClick={handlePrintBlank}><Icon name="printer" size={16} /> Распечатать бланк</button>
           <button type="button" onClick={() => fileInput.current?.click()} disabled={scanBusy}>
+            <Icon name="camera" size={16} />
             {scanBusy ? "Загружаю…" : "Сфотографировать заполненный бланк"}
           </button>
           <input
@@ -1412,7 +1430,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
                   {s.verification == null && s.error && <span className="pill warn"> {s.error}</span>}
                 </span>
                 {s.verification == null && (
-                  <button type="button" onClick={() => setReviewScanId(s.id === reviewScanId ? null : s.id)}>
+                  <button type="button" className="sm" onClick={() => setReviewScanId(s.id === reviewScanId ? null : s.id)}>
                     {s.id === reviewScanId ? "Свернуть" : "Сверить"}
                   </button>
                 )}

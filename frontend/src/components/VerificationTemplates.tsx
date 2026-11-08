@@ -6,6 +6,8 @@ import {
   fetchVerificationTemplates,
   type VerificationTemplate,
 } from "../api";
+import Icon from "../ui/Icon";
+import { Alert, EmptyState, Spinner } from "../ui/controls";
 
 /**
  * Шаблоны поверки СИ (всё, кроме счётчиков воды) — claude/templates.md.
@@ -69,14 +71,16 @@ export default function VerificationTemplates({ canReview }: { canReview: boolea
 
   return (
     <>
-      <p className="hint">
+      <Alert tone="info">
         Шаблон — как поверять прибор и как выглядит протокол. Составляет ассистент («сделай шаблон протокола
         поверки для манометров ДМ»), проверяет метролог. Поверитель по шаблону вносит только показания.
-      </p>
-      {error && <div className="error">{error}</div>}
-      {loading && <div className="loading">Загружаю…</div>}
+      </Alert>
+      {error && <Alert onClose={() => setError("")}>{error}</Alert>}
+      {loading && <Spinner />}
       {!loading && items.length === 0 && (
-        <div className="empty">Шаблонов поверки пока нет — попросите ассистента составить первый</div>
+        <EmptyState icon="layers" title="Шаблонов поверки пока нет">
+          Попросите ассистента составить первый — например, для манометров или весов.
+        </EmptyState>
       )}
       <div className="card-list">
         {items.map((item) => (
@@ -87,25 +91,25 @@ export default function VerificationTemplates({ canReview }: { canReview: boolea
                 <div className="sub">
                   {item.si_type_name || `все типы: ${item.family_name}`} · {item.plan.method}
                 </div>
-                <div className="sub">
+                <div className="pills" style={{ marginTop: 6 }}>
                   {item.needs_review ? <span className="pill warn">ждёт проверки</span> : <span className="pill ok">проверен</span>}
-                  {!item.is_active && <span className="pill muted"> выключен</span>}
-                  {item.created_via_assistant && <span className="sub"> · составил ассистент</span>}
+                  {!item.is_active && <span className="pill muted">выключен</span>}
+                  {item.created_via_assistant && <span className="tag info"><Icon name="sparkle" size={11} /> составил ассистент</span>}
                 </div>
               </div>
               <div className="actions">
                 {canReview && item.needs_review && (
-                  <button type="button" className="primary" disabled={busy} onClick={() => void approve(item)}>
-                    Всё верно
+                  <button type="button" className="primary sm" disabled={busy} onClick={() => void approve(item)}>
+                    <Icon name="check" size={14} /> Всё верно
                   </button>
                 )}
-                <button type="button" onClick={() => void toggle(item)}>
+                <button type="button" className="sm" onClick={() => void toggle(item)}>
                   {open?.id === item.id ? "Свернуть" : "Открыть"}
                 </button>
               </div>
             </div>
             {open?.id === item.id && (
-              <div className="kv">
+              <div className="kv" style={{ marginTop: 14, marginBottom: 0, background: "var(--surface)" }}>
                 <div>
                   <span className="k">Параметры прибора</span>
                   <span className="v">
@@ -143,8 +147,8 @@ export default function VerificationTemplates({ canReview }: { canReview: boolea
                   </div>
                 )}
                 <div className="actions">
-                  <button type="button" onClick={() => void preview(item, "pdf")}>Пустой протокол PDF</button>
-                  <button type="button" onClick={() => void preview(item, "docx")}>Word</button>
+                  <button type="button" className="sm" onClick={() => void preview(item, "pdf")}><Icon name="download" size={14} /> Пустой протокол PDF</button>
+                  <button type="button" className="sm" onClick={() => void preview(item, "docx")}><Icon name="download" size={14} /> Word</button>
                 </div>
               </div>
             )}

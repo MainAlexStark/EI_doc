@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { applyNumbering, fetchScopes, fetchSiTypes, previewNumbering, type Preview, type Scope } from "../api";
+import Icon from "../ui/Icon";
+import { Alert, EmptyState, Spinner } from "../ui/controls";
 
 /**
  * Экран нормоконтроля.
@@ -70,26 +72,28 @@ export default function Normocontrol({ onOpenTypes }: { onOpenTypes?: () => void
     }
   };
 
-  if (loading) return <div className="loading">Загружаю…</div>;
+  if (loading) return <Spinner />;
 
   return (
     <>
       {pendingTypes > 0 && (
-        <div className="notice">
-          <span>
-            Новых типов СИ ждут проверки: <b>{pendingTypes}</b>. Пока тип не проверен, протоколы по нему не подписываются.
-          </span>
+        <Alert tone="warn">
+          Новых типов СИ ждут проверки: <b>{pendingTypes}</b>. Пока тип не проверен, протоколы по нему не подписываются.
           {onOpenTypes && (
-            <button type="button" className="primary" onClick={onOpenTypes}>
-              Проверить
-            </button>
+            <div style={{ marginTop: 8 }}>
+              <button type="button" className="sm" onClick={onOpenTypes}>
+                Проверить типы <Icon name="arrowRight" size={14} />
+              </button>
+            </div>
           )}
-        </div>
+        </Alert>
       )}
-      {error && <div className="error">{error}</div>}
+      {error && <Alert onClose={() => setError("")}>{error}</Alert>}
 
       {scopes.length === 0 && (
-        <div className="empty">Областей нумерации пока нет — заведите поверки</div>
+        <EmptyState icon="layers" title="Областей нумерации пока нет">
+          Они появятся, когда поверители заведут первые поверки.
+        </EmptyState>
       )}
 
       <div className="scopes">
@@ -101,41 +105,22 @@ export default function Normocontrol({ onOpenTypes }: { onOpenTypes?: () => void
               <div className="who">
                 {scope.employee}
                 {scope.year ? ` · ${scope.year} год` : ""}
+                {` · запечатано до № ${scope.sealed_high_water || "—"}`}
               </div>
 
-              <div className="counts">
-                <span className="pill muted">без номера: {scope.drafts}</span>
-                <span className="pill muted">пронумеровано: {scope.numbered}</span>
-                <span className="pill ok">подписано: {scope.signed}</span>
-                {scope.published > 0 && <span className="pill ok">в ФИФ: {scope.published}</span>}
-                <span className="pill muted">
-                  запечатано до: {scope.sealed_high_water || "—"}
-                </span>
-              </div>
-
-              <div className="actions">
-                <button disabled={busy === scope.id} onClick={() => void preview(scope)}>
-                  Показать, что изменится
-                </button>
-                {shown?.changed && (
-                  <button
-                    className="primary"
-                    disabled={busy === scope.id}
-                    onClick={() => void apply(scope)}
-                  >
-                    Пересчитать номера
-                  </button>
-                )}
+              <div className="stat-row">
+                <div><b>{scope.drafts}</b><span>без номера</span></div>
+                <div><b>{scope.numbered}</b><span>пронумеровано</span></div>
+                <div className="ok"><b>{scope.signed}</b><span>подписано</span></div>
+                <div><b>{scope.published}</b><span>в ФИФ</span></div>
               </div>
 
               {shown && !shown.changed && (
-                <div className="preview">
-                  <h4>Менять нечего</h4>
-                </div>
+                <Alert tone="ok">Нумерация в порядке — менять нечего.</Alert>
               )}
 
               {shown?.changed && (
-                <div className="preview">
+                <div className="preview" style={{ marginTop: 0, marginBottom: 12 }}>
                   <h4>
                     Присвоится {shown.assigned.length}, сдвинется {shown.renumbered.length}
                   </h4>
@@ -148,8 +133,8 @@ export default function Normocontrol({ onOpenTypes }: { onOpenTypes?: () => void
               )}
 
               {scope.chronology_breaks.length > 0 && (
-                <div className="breaks">
-                  Номера идут вразрез с датами поверки:
+                <div className="breaks" style={{ marginTop: 0, marginBottom: 12 }}>
+                  <b>Номера идут вразрез с датами поверки:</b>
                   <ul>
                     {scope.chronology_breaks.map((item, index) => (
                       <li key={index}>
@@ -160,6 +145,19 @@ export default function Normocontrol({ onOpenTypes }: { onOpenTypes?: () => void
                   </ul>
                 </div>
               )}
+
+              <div className="actions">
+                <button type="button" disabled={busy === scope.id} onClick={() => void preview(scope)}>
+                  <Icon name="eye" size={16} />
+                  {shown ? "Проверить ещё раз" : "Показать, что изменится"}
+                </button>
+                {shown?.changed && (
+                  <button type="button" className="primary" disabled={busy === scope.id} onClick={() => void apply(scope)}>
+                    Пересчитать номера
+                  </button>
+                )}
+                {busy === scope.id && <span className="spinner sm" />}
+              </div>
             </div>
           );
         })}

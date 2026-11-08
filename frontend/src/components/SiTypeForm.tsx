@@ -468,6 +468,7 @@ export default function SiTypeForm({
         </p>
       )}
 
+      {error && <div className="error">{error}</div>}
       <div className="actions">
         <button className="primary big" type="button" onClick={() => void submit()} disabled={busy}>
           {busy ? "Сохраняю…" : existing ? "Сохранить" : "Завести тип"}
@@ -478,7 +479,6 @@ export default function SiTypeForm({
           </button>
         )}
       </div>
-      {error && <div className="error">{error}</div>}
     </div>
   );
 }

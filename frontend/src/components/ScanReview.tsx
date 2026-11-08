@@ -161,19 +161,19 @@ export default function ScanReview({
 
   return (
     <div className="scan-review">
-      <h4>Сверка скана №{scan.id}</h4>
-      {scan.warning && <div className="hint">{scan.warning}</div>}
+      <h4 style={{ margin: "16px 0 8px" }}>Сверка скана №{scan.id}</h4>
+      {scan.warning && <div className="alert warn">{scan.warning}</div>}
       {!scan.recognized?.legible && Object.keys(scan.recognized || {}).length > 0 && (
-        <div className="hint">Модель отметила фото как плохо читаемое — проверьте все поля особенно внимательно.</div>
+        <div className="alert warn">Модель отметила фото как плохо читаемое — проверьте все поля особенно внимательно.</div>
       )}
 
       <div className="scan-review-grid">
         <div className="scan-review-photo">
           {imageError && <div className="error">{imageError}</div>}
-          {imageUrl ? <img src={imageUrl} alt="Фото бланка" /> : !imageError && <div className="loading">Загружаю фото…</div>}
+          {imageUrl ? <img src={imageUrl} alt="Фото бланка" /> : !imageError && <div className="loading"><span className="spinner" /> Загружаю фото…</div>}
         </div>
 
-        <form className="new-slot-form" onSubmit={submit}>
+        <form className="form-stack" onSubmit={submit}>
           <SiTypePicker value={siType} onChange={setSiType} initialQuery={r.si_type_query ?? ""} inputId="sr-si-type" />
           <div className="field-row">
             <div className="field">
@@ -182,7 +182,7 @@ export default function ScanReview({
             </div>
             <div className="field">
               <label htmlFor="sr-year">Год выпуска</label>
-              <input id="sr-year" value={year} onChange={(event) => setYear(event.target.value.replace(/\D/g, ""))} style={{ width: 90 }} />
+              <input id="sr-year" value={year} onChange={(event) => setYear(event.target.value.replace(/\D/g, ""))} />
             </div>
           </div>
 
@@ -205,17 +205,17 @@ export default function ScanReview({
             </div>
             <div className="field">
               <label htmlFor="sr-pulse">Коэфф. K</label>
-              <input id="sr-pulse" value={pulseWeight} onChange={(event) => setPulseWeight(event.target.value)} style={{ width: 100 }} />
+              <input id="sr-pulse" value={pulseWeight} onChange={(event) => setPulseWeight(event.target.value)} />
             </div>
             <div className="field">
               <label htmlFor="sr-water-temp">Темп. воды, °C</label>
-              <input id="sr-water-temp" value={waterTemp} onChange={(event) => setWaterTemp(event.target.value)} style={{ width: 100 }} />
+              <input id="sr-water-temp" value={waterTemp} onChange={(event) => setWaterTemp(event.target.value)} />
             </div>
           </div>
 
-          <div className="filters">
+          <div className="check-row">
             {Object.entries(layoutsInfo.checks).map(([key, label]) => (
-              <label key={key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <label key={key} className={`check-chip ${checks[key] ?? true ? "on" : "off"}`}>
                 <input
                   type="checkbox"
                   checked={checks[key] ?? true}
@@ -226,14 +226,14 @@ export default function ScanReview({
             ))}
           </div>
 
-          <div className="field" style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", padding: 10 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className={`unsuitable ${manualUnsuitable ? "on" : ""}`} style={{ marginBottom: 0 }}>
+            <label className="toggle">
               <input type="checkbox" checked={manualUnsuitable} onChange={(event) => setManualUnsuitable(event.target.checked)} />
-              НЕПРИГОДЕН (по другой причине, не по погрешности)
+              Непригоден по другой причине (не по погрешности)
             </label>
             {manualUnsuitable && (
-              <div className="field-row" style={{ marginTop: 8 }}>
-                <div className="field" style={{ flex: 2 }}>
+              <div className="field-row" style={{ marginTop: 10 }}>
+                <div className="field">
                   <label htmlFor="sr-reason-text">Причина<span className="req">*</span></label>
                   <input id="sr-reason-text" value={manualReason} onChange={(event) => setManualReason(event.target.value)} />
                 </div>
@@ -257,10 +257,10 @@ export default function ScanReview({
                 {modes.map((mode, index) => (
                   <tr key={index} className={rowClass(rows[index]?.confidence ?? null)}>
                     <td>{mode.label} <span className="sub">{mode.seconds} с</span></td>
-                    <td><input value={rows[index]?.flow_rate ?? ""} onChange={(e) => updateRow(index, { flow_rate: e.target.value })} style={{ width: 70 }} /></td>
-                    <td><input value={rows[index]?.volume_standard ?? ""} onChange={(e) => updateRow(index, { volume_standard: e.target.value })} style={{ width: 80 }} /></td>
-                    <td><input value={rows[index]?.reading_start ?? ""} onChange={(e) => updateRow(index, { reading_start: e.target.value })} style={{ width: 90 }} /></td>
-                    <td><input value={rows[index]?.reading_end ?? ""} onChange={(e) => updateRow(index, { reading_end: e.target.value })} style={{ width: 90 }} /></td>
+                    <td><input value={rows[index]?.flow_rate ?? ""} onChange={(e) => updateRow(index, { flow_rate: e.target.value })} /></td>
+                    <td><input value={rows[index]?.volume_standard ?? ""} onChange={(e) => updateRow(index, { volume_standard: e.target.value })} /></td>
+                    <td><input value={rows[index]?.reading_start ?? ""} onChange={(e) => updateRow(index, { reading_start: e.target.value })} /></td>
+                    <td><input value={rows[index]?.reading_end ?? ""} onChange={(e) => updateRow(index, { reading_end: e.target.value })} /></td>
                     <td className="sub">
                       {rows[index]?.confidence == null ? "—" : `${Math.round((rows[index]!.confidence as number) * 100)}%`}
                     </td>
@@ -270,7 +270,8 @@ export default function ScanReview({
             </table>
           </div>
 
-          <div className="field-row">
+          {error && <div className="error">{error}</div>}
+          <div className="row">
             <button className="primary" type="submit" disabled={busy}>
               {busy ? "Завожу поверку…" : "Подтвердить и завести поверку"}
             </button>
@@ -278,7 +279,6 @@ export default function ScanReview({
               Отмена
             </button>
           </div>
-          {error && <div className="error">{error}</div>}
         </form>
       </div>
     </div>

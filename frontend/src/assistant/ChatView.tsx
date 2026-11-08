@@ -22,6 +22,7 @@ import {
   type RunState,
   type Source,
 } from "./api";
+import Icon, { type IconName } from "../ui/Icon";
 import ModelPicker from "./ModelPicker";
 import WidgetView from "./Widgets";
 
@@ -263,7 +264,7 @@ export default function ChatView({ conversationId, models, defaultModel, onChang
           {!run?.active && messages.length > 0 && lastTurnIsAssistant && (
             <div className="turn-tools">
               <button className="link" onClick={() => void doRegenerate()} title="Ответить заново выбранной моделью">
-                ↻ Перегенерировать
+                <Icon name="refresh" size={14} /> Перегенерировать
               </button>
             </div>
           )}
@@ -341,7 +342,7 @@ function FileCard({ file }: { file: FileRef }) {
   );
 }
 
-const SOURCE_ICON: Record<string, string> = { rst: "🏛", web: "🌐", context: "📁", ei: "🗂", file: "📎", doc: "📄", mcp: "🔌" };
+const SOURCE_ICON: Record<string, IconName> = { rst: "globe", web: "globe", context: "folder", ei: "server", file: "paperclip", doc: "doc", mcp: "plug" };
 
 function SourcesRow({ sources, onOpenContextFile }: { sources: Source[]; onOpenContextFile: (id: number) => void }) {
   if (!sources.length) return null;
@@ -350,7 +351,12 @@ function SourcesRow({ sources, onOpenContextFile }: { sources: Source[]; onOpenC
       <span className="muted small">Источники:</span>
       {sources.map((s, i) => {
         const fileId = s.ref?.startsWith("file:") ? Number(s.ref.slice(5)) : null;
-        const label = `${SOURCE_ICON[s.kind] ?? "•"} ${s.title}`;
+        const label = (
+          <>
+            <Icon name={SOURCE_ICON[s.kind] ?? "doc"} size={12} />
+            <span>{s.title}</span>
+          </>
+        );
         if (s.url) return <a key={i} className="src-chip" href={s.url} target="_blank" rel="noreferrer" title={s.url}>{label}</a>;
         if (fileId) return <button key={i} className="src-chip" onClick={() => onOpenContextFile(fileId)}>{label}</button>;
         return <span key={i} className="src-chip" title={s.ref}>{label}</span>;
@@ -508,7 +514,7 @@ function AssistantTurn({
       blocks.push(
         <details key={c.id} className={`step ${!result ? "running" : ui.error ? "failed" : "ok"}`}>
           <summary>
-            <span className="step-icon">{!result ? <i className="spinner" /> : ui.error ? "✕" : "✓"}</span>
+            <span className="step-icon">{!result ? <i className="spinner sm" /> : <Icon name={ui.error ? "x" : "check"} size={13} strokeWidth={2.4} />}</span>
             <span className="step-label">{ui.label || c.name}</span>
             <span className="step-args">{argsSummary(c.args)}</span>
             {ui.summary && <span className="step-sum">{ui.summary}</span>}
@@ -526,12 +532,14 @@ function AssistantTurn({
 
   return (
     <div className="msg-assistant">
-      <div className="avatar" title="Ассистент-метролог">Σ</div>
+      <div className="chat-avatar" title="Ассистент-метролог"><Icon name="sparkle" size={16} strokeWidth={2} /></div>
       <div className="turn-body">
         {stepCount > 0 && (
           <div className="steps">
             <button className="steps-toggle" onClick={() => setStepsOpen((o) => !o)}>
-              {live ? "Работаю" : "Ход работы"} · {stepCount} {plural(stepCount, ["шаг", "шага", "шагов"])} {showSteps ? "▴" : "▾"}
+              <Icon name="tools" size={14} />
+              {live ? "Работаю" : "Ход работы"} · {stepCount} {plural(stepCount, ["шаг", "шага", "шагов"])}
+              <Icon name={showSteps ? "chevronDown" : "chevronRight"} size={14} />
             </button>
             {showSteps && <div className="steps-list">{blocks}</div>}
           </div>
@@ -540,7 +548,7 @@ function AssistantTurn({
         {!lastHasCalls && finalText && <Markdown text={finalText} />}
         {live && partial && <Markdown text={partial + " ▍"} />}
         {live && !partial && (
-          <div className="activity"><i className="spinner" /> {activity || "Думаю…"}</div>
+          <div className="activity"><i className="spinner sm" /> {activity || "Думаю…"}</div>
         )}
         {!live && <SourcesRow sources={sources} onOpenContextFile={onOpenContextFile} />}
         {!live && model && (
@@ -673,16 +681,16 @@ function Composer({
         <div className="att-row pending">
           {pending.map((p) => (
             <span key={p.key} className={`att-chip ${p.error ? "warn" : ""}`} title={p.error || p.attachment?.extract_error || ""}>
-              {!p.attachment && !p.error && <i className="spinner" />}
+              {!p.attachment && !p.error && <i className="spinner sm" />}
               <span className="att-name">{p.file.name}</span>
               {p.attachment?.extract_error && <span className="warn-dot">!</span>}
-              <button className="x" onClick={() => setPending((list) => list.filter((x) => x.key !== p.key))}>×</button>
+              <button className="x" aria-label="Убрать" onClick={() => setPending((list) => list.filter((x) => x.key !== p.key))}><Icon name="x" size={12} /></button>
             </span>
           ))}
         </div>
       )}
       {hasImages && !vision && (
-        <div className="small warn-text">Выбранная модель не видит картинки — выберите модель со значком 👁</div>
+        <div className="small warn-text">Выбранная модель не видит картинки — выберите модель с поддержкой изображений</div>
       )}
       <textarea
         ref={area}
@@ -705,7 +713,7 @@ function Composer({
         }}
       />
       <div className="composer-bar">
-        <button className="icon" title="Приложить файлы" onClick={() => fileInput.current?.click()}>📎</button>
+        <button className="icon-btn" title="Приложить файлы" aria-label="Приложить файлы" onClick={() => fileInput.current?.click()}><Icon name="paperclip" /></button>
         <input
           ref={fileInput}
           type="file"
@@ -721,10 +729,10 @@ function Composer({
         <div className="spacer" />
         <span className="muted small hint">Enter — отправить, Shift+Enter — новая строка</span>
         {running ? (
-          <button className="stop" onClick={onStop}>■ Стоп</button>
+          <button className="send stop" onClick={onStop} title="Остановить" aria-label="Остановить"><Icon name="stop" size={14} /></button>
         ) : (
-          <button className="primary send" disabled={!canSend} onClick={() => void submit()}>
-            {sending ? "…" : "Отправить"}
+          <button className="primary send" disabled={!canSend} onClick={() => void submit()} title="Отправить" aria-label="Отправить">
+            {sending ? <i className="spinner sm" /> : <Icon name="send" size={17} strokeWidth={2.2} />}
           </button>
         )}
       </div>

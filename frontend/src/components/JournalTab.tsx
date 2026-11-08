@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Segmented } from "../ui/controls";
 import Journal from "./Journal";
 import Normocontrol from "./Normocontrol";
 
@@ -15,26 +16,14 @@ export default function JournalTab({ isManager, onOpenTypes }: { isManager: bool
   return (
     <>
       <div className="toolbar">
-        <div className="segmented" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "protocols"}
-            className={view === "protocols" ? "active" : ""}
-            onClick={() => setView("protocols")}
-          >
-            Протоколы
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "arshin"}
-            className={view === "arshin" ? "active" : ""}
-            onClick={() => setView("arshin")}
-          >
-            Нумерация и Аршин
-          </button>
-        </div>
+        <Segmented
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "protocols", label: "Протоколы", icon: "doc" },
+            { value: "arshin", label: "Нумерация и Аршин", icon: "layers" },
+          ]}
+        />
       </div>
       {view === "protocols" ? <Journal /> : <Normocontrol onOpenTypes={onOpenTypes} />}
     </>

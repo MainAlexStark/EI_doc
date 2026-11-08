@@ -11,6 +11,8 @@ import {
   type RequestItemPayload,
   type RequestPayload,
 } from "../api";
+import Icon from "../ui/Icon";
+import { Alert } from "../ui/controls";
 import MonthCalendar, { type CalendarMarker } from "./Calendar";
 import { formatPhoneInput, isPhoneComplete } from "../phone";
 import { loadSmartCaptcha, type SmartCaptchaApi } from "../smartCaptcha";
@@ -323,11 +325,15 @@ export default function PublicRequestForm() {
   if (doneId !== null) {
     return (
       <div className="public-page">
+        <div className="public-brand">
+          <div className="brand-mark">ЕИ</div>
+          <div className="brand-name">Единица Измерения<small>метрологическая служба, г. Киров</small></div>
+        </div>
         <div className="public-card thanks">
+          <div className="empty-icon"><Icon name="check" size={28} strokeWidth={2.4} /></div>
           <h1>Заявка принята</h1>
-          <p>
-            Номер заявки — <b>№{doneId}</b>. Мы свяжемся с вами, чтобы согласовать дату
-            поверки.
+          <p className="sub">
+            Номер заявки — <b>№{doneId}</b>. Мы свяжемся с вами, чтобы согласовать дату и время поверки.
           </p>
         </div>
       </div>
@@ -336,13 +342,21 @@ export default function PublicRequestForm() {
 
   return (
     <div className="public-page">
+      <div className="public-brand">
+        <div className="brand-mark">ЕИ</div>
+        <div className="brand-name">Единица Измерения<small>метрологическая служба, г. Киров</small></div>
+      </div>
       <form className="public-card" onSubmit={submit} autoComplete="off">
-        <h1>Заявка на поверку</h1>
-        <p className="sub">ООО «Единица Измерения» — метрологическая служба, г. Киров</p>
+        <div>
+          <h1>Заявка на поверку</h1>
+          <p className="sub" style={{ marginTop: 6 }}>
+            Оставьте контакты и адрес — подберём поверителя и согласуем время. Поля со <span className="req">*</span> обязательны.
+          </p>
+        </div>
 
-        {error && <div className="error">{error}</div>}
+        {error && <Alert>{error}</Alert>}
 
-        <p className="hint"><span className="req">*</span> — обязательные поля</p>
+        <h2>Контакты</h2>
 
         <div className="field">
           <label htmlFor="rf-name">Имя или организация<span className="req">*</span></label>
@@ -377,7 +391,9 @@ export default function PublicRequestForm() {
             />
           </div>
         </div>
-        <p className="hint"><span className="req">*</span> телефон или email — укажите хотя бы один</p>
+        <p className="hint" style={{ marginTop: -8 }}>Укажите хотя бы телефон или email.</p>
+
+        <h2>Что и где поверить</h2>
 
         <div className="field suggest-field">
           <label htmlFor="rf-address">Адрес поверки<span className="req">*</span></label>
@@ -403,7 +419,7 @@ export default function PublicRequestForm() {
           {!suggestConfigured && (
             <div className="hint">Подсказка адресов недоступна — введите адрес полностью вручную</div>
           )}
-          {addressConfirmed && <div className="hint ok">Адрес выбран из справочника</div>}
+          {addressConfirmed && <div className="hint ok"><Icon name="check" size={12} /> Адрес выбран из справочника</div>}
         </div>
 
         <div className="field">
@@ -420,8 +436,8 @@ export default function PublicRequestForm() {
                   </option>
                 ))}
             </select>
-            <button type="button" onClick={addItem} disabled={!addFamilyId}>
-              Добавить
+            <button type="button" className={addFamilyId ? "tinted" : ""} onClick={addItem} disabled={!addFamilyId}>
+              <Icon name="plus" size={16} /> Добавить
             </button>
           </div>
 
@@ -433,17 +449,20 @@ export default function PublicRequestForm() {
                 return (
                   <li key={item.family_id}>
                     <span className="name">{family.name}</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={item.quantity}
-                      onChange={(event) => setQuantity(item.family_id, Number(event.target.value))}
-                    />
-                    <span className="sub">шт.</span>
+                    <span className="qty" aria-label="Количество">
+                      <button type="button" aria-label="Меньше" onClick={() => setQuantity(item.family_id, Math.max(1, item.quantity - 1))}>−</button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={item.quantity}
+                        onChange={(event) => setQuantity(item.family_id, Number(event.target.value))}
+                      />
+                      <button type="button" aria-label="Больше" onClick={() => setQuantity(item.family_id, Math.min(99, item.quantity + 1))}>+</button>
+                    </span>
                     <span className="sub price">{money(Number(family.price) * item.quantity)} ₽</span>
-                    <button type="button" onClick={() => removeItem(item.family_id)}>
-                      Убрать
+                    <button type="button" className="icon-btn sm danger" aria-label="Убрать" title="Убрать" onClick={() => removeItem(item.family_id)}>
+                      <Icon name="x" size={14} />
                     </button>
                   </li>
                 );
@@ -468,13 +487,15 @@ export default function PublicRequestForm() {
           </div>
         )}
 
+        <h2>Когда удобно</h2>
         <div className="field">
           <label>
             {needsTime ? "Дата и время выезда" : "Желаемая дата"}
-            {needsTime ? <span className="req">*</span> : <span className="opt"> (необязательно)</span>}
+            {needsTime ? <span className="req">*</span> : <span className="opt"> — необязательно</span>}
           </label>
 
           <MonthCalendar
+            className="lg"
             selected={chosenDate ? [chosenDate] : []}
             onToggle={pickDate}
             markers={calendarMarkers}
@@ -523,7 +544,7 @@ export default function PublicRequestForm() {
         </div>
 
         <div className="field">
-          <label htmlFor="rf-comment">Комментарий<span className="opt"> (необязательно)</span></label>
+          <label htmlFor="rf-comment">Комментарий<span className="opt"> — необязательно</span></label>
           <textarea
             id="rf-comment"
             rows={3}
@@ -533,20 +554,17 @@ export default function PublicRequestForm() {
           />
         </div>
 
-        <div className="field">
-          <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={consentGiven}
-              onChange={(event) => setConsentGiven(event.target.checked)}
-              style={{ marginTop: 3 }}
-            />
-            <span className="sub">
-              {CONSENT_TEXT}
-              <span className="req"> *</span>
-            </span>
-          </label>
-        </div>
+        <label className="consent">
+          <input
+            type="checkbox"
+            checked={consentGiven}
+            onChange={(event) => setConsentGiven(event.target.checked)}
+          />
+          <span>
+            {CONSENT_TEXT}
+            <span className="req"> *</span>
+          </span>
+        </label>
 
         <div className="field captcha-field" style={{ display: captchaConfigured ? "block" : "none" }}>
           <div ref={captchaContainerRef} className="captcha-widget" />
@@ -568,6 +586,7 @@ export default function PublicRequestForm() {
           {submitting ? "Отправляю…" : "Отправить заявку"}
         </button>
       </form>
+      <div className="public-foot">ООО «Единица Измерения» · поверка средств измерений в Кирове и области</div>
     </div>
   );
 }
