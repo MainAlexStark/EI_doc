@@ -69,7 +69,10 @@ class SiTypeSuggestView(APIView):
                     suggestions.append({"source": "fif", "si_type_id": None, "needs_review": False, **item})
 
         suggestions = self._flag_duplicates(suggestions)
-        payload = {"results": suggestions}
+        from apps.arshin import status as fif_status
+
+        payload = {"results": suggestions, "fif": {"ok": warning is None, "error": warning or "",
+                                                   "routes": fif_status.routes()}}
         if warning:
             # Реестр недоступен — это не ошибка операции: тип заводится вручную.
             payload["warning"] = warning

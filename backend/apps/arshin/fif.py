@@ -17,7 +17,10 @@
 * ``GET /doc/<uuid>`` — файл (PDF) методики поверки или описания типа.
 
 ФГИС отвечает только российским адресам и держит лимит 2 запроса в секунду с
-адреса — клиент сам выдерживает паузу между запросами. Разбор по-прежнему
+адреса — клиент сам выдерживает паузу между запросами. Поэтому поиск и карточка
+идут по путям (``apps.arshin.status.routes``): сначала через MCP-сервер РСТ на
+российском VPS (``apps.arshin.rst_mcp``), если он задан, потом напрямую. Исход
+каждого пути запоминается — его показывает индикатор «РСТ» на экране. Разбор по-прежнему
 терпим к обёрткам и именам полей: если формат снова поменяется, ``manage.py
 fif_probe`` покажет фактический ответ.
 """
@@ -36,7 +39,9 @@ from urllib.parse import unquote
 
 import requests
 from django.conf import settings
-from django.core.cache import cache
+
+from apps.arshin import rst_mcp
+from apps.arshin import status as fif_status
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +244,14 @@ class FifClient:
             response = requests.get(url, params=params, timeout=timeout or self.timeout)
             response.raise_for_status()
             return response
+        except requests.Timeout as exc:
+            raise FifUnavailable(
+                f"ФГИС не ответила за {timeout or self.timeout:g} с (она отвечает только российским адресам)"
+            ) from exc
+        except requests.ConnectionError as exc:
+            raise FifUnavailable("нет соединения с ФГИС (fgis.gost.ru)") from exc
+        except requests.HTTPError as exc:
+            raise FifUnavailable(f"ФГИС ответила {exc.response.status_code}") from exc
         except requests.RequestException as exc:
             raise FifUnavailable(f"Реестр ФИФ недоступен: {exc}") from exc
 
@@ -325,23 +338,55 @@ class FifClient:
         if len(query) < 2 or not words:
             return []
 
-        key = "fif:types:v3:" + hashlib.md5(f"{query.lower()}:{limit}".encode()).hexdigest()
-        cached = cache.get(key)
+        key = "fif:types:v4:" + hashlib.md5(f"{query.lower()}:{limit}".encode()).hexdigest()
+        cached = fif_status.cache_get(key)
         if cached is not None:
             return [FifType(**item) for item in cached]
 
         with_letters = [w for w in words if re.search(r"[^\W\d_]", w)]
         anchor = max(with_letters or words, key=len)
-        rest = [w for w in words if w is not anchor]
-        fetch = 100 if rest else limit
-        payload = self._get("mit", {"search": f"*{anchor}*", "rows": fetch, "start": 0})
-        found = [self._parse(row) for row in self._rows(payload)]
-        if rest:
-            found.sort(key=lambda item: -sum(self._matches(item, [w]) for w in rest))
-        found = found[:limit]
+        # ФГИС отдаёт по номеру в реестре, а не по похожести: берём с запасом и сортируем сами.
+        fetch = max(limit, 50)
+        rows = self._on_routes(lambda route: self.search_on(route, anchor, rows=fetch))
+        found = [self._parse(row) for row in rows]
+        found = rank(found, query)[:limit]
 
-        cache.set(key, [item.__dict__ for item in found], CACHE_TTL)
+        fif_status.cache_set(key, [item.__dict__ for item in found], CACHE_TTL)
         return found
+
+    # -- пути: MCP-сервер РСТ, затем напрямую -------------------------------
+    def _on_routes(self, fetch):
+        errors = []
+        for route in fif_status.routes():
+            try:
+                return fetch(route)
+            except FifUnavailable as exc:
+                errors.append(f"{fif_status.ROUTES[route]}: {exc}")
+        raise FifUnavailable("Госреестр (РСТ) недоступен — " + "; ".join(errors))
+
+    def _timed(self, route: str, call):
+        started = time.monotonic()
+        try:
+            result = call()
+        except (FifUnavailable, rst_mcp.RstMcpError) as exc:
+            fif_status.record(route, False, ms=int((time.monotonic() - started) * 1000), error=str(exc))
+            raise FifUnavailable(str(exc)) from exc
+        fif_status.record(route, True, ms=int((time.monotonic() - started) * 1000))
+        return result
+
+    def search_on(self, route: str, anchor: str, *, rows: int) -> list[dict]:
+        """Строки поиска по одному пути (без кэша). Исход пути запоминается для индикатора."""
+        if route == "mcp":
+            payload = self._timed(route, lambda: rst_mcp.call(
+                "search_types", {"search": anchor, "rows": min(rows, 100)}, timeout=max(self.timeout, 20)))
+        else:
+            payload = self._timed(route, lambda: self._get("mit", {"search": f"*{anchor}*", "rows": rows, "start": 0}))
+        return list(self._rows(payload))
+
+    def card_on(self, route: str, uuid: str) -> Any:
+        if route == "mcp":
+            return self._timed(route, lambda: rst_mcp.call("get_type", {"id": uuid}, timeout=max(self.timeout, 20)))
+        return self._timed(route, lambda: self._get(f"mit/{uuid}"))
 
     def raw_search(self, query: str, *, limit: int = 5) -> Any:
         """Сырой ответ — для команды fif_probe."""
@@ -409,12 +454,12 @@ class FifClient:
         """Карточка утверждённого типа по mit_uuid, ссылке или номеру в Госреестре."""
         uuid = self.resolve_uuid(ident)
         key = f"fif:card:{uuid}"
-        cached = cache.get(key)
+        cached = fif_status.cache_get(key)
         if cached is not None:
             return self.parse_card(cached, uuid)
-        payload = self._get(f"mit/{uuid}")
+        payload = self._on_routes(lambda route: self.card_on(route, uuid))
         card = self.parse_card(payload, uuid)
-        cache.set(key, payload, CARD_CACHE_TTL)
+        fif_status.cache_set(key, payload, CARD_CACHE_TTL)
         return card
 
     def download(self, url: str) -> tuple[bytes, str, str]:
@@ -430,6 +475,55 @@ class FifClient:
             extension = ".pdf" if "pdf" in content_type else ""
             filename = url.rstrip("/").rsplit("/", 1)[-1] + extension
         return response.content, filename, content_type
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[\s\-–«»\"'.,()]+", "", str(text or "").lower().replace("ё", "е"))
+
+
+def rank(items: list[FifType], query: str) -> list[FifType]:
+    """Самое похожее — первым. ФГИС сортирует по номеру в реестре, а не по запросу.
+
+    Номер в реестре целиком > обозначение совпало > начинается с запроса > содержит запрос >
+    запрос начинается с обозначения («СВК 15-3-2» → «СВК») > слова в обозначении, наименовании,
+    изготовителе.
+    Каждое слово запроса, найденное в записи, добавляет вес; при равенстве — порядок ФГИС
+    (новые типы раньше).
+    """
+    words = [w for w in re.split(r"[\s,;]+", query.strip()) if w]
+    q = _norm(query)
+
+    def score(item: FifType) -> int:
+        notation = _norm(item.notation)
+        parts = [_norm(p) for p in re.split(r"[,;()]+", item.notation) if p.strip()]
+        title = item.title.lower().replace("ё", "е")
+        points = 0
+        if item.registry_number and item.registry_number == query.strip():
+            points += 1000
+        if q and (notation == q or q in parts):
+            points += 300
+        elif q and (notation.startswith(q) or any(p.startswith(q) for p in parts)):
+            points += 200
+        elif q and q in notation:
+            points += 180  # «ЭКВАТЭЛ СВК-15У» на запрос «СВК 15»
+        elif q and any(q.startswith(p) for p in parts if len(p) >= 2):
+            points += 150  # «СВК 15-3-2» — в реестре «СВК»
+        for word in words:
+            w = word.lower().replace("ё", "е")
+            nw = _norm(word)
+            if nw and nw in notation:
+                points += 40
+            if title.startswith(w):
+                points += 30
+            elif w in title:
+                points += 15
+            if w in item.manufacturer.lower():
+                points += 10
+        if words and all(FifClient._matches(item, [w]) for w in words):
+            points += 50
+        return points
+
+    return sorted(items, key=lambda item: -score(item))  # sorted устойчив — равные в порядке ФГИС
 
 
 def mark_ambiguous(candidates: list[FifType]) -> list[dict]:

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SiTypeSuggestion } from "../api";
 import { searchSiTypes } from "../offline/sync";
+import RstStatus from "./RstStatus";
 import { loadPresets, type SiTypeDraft } from "./SiTypeForm";
 
 /**
@@ -33,6 +34,8 @@ export default function FifTypeSearch({
   const [offline, setOffline] = useState(false);
   const [fifUnavailable, setFifUnavailable] = useState(false);
   const [canManual, setCanManual] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [failures, setFailures] = useState(0);
   const debounce = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -54,6 +57,8 @@ export default function FifTypeSearch({
       setResults(found.results);
       setOffline(found.offline);
       setFifUnavailable(found.fifUnavailable);
+      setSearchError(found.error ?? "");
+      if (found.fifUnavailable) setFailures((n) => n + 1); // индикатор «РСТ» перечитает статус
       setSearching(false);
       setSearched(true);
     }, 300);
@@ -66,7 +71,10 @@ export default function FifTypeSearch({
 
   return (
     <div className="field">
-      <label htmlFor={inputId}>{label}</label>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <label htmlFor={inputId}>{label}</label>
+        <RstStatus signal={failures} />
+      </div>
       <input
         id={inputId}
         className="big-input"
@@ -87,6 +95,7 @@ export default function FifTypeSearch({
         <p className="hint warn-text">
           Госреестр (ФИФ) сейчас не отвечает — показываю только заведённые типы. Попробуйте чуть позже
           {canManual ? " или заведите тип вручную." : "."}
+          {searchError && <span className="sub" style={{ display: "block" }}>{searchError}</span>}
         </p>
       )}
 

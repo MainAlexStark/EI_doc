@@ -330,7 +330,13 @@ function toSuggestion(item: SiType): SiTypeSuggestion {
   };
 }
 
-export type SiTypeSearch = { results: SiTypeSuggestion[]; offline: boolean; fifUnavailable: boolean };
+export type SiTypeSearch = {
+  results: SiTypeSuggestion[];
+  offline: boolean;
+  fifUnavailable: boolean;
+  /** Почему реестр не ответил (или сервер EI_doc ответил ошибкой) — для индикатора «РСТ». */
+  error?: string;
+};
 
 /** Поиск типа: при связи — свой справочник + реестр ФИФ, без связи — только локальная копия. */
 export async function searchSiTypes(query: string): Promise<SiTypeSearch> {
@@ -338,14 +344,24 @@ export async function searchSiTypes(query: string): Promise<SiTypeSearch> {
   if (q.length < 2) return { results: [], offline: false, fifUnavailable: false };
   try {
     const response = await suggestSiTypes(query, { throwOnError: true });
-    return { results: response.results, offline: false, fifUnavailable: Boolean(response.warning) };
-  } catch {
+    return {
+      results: response.results,
+      offline: false,
+      fifUnavailable: Boolean(response.warning),
+      error: response.warning,
+    };
+  } catch (exc) {
     const local = (await cachedSiTypes())
       .filter((item) =>
         [item.name, item.registry_number, item.manufacturer].some((field) => field.toLowerCase().includes(q)),
       )
       .slice(0, 20)
       .map(toSuggestion);
+    // Сервер ответил ошибкой — это не «нет связи», а сбой поиска: так и говорим.
+    if (!isNetworkFailure(exc)) {
+      const message = exc instanceof Error ? exc.message : "ошибка сервера";
+      return { results: local, offline: false, fifUnavailable: true, error: `Поиск не сработал: ${message}` };
+    }
     return { results: local, offline: true, fifUnavailable: true };
   }
 }

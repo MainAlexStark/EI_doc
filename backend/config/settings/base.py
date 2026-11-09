@@ -213,6 +213,9 @@ YANDEX_AI_CHAT_URL = env("YANDEX_AI_CHAT_URL", default="")
 ARSHIN_BASE_URL = env("ARSHIN_BASE_URL", default="https://fgis.gost.ru/fundmetrology/eapi")
 # Скачивать методику и описание типа в фоне (Celery), когда заводится тип из ФИФ.
 FIF_DOCUMENTS_AUTO_DOWNLOAD = env.bool("FIF_DOCUMENTS_AUTO_DOWNLOAD", default=True)
+# Как ходить в Госреестр (поиск типов, карточка): auto — через MCP-сервер РСТ (RST_MCP_URL), если задан,
+# при его отказе — напрямую в ФГИС; mcp / direct — только этот путь. ФГИС отвечает только российским адресам.
+FIF_TRANSPORT = env("FIF_TRANSPORT", default="auto")
 # Ключи из старого config.yaml. Что именно они открывают — надо выяснить
 # перед реализацией выгрузки сведений о поверке.
 ARSHIN_PUBLIC_KEY = env("ARSHIN_PUBLIC_KEY", default="")

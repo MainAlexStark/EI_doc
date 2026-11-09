@@ -60,6 +60,21 @@ class FifDocumentSerializer(serializers.ModelSerializer):
         return f"/api/catalog/fif/documents/{obj.pk}/file/"
 
 
+class FifStatusView(APIView):
+    """GET /api/catalog/fif/status/ — индикатор «РСТ»: на связи ли Госреестр и через какой путь.
+
+    ``?probe=1`` — проверить сейчас (кнопка «Проверить»), иначе берутся отметки последних запросов,
+    а проба идёт, только если их давно не было.
+    """
+
+    @extend_schema(responses={200: dict})
+    def get(self, request):
+        from apps.arshin import status as fif_status
+
+        probe = request.query_params.get("probe") in ("1", "true", "yes")
+        return Response(fif_status.snapshot(probe=probe))
+
+
 class FifTypeCardView(APIView):
     @extend_schema(responses={200: dict})
     def get(self, request, ident: str):

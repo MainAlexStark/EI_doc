@@ -600,7 +600,25 @@ export type SiTypeSuggestion = {
   fif_uuid?: string;
 };
 
-export type SiTypeSuggestResponse = { results: SiTypeSuggestion[]; warning?: string };
+export type SiTypeSuggestResponse = {
+  results: SiTypeSuggestion[];
+  warning?: string;
+  fif?: { ok: boolean; error: string; routes: string[] };
+};
+
+/** Связь с Госреестром (РСТ): какие пути живы (apps/arshin/status.py). */
+export type FifRoute = {
+  key: "mcp" | "direct";
+  label: string;
+  ok: boolean | null;
+  ms: number | null;
+  error: string;
+  checked_at: string | null;
+};
+export type FifStatus = { ok: boolean; via: string | null; via_label: string; mode: string; routes: FifRoute[] };
+
+export const fetchFifStatus = (probe = false) =>
+  json<FifStatus>(`/api/catalog/fif/status/${probe ? "?probe=1" : ""}`);
 
 /** Подсказка типов СИ — авторизованный эндпоинт, поэтому через json(), не суём в public-хелперы. */
 export async function suggestSiTypes(

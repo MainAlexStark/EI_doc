@@ -5,6 +5,7 @@ import Icon from "../ui/Icon";
 import { Modal } from "../ui/Modal";
 import { Alert, EmptyState, PageActions, SearchField, Segmented, Spinner } from "../ui/controls";
 import FifTypeSearch from "./FifTypeSearch";
+import RstStatus from "./RstStatus";
 import SiTypeForm, { type SiTypeDraft } from "./SiTypeForm";
 import StandardKits from "./StandardKits";
 import VerificationTemplates from "./VerificationTemplates";
@@ -96,6 +97,7 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
   return (
     <div className="narrow" style={{ maxWidth: 920 }}>
       <PageActions>
+        <RstStatus />
         <button type="button" className="primary" onClick={() => setAdding(true)}>
           <Icon name="plus" size={16} strokeWidth={2.2} />
           Новый тип
