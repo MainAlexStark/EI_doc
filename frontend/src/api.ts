@@ -972,6 +972,9 @@ export type TemplateJob = {
   session_id: string;
 };
 
+export const fetchTemplateJobs = (siTypeId: number) =>
+  json<TemplateJob[]>(`/api/catalog/si-types/${siTypeId}/template-jobs/`);
+
 export const startTemplateJob = (siTypeId: number, comment = "") =>
   json<TemplateJob>(`/api/catalog/si-types/${siTypeId}/template-jobs/`, {
     method: "POST",

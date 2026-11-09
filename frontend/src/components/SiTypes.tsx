@@ -4,12 +4,14 @@ import { rememberSiType } from "../offline/sync";
 import Icon from "../ui/Icon";
 import { Modal } from "../ui/Modal";
 import { Alert, EmptyState, PageActions, SearchField, Segmented, Spinner } from "../ui/controls";
-import SiTypeForm from "./SiTypeForm";
+import FifTypeSearch from "./FifTypeSearch";
+import SiTypeForm, { type SiTypeDraft } from "./SiTypeForm";
+import StandardKits from "./StandardKits";
 import VerificationTemplates from "./VerificationTemplates";
 
 const REVIEWER_ROLES = new Set(["owner", "head", "metrologist"]);
 
-type View = "pending" | "all" | "templates";
+type View = "pending" | "all" | "templates" | "kits";
 
 /**
  * Справочник типов СИ — вместо раздела в админке.
@@ -34,12 +36,13 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
   const [pendingTotal, setPendingTotal] = useState(0);
   const [open, setOpen] = useState<SiType | null>(null);
   const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState<SiTypeDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    if (view === "templates") return;
+    if (view === "templates" || view === "kits") return;
     setLoading(true);
     setError("");
     try {
@@ -77,9 +80,14 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
     }
   };
 
+  const closeAdding = () => {
+    setAdding(false);
+    setDraft(null);
+  };
+
   const saved = (item: SiType) => {
     void rememberSiType(item);
-    setAdding(false);
+    closeAdding();
     setOpen(null);
     void load();
     onChanged?.();
@@ -102,15 +110,18 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
             ...(canReview || pendingTotal > 0 ? [{ value: "pending" as View, label: "Ждут проверки", count: pendingTotal }] : []),
             { value: "all" as View, label: "Все типы" },
             { value: "templates" as View, label: "Шаблоны поверки" },
+            { value: "kits" as View, label: "Эталоны" },
           ]}
         />
-        {view !== "templates" && (
+        {view !== "templates" && view !== "kits" && (
           <SearchField className="grow" value={query} onChange={setQuery} placeholder="Название, номер в Госреестре, изготовитель" />
         )}
       </div>
 
       {view === "templates" ? (
         <VerificationTemplates canReview={canReview} />
+      ) : view === "kits" ? (
+        <StandardKits />
       ) : (
         <>
           {error && <Alert>{error}</Alert>}
@@ -143,6 +154,7 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
                       ) : (
                         item.reviewed_by_name && <span><Icon name="check" size={12} /> проверил {item.reviewed_by_name}</span>
                       )}
+                      <TemplateBadge item={item} />
                     </div>
                   </div>
                   <div className="row">
@@ -164,8 +176,28 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
         </>
       )}
 
-      <Modal open={adding} onClose={() => setAdding(false)} size="lg" title="Новый тип СИ" subtitle="Номер в Госреестре подтянет наименование, изготовителя и методику">
-        <SiTypeForm onSaved={saved} onCancel={() => setAdding(false)} />
+      <Modal
+        open={adding}
+        onClose={closeAdding}
+        size="lg"
+        title="Новый тип СИ"
+        subtitle={draft ? "Данные — из Госреестра, сверьте и сохраните" : "Начните вводить что угодно — подсказки из Госреестра (ФИФ)"}
+      >
+        {draft ? (
+          <SiTypeForm initial={draft} onSaved={saved} onCancel={() => setDraft(null)} />
+        ) : (
+          adding && (
+            <FifTypeSearch
+              autoFocus
+              onPickFif={setDraft}
+              onPickLocal={(item) => {
+                closeAdding();
+                setView("all");
+                setQuery(item.registry_number);
+              }}
+            />
+          )
+        )}
       </Modal>
       <Modal
         open={open != null}
@@ -178,4 +210,19 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
       </Modal>
     </div>
   );
+}
+
+/** Короткая отметка в строке справочника: как дела с шаблоном поверки. */
+function TemplateBadge({ item }: { item: SiType }) {
+  const job = item.template_job;
+  const template = item.templates?.[0];
+  if (job && (job.status === "queued" || job.status === "running")) {
+    return <span><Icon name="sparkle" size={12} /> ассистент готовит шаблон…</span>;
+  }
+  if (template) {
+    return <span>шаблон {template.needs_review ? "ждёт проверки" : "есть"}</span>;
+  }
+  if (job?.status === "failed") return <span className="warn-text">шаблон не получился</span>;
+  if (item.calculator_key === "water_meter") return null;
+  return <span>без шаблона</span>;
 }

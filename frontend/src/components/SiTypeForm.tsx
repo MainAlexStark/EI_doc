@@ -13,6 +13,7 @@ import {
   type SiTypePresets,
 } from "../api";
 import SiTypeDocuments, { FifDocumentButtons } from "./FifDocuments";
+import TemplateStatus from "./TemplateStatus";
 
 /**
  * Форма типа СИ — вместо Django-админки и ручного JSON с характеристиками.
@@ -98,6 +99,8 @@ export default function SiTypeForm({
     return value ? String(value) : "";
   });
   const [family, setFamily] = useState<number | null>(existing?.family ?? null);
+  // Вид СИ угадывается по наименованию типа из реестра; выбранный руками не перезаписываем.
+  const familyTouched = useRef(Boolean(existing));
   const [limits, setLimits] = useState<Record<string, string>>(() =>
     Object.fromEntries(Object.entries(existing?.limits ?? initial?.limits ?? {}).map(([k, v]) => [k, toText(v)])),
   );
@@ -160,6 +163,7 @@ export default function SiTypeForm({
       setName(chosenName);
       setRegistry((current) => current || data.registry_number);
       setManufacturer((current) => current || data.manufacturer);
+      if (data.family_guess && !familyTouched.current) setFamily(data.family_guess);
       const months = Array.from(new Set(data.mpi.map((m) => m.months)));
       if (months.length === 1) setIntervalMonths(String(months[0]));
       if (data.limits_reader) void readLimits(data.uuid, chosenName);
@@ -343,7 +347,13 @@ export default function SiTypeForm({
         </div>
         <div className="field">
           <label htmlFor="tf-reg">Номер в Госреестре<span className="req">*</span></label>
-          <input id="tf-reg" value={registry} onChange={(e) => setRegistry(e.target.value)} placeholder="12345-06" />
+          <input
+            id="tf-reg"
+            value={registry}
+            readOnly={Boolean(card) && !info?.can_manual}
+            onChange={(e) => setRegistry(e.target.value)}
+            placeholder="12345-06"
+          />
         </div>
       </div>
       <div className="field-row">
@@ -371,7 +381,14 @@ export default function SiTypeForm({
       {info && info.families.length > 1 && (
         <div className="field">
           <label htmlFor="tf-family">Вид СИ</label>
-          <select id="tf-family" value={family ?? ""} onChange={(e) => setFamily(Number(e.target.value))}>
+          <select
+            id="tf-family"
+            value={family ?? ""}
+            onChange={(e) => {
+              familyTouched.current = true;
+              setFamily(Number(e.target.value));
+            }}
+          >
             {info.families.map((f) => (
               <option key={f.id} value={f.id}>{f.name}</option>
             ))}
@@ -461,6 +478,17 @@ export default function SiTypeForm({
           Найти № {registry.trim()} в Госреестре — подтянуть методику поверки и описание типа
         </button>
       )}
+
+      {card && !existing && !card.family_guess && info && info.families.length > 1 && !familyTouched.current && (
+        <p className="hint warn-text">Вид СИ по наименованию типа не угадался — выберите его выше.</p>
+      )}
+      {!existing && fifUuid && (
+        <p className="hint">
+          После сохранения ассистент сам подготовит шаблон поверки по методике из Госреестра и перечню эталонов
+          компании (для испытательного оборудования — и шаблон аттестации). Метролог проверит его на вкладке «Типы СИ».
+        </p>
+      )}
+      {existing && <TemplateStatus siType={existing} />}
 
       {!existing && !info?.can_review && (
         <p className="hint">

@@ -665,6 +665,11 @@ function TemplateMeasurementForm({
   const [conditions, setConditions] = useState<Record<string, string>>(() => ({ ...(saved?.conditions ?? {}) }));
   const [manualUnsuitable, setManualUnsuitable] = useState(Boolean(saved?.manual_unsuitable));
   const [manualReason, setManualReason] = useState(saved?.manual_unsuitability_reason ?? "");
+  // Набор эталонов из «Перечня применяемых эталонов»: свой (закреплённый за поверителем) — по умолчанию.
+  const kits = info.kits ?? [];
+  const [kitId, setKitId] = useState<number | null>(
+    () => saved?.kit?.id ?? kits.find((k) => k.own)?.id ?? (kits.length === 1 ? kits[0].id : null),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<MeasurementsResult | null>(null);
@@ -725,6 +730,10 @@ function TemplateMeasurementForm({
       setError("Укажите причину непригодности");
       return;
     }
+    if (kits.length > 1 && !kitId) {
+      setError("Выберите набор эталонов — что брали на эту поверку");
+      return;
+    }
     const dot = (v: string) => v.trim().replace(",", ".");
     const payload: TemplateMeasurementsPayload = {
       template_id: template.id,
@@ -746,6 +755,7 @@ function TemplateMeasurementForm({
       conditions: Object.fromEntries(Object.entries(conditions).filter(([, v]) => v.trim()).map(([k, v]) => [k, dot(v)])),
       manual_unsuitable: manualUnsuitable,
       manual_unsuitability_reason: manualUnsuitable ? manualReason.trim() : "",
+      kit: kitId,
     };
     setBusy(true);
     try {
@@ -779,6 +789,29 @@ function TemplateMeasurementForm({
           ]}
         />
       </div>
+
+      {kits.length > 1 && (
+        <div className="field">
+          <label>Эталоны — какой набор брали</label>
+          <div className="chip-row">
+            {kits.map((k) => (
+              <button
+                type="button"
+                key={k.id}
+                className={`chip ${kitId === k.id ? "active" : ""}`}
+                title={[k.standards_text, k.aux_text].filter(Boolean).join("\n")}
+                onClick={() => setKitId(k.id)}
+              >
+                {(k.scope || k.section).split("\n")[0].slice(0, 60)}
+                {k.employee_name ? ` · ${k.employee_name}` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {kits.length === 1 && (
+        <p className="hint">Эталоны: {kits[0].standards_text.split("\n")[0] || kits[0].scope} — из перечня компании.</p>
+      )}
 
       {plan.params.length > 0 && (
         <div className="form-grid">
