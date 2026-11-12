@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  fetchFgisVerification,
+  type FgisVerification,
+  type OwnInstrumentHistory,
   deleteVerificationPhoto,
   downloadBlank,
   downloadVerificationProtocol,
@@ -28,6 +31,8 @@ import { confirmDialog } from "../ui/Modal";
 import { EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
 import ScanReview from "./ScanReview";
 import SiTypeDocuments from "./FifDocuments";
+import InstrumentHistory from "./InstrumentHistory";
+import type { SiTypeDraft } from "./SiTypeForm";
 import SiTypePicker, { type PickedType } from "./SiTypePicker";
 import {
   addVerification,
@@ -201,6 +206,16 @@ function PhotosPanel({ verification }: { verification: CachedVerification }) {
   );
 }
 
+type PreviousVerification = {
+  key: string;
+  line: string;
+  details: string[];
+};
+
+function ruDate(value: string | null | undefined): string {
+  return value ? new Date(value).toLocaleDateString("ru-RU") : "";
+}
+
 function AddInstrumentForm({
   workOrderId,
   onAdded,
@@ -216,15 +231,85 @@ function AddInstrumentForm({
   const [year, setYear] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Прошлая поверка, из которой подставлены поля (InstrumentHistory).
+  const [previous, setPrevious] = useState<PreviousVerification | null>(null);
+  // Чем открыть выбор типа, когда своего типа под прошлую поверку нет: поиск по номеру
+  // Госреестра или сразу заведение типа из реестра. Смена key пересоздаёт SiTypePicker.
+  const [typeSeed, setTypeSeed] = useState<{ key: number; query: string; draft: SiTypeDraft | null }>({
+    key: 0, query: "", draft: null,
+  });
+  const pickRun = useRef(0);
+
+  const pickOwn = (item: OwnInstrumentHistory) => {
+    pickRun.current += 1;
+    setSerial(item.serial_number);
+    setYear(item.manufacture_year ? String(item.manufacture_year) : "");
+    setSiType({ id: item.si_type.id, label: item.si_type.label, needs_review: item.si_type.needs_review });
+    setPrevious({
+      key: `own-${item.instrument_id}`,
+      line: item.last ? `Прошлая поверка у нас — ${ruDate(item.last.verified_at)}` : "Прибор уже заведён у нас",
+      details: [item.owner, item.site].filter(Boolean),
+    });
+    setError("");
+  };
+
+  const pickFgis = async (item: FgisVerification) => {
+    const current = ++pickRun.current;
+    const modification = item.modification || item.mit_notation;
+    setSerial(item.mi_number);
+    setError("");
+    setPrevious({
+      key: item.vri_id,
+      line: `Прошлая поверка — ${ruDate(item.verification_date)}, ${item.org_title}`,
+      details: item.valid_date ? [`действует до ${ruDate(item.valid_date)}`] : [],
+    });
+    if (item.si_type) {
+      setSiType({ id: item.si_type.id, label: item.si_type.label, needs_review: item.si_type.needs_review });
+    } else {
+      // Своего типа с такой модификацией нет: показываем поиск по номеру Госреестра —
+      // там и наши типы с этим номером, и карточка из реестра.
+      setSiType(null);
+      setTypeSeed((seed) => ({ key: seed.key + 1, query: item.mit_number, draft: null }));
+    }
+    // Год выпуска, владелец и методика есть только в карточке поверки.
+    try {
+      const card = await fetchFgisVerification(item.vri_id);
+      if (current !== pickRun.current) return;
+      if (card.manufacture_year) setYear(String(card.manufacture_year));
+      setPrevious((prev) =>
+        prev && prev.key === item.vri_id
+          ? {
+              ...prev,
+              details: [
+                ...prev.details,
+                card.method && `методика ${card.method}`,
+                card.owner && `владелец: ${card.owner}`,
+                card.additional_info,
+              ].filter(Boolean) as string[],
+            }
+          : prev,
+      );
+      if (!item.si_type && item.candidates.length === 0 && card.mit_uuid) {
+        // У нас нет ни одного типа по этому номеру — сразу открываем заведение из Госреестра.
+        setTypeSeed((seed) => ({
+          key: seed.key + 1,
+          query: item.mit_number,
+          draft: { name: modification, registry_number: item.mit_number, fif_uuid: card.mit_uuid, query: modification },
+        }));
+      }
+    } catch {
+      // Карточка не открылась — год выпуска поверитель впишет сам.
+    }
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!siType) {
-      setError("Сначала выберите тип счётчика");
-      return;
-    }
     if (!serial.trim()) {
       setError("Впишите заводской номер");
+      return;
+    }
+    if (!siType) {
+      setError("Выберите тип счётчика");
       return;
     }
     setBusy(true);
@@ -246,36 +331,59 @@ function AddInstrumentForm({
   return (
     <form className="card" onSubmit={submit}>
       <h3>Новый счётчик</h3>
-      <SiTypePicker value={siType} onChange={setSiType} inputId="fw-si-type" onDraftChange={setDrafting} />
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="fw-serial">Заводской номер<span className="req">*</span></label>
+          <input
+            id="fw-serial"
+            className="big-input"
+            value={serial}
+            onChange={(event) => {
+              setSerial(event.target.value);
+              setPrevious(null);
+            }}
+            placeholder="с корпуса счётчика — найду прошлые поверки"
+            autoComplete="off"
+            autoFocus
+          />
+        </div>
+        <div className="field" style={{ maxWidth: 160 }}>
+          <label htmlFor="fw-year">Год выпуска</label>
+          <input
+            id="fw-year"
+            className="big-input"
+            inputMode="numeric"
+            value={year}
+            onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))}
+            placeholder="если есть"
+          />
+        </div>
+      </div>
 
-      {siType && (
-        <>
-          <div className="field-row">
-            <div className="field">
-              <label htmlFor="fw-serial">Заводской номер<span className="req">*</span></label>
-              <input
-                id="fw-serial"
-                className="big-input"
-                value={serial}
-                onChange={(event) => setSerial(event.target.value)}
-                placeholder="с корпуса счётчика"
-                autoFocus
-              />
-            </div>
-            <div className="field" style={{ maxWidth: 160 }}>
-              <label htmlFor="fw-year">Год выпуска</label>
-              <input
-                id="fw-year"
-                className="big-input"
-                inputMode="numeric"
-                value={year}
-                onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))}
-                placeholder="если есть"
-              />
-            </div>
-          </div>
-        </>
+      {previous && (
+        <p className="hint ok">
+          Подставлено из прошлой поверки. {previous.line}
+          {previous.details.length > 0 && <span className="sub" style={{ display: "block" }}>{previous.details.join(" · ")}</span>}
+        </p>
       )}
+      {!drafting && (
+        <InstrumentHistory
+          serial={serial}
+          pickedKey={previous?.key ?? null}
+          onPickOwn={pickOwn}
+          onPickFgis={(item) => void pickFgis(item)}
+        />
+      )}
+
+      <SiTypePicker
+        key={typeSeed.key}
+        value={siType}
+        onChange={setSiType}
+        initialQuery={typeSeed.query}
+        initialDraft={typeSeed.draft}
+        inputId="fw-si-type"
+        onDraftChange={setDrafting}
+      />
 
       {!drafting && (
         <div className="actions">

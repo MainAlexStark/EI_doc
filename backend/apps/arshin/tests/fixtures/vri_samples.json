@@ -1,0 +1,47 @@
+{
+  "_note": "Ответы MCP-сервера РСТ (RSTMetrology_MCP), сняты 10.11.2026: search_verifications {mi_number: С2674623, year} и get_verification {vri_id: 1-529062899, include_raw: true}. direct_* — те же данные в формате прямого API ФГИС (даты ДД.ММ.ГГГГ).",
+  "year_2026": {
+    "count": 1, "candidates": 1, "start": 0, "returned": 1, "period": "2026 год",
+    "items": [{
+      "vri_id": "1-529062899", "org_title": "ООО \"ЕДИНИЦА ИЗМЕРЕНИЯ\"", "mit_number": "24319-05",
+      "mit_title": "Счетчики холодной и горячей воды крыльчатые", "mit_notation": "СВ-15",
+      "mi_modification": "СВ-15Г", "mi_number": "С2674623", "verification_date": "2026-05-27",
+      "valid_date": "2032-05-26", "result_docnum": "С-ДЮЕ/27-05-2026/529062899", "applicability": true
+    }]
+  },
+  "year_empty": {"count": 0, "candidates": 0, "start": 0, "returned": 0, "period": "2025 год", "items": []},
+  "card": {
+    "card_url": "https://fgis.gost.ru/fundmetrology/cm/results/1-529062899",
+    "raw": {
+      "miInfo": {"singleMI": {
+        "mitypeNumber": "24319-05",
+        "mitypeURL": "https://fgis.gost.ru/fundmetrology/cm/mits/97cf5791-eb65-5e2c-a496-6b237f7f1d97",
+        "mitypeType": "СВ-15", "mitypeTitle": "Счетчики холодной и горячей воды крыльчатые",
+        "manufactureNum": "С2674623", "modification": "СВ-15Г"
+      }},
+      "vriInfo": {
+        "organization": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"ЕДИНИЦА ИЗМЕРЕНИЯ\"(ООО \"ЕДИНИЦА ИЗМЕРЕНИЯ\")",
+        "signCipher": "ДЮЕ", "miOwner": "г.Киров, ул.Кольцова 22к1-71", "vrfDate": "27.05.2026",
+        "validDate": "26.05.2032", "vriType": "2", "docTitle": "МИ 1592-2015",
+        "applicable": {"certNum": "С-ДЮЕ/27-05-2026/529062899", "signPass": false, "signMi": true}
+      },
+      "means": {"mieta": [{
+        "regNumber": "72850.18.3Р.00701885", "mietaURL": "https://fgis.gost.ru/fundmetrology/cm/etalons/701885",
+        "mitypeNumber": "72850-18", "mitypeTitle": "Установки поверочные переносные", "notation": "УПСЖ 5П",
+        "modification": "нет модификации", "manufactureNum": "2350", "manufactureYear": 2021,
+        "rankCode": "3Р", "rankTitle": "Эталон 3-го разряда", "schemaTitle": "приказ №2356 от 26.09.2022"
+      }]},
+      "info": {"briefIndicator": false, "additional_info": "Поверен в диапазоне расхода (0,03-0.935) м3/ч"},
+      "publication": {"vriVerDateStart": "2026-05-28T10:35:01"}
+    },
+    "summary": {"vri_id": "1-529062899", "mit_number": "24319-05", "modification": "СВ-15Г", "applicable": true},
+    "valid_today": true
+  },
+  "direct_year": {"result": {"count": 1, "start": 0, "rows": 20, "items": [{
+    "vri_id": "1-529062899", "org_title": "ООО \"ЕДИНИЦА ИЗМЕРЕНИЯ\"", "mit_number": "24319-05",
+    "mit_title": "Счетчики холодной и горячей воды крыльчатые", "mit_notation": "СВ-15",
+    "mi_modification": "СВ-15Г", "mi_number": "С2674623", "verification_date": "27.05.2026",
+    "valid_date": "26.05.2032", "result_docnum": "С-ДЮЕ/27-05-2026/529062899", "applicability": true
+  }]}},
+  "direct_empty": {"result": {"count": 0, "start": 0, "rows": 20, "items": []}}
+}

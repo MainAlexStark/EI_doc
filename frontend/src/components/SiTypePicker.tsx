@@ -17,17 +17,20 @@ export default function SiTypePicker({
   value,
   onChange,
   initialQuery = "",
+  initialDraft = null,
   inputId = "si-type",
   onDraftChange,
 }: {
   value: PickedType | null;
   onChange: (picked: PickedType | null) => void;
   initialQuery?: string;
+  /** Сразу открыть заведение типа с этими данными (тип известен из прошлой поверки, а у нас его нет). */
+  initialDraft?: SiTypeDraft | null;
   inputId?: string;
   /** Идёт заведение нового типа — внешняя форма прячет свои кнопки, чтобы не путать. */
   onDraftChange?: (drafting: boolean) => void;
 }) {
-  const [draft, setDraft] = useState<SiTypeDraft | null>(null);
+  const [draft, setDraft] = useState<SiTypeDraft | null>(initialDraft);
 
   useEffect(() => {
     onDraftChange?.(draft !== null);

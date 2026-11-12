@@ -1176,3 +1176,91 @@ export async function openFifDocument(doc: FifDocument): Promise<void> {
     throw exc;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Прошлые поверки СИ по заводскому номеру (apps/verification/api_history.py)
+// ---------------------------------------------------------------------------
+export type TypeBrief = { id: number; name: string; label: string; needs_review: boolean };
+
+/** Экземпляр, который мы уже поверяли. */
+export type OwnInstrumentHistory = {
+  instrument_id: number;
+  serial_number: string;
+  manufacture_year: number | null;
+  si_type: TypeBrief;
+  registry_number: string;
+  owner: string;
+  site: string;
+  verifications_count: number;
+  last: {
+    verification_id: number;
+    verified_at: string | null;
+    next_verification_date: string | null;
+    suitable: boolean;
+    status: string;
+    verifier: string;
+    protocol_number: string;
+  } | null;
+};
+
+/** Запись о поверке из ФГИС «Аршин» и наши типы по её номеру Госреестра. */
+export type FgisVerification = {
+  vri_id: string;
+  org_title: string;
+  mit_number: string;
+  mit_title: string;
+  mit_notation: string;
+  modification: string;
+  mi_number: string;
+  verification_date: string | null;
+  valid_date: string | null;
+  docnum: string;
+  applicable: boolean | null;
+  /** Наш тип, если совпали номер Госреестра и модификация. */
+  si_type: TypeBrief | null;
+  candidates: TypeBrief[];
+};
+
+export type FgisHistory = {
+  ok: boolean;
+  error: string;
+  items: FgisVerification[];
+  partial: boolean;
+  years: number[];
+};
+
+export type FgisVerificationCard = {
+  vri_id: string;
+  mit_number: string;
+  mit_title: string;
+  mit_notation: string;
+  mit_uuid: string;
+  modification: string;
+  mi_number: string;
+  manufacture_year: number | null;
+  organization: string;
+  owner: string;
+  verification_date: string | null;
+  valid_date: string | null;
+  method: string;
+  applicable: boolean | null;
+  docnum: string;
+  additional_info: string;
+  card_url: string;
+  si_type: TypeBrief | null;
+  candidates: TypeBrief[];
+};
+
+/** Своя база отвечает сразу, ФГИС — секунд пять-десять, поэтому спрашиваем их по отдельности. */
+export const fetchOwnHistory = (serial: string) =>
+  json<{ serial: string; own: OwnInstrumentHistory[] }>(
+    `/api/instruments/history/?source=own&serial=${encodeURIComponent(serial)}`,
+  );
+
+export const fetchFgisHistory = (serial: string) =>
+  json<{ serial: string; fgis: FgisHistory }>(
+    `/api/instruments/history/?source=fgis&serial=${encodeURIComponent(serial)}`,
+  );
+
+export const fetchFgisVerification = (vriId: string) =>
+  json<FgisVerificationCard>(`/api/instruments/history/fgis/${encodeURIComponent(vriId)}/`);

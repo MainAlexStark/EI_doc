@@ -64,6 +64,7 @@ from apps.verification.api_journal import (
     SignProtocolsView,
 )
 from apps.verification.api_field import WorkOrderVerificationsView
+from apps.verification.api_history import FgisVerificationCardView, InstrumentHistoryView
 from apps.verification.api_templates import (
     TemplateApproveView,
     TemplateDetailView,
@@ -129,6 +130,12 @@ urlpatterns = [
     path(
         "api/telegram/webhook/<str:secret>/",
         TelegramWebhookView.as_view(), name="telegram_webhook",
+    ),
+    path("api/instruments/history/", InstrumentHistoryView.as_view(), name="instrument_history"),
+    path(
+        "api/instruments/history/fgis/<str:vri_id>/",
+        FgisVerificationCardView.as_view(),
+        name="fgis_verification_card",
     ),
     path("api/journal/", JournalView.as_view(), name="journal"),
     path("api/journal/export/", JournalExportView.as_view(), name="journal_export"),

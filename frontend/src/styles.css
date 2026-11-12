@@ -1212,6 +1212,7 @@ a.contact-chip:hover { background: var(--accent-soft); color: var(--accent-ink);
 .pick-item:hover:not(:disabled) { background: var(--accent-softer); }
 .pick-item .pill { margin-top: 4px; }
 .pick-item.new b { color: var(--accent); }
+.pick-item.picked-row { background: var(--accent-softer); }
 .pick-item.manual { color: var(--accent); }
 
 /* скан бланка */

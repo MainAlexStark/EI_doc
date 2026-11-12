@@ -216,6 +216,9 @@ FIF_DOCUMENTS_AUTO_DOWNLOAD = env.bool("FIF_DOCUMENTS_AUTO_DOWNLOAD", default=Tr
 # Как ходить в Госреестр (поиск типов, карточка): auto — через MCP-сервер РСТ (RST_MCP_URL), если задан,
 # при его отказе — напрямую в ФГИС; mcp / direct — только этот путь. ФГИС отвечает только российским адресам.
 FIF_TRANSPORT = env("FIF_TRANSPORT", default="auto")
+# Прошлые поверки по заводскому номеру (apps.arshin.vri): за сколько прошлых лет искать во ФГИС.
+# Каждый год — отдельный запрос: за несколько лет сразу ФГИС не успевает ответить.
+FIF_VRI_YEARS_BACK = env.int("FIF_VRI_YEARS_BACK", default=7)
 # Ключи из старого config.yaml. Что именно они открывают — надо выяснить
 # перед реализацией выгрузки сведений о поверке.
 ARSHIN_PUBLIC_KEY = env("ARSHIN_PUBLIC_KEY", default="")
