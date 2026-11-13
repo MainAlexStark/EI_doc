@@ -34,6 +34,7 @@ import {
   type VerificationTemplate,
 } from "../api";
 import { db, type CachedVerification } from "./db";
+import { fitsYear } from "../registryYear";
 
 function newUuid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -334,35 +335,38 @@ export type SiTypeSearch = {
   results: SiTypeSuggestion[];
   offline: boolean;
   fifUnavailable: boolean;
+  /** Сколько вариантов скрыто: не подходят по году выпуска прибора. */
+  hiddenByYear: number;
   /** Почему реестр не ответил (или сервер EI_doc ответил ошибкой) — для индикатора «РСТ». */
   error?: string;
 };
 
 /** Поиск типа: при связи — свой справочник + реестр ФИФ, без связи — только локальная копия. */
-export async function searchSiTypes(query: string): Promise<SiTypeSearch> {
+export async function searchSiTypes(query: string, year: number | null = null): Promise<SiTypeSearch> {
   const q = query.trim().toLowerCase();
-  if (q.length < 2) return { results: [], offline: false, fifUnavailable: false };
+  if (q.length < 2) return { results: [], offline: false, fifUnavailable: false, hiddenByYear: 0 };
   try {
-    const response = await suggestSiTypes(query, { throwOnError: true });
+    const response = await suggestSiTypes(query, { throwOnError: true, year });
     return {
       results: response.results,
       offline: false,
       fifUnavailable: Boolean(response.warning),
+      hiddenByYear: response.hidden_by_year ?? 0,
       error: response.warning,
     };
   } catch (exc) {
-    const local = (await cachedSiTypes())
-      .filter((item) =>
-        [item.name, item.registry_number, item.manufacturer].some((field) => field.toLowerCase().includes(q)),
-      )
-      .slice(0, 20)
-      .map(toSuggestion);
+    const matched = (await cachedSiTypes()).filter((item) =>
+      [item.name, item.registry_number, item.manufacturer].some((field) => field.toLowerCase().includes(q)),
+    );
+    const fitting = fitsYear(matched, year);
+    const hiddenByYear = matched.length - fitting.length;
+    const local = fitting.slice(0, 20).map(toSuggestion);
     // Сервер ответил ошибкой — это не «нет связи», а сбой поиска: так и говорим.
     if (!isNetworkFailure(exc)) {
       const message = exc instanceof Error ? exc.message : "ошибка сервера";
-      return { results: local, offline: false, fifUnavailable: true, error: `Поиск не сработал: ${message}` };
+      return { results: local, offline: false, fifUnavailable: true, hiddenByYear, error: `Поиск не сработал: ${message}` };
     }
-    return { results: local, offline: true, fifUnavailable: true };
+    return { results: local, offline: true, fifUnavailable: true, hiddenByYear };
   }
 }
 

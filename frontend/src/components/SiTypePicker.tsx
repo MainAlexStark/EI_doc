@@ -20,6 +20,7 @@ export default function SiTypePicker({
   initialDraft = null,
   inputId = "si-type",
   onDraftChange,
+  manufactureYear,
 }: {
   value: PickedType | null;
   onChange: (picked: PickedType | null) => void;
@@ -29,6 +30,8 @@ export default function SiTypePicker({
   inputId?: string;
   /** Идёт заведение нового типа — внешняя форма прячет свои кнопки, чтобы не путать. */
   onDraftChange?: (drafting: boolean) => void;
+  /** Год выпуска прибора — в подсказках останутся записи реестра, действовавшие в тот год. */
+  manufactureYear?: string | number | null;
 }) {
   const [draft, setDraft] = useState<SiTypeDraft | null>(initialDraft);
 
@@ -79,6 +82,7 @@ export default function SiTypePicker({
       label="Тип счётчика"
       inputId={inputId}
       initialQuery={initialQuery}
+      year={manufactureYear}
       onPickLocal={(item) => onChange({ id: item.si_type_id!, label: item.label, needs_review: item.needs_review })}
       onPickFif={setDraft}
     />

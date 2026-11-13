@@ -602,6 +602,8 @@ export type SiTypeSuggestion = {
 
 export type SiTypeSuggestResponse = {
   results: SiTypeSuggestion[];
+  /** Сколько вариантов не показано, потому что не подходят по году выпуска. */
+  hidden_by_year?: number;
   warning?: string;
   fif?: { ok: boolean; error: string; routes: string[] };
 };
@@ -623,11 +625,12 @@ export const fetchFifStatus = (probe = false) =>
 /** Подсказка типов СИ — авторизованный эндпоинт, поэтому через json(), не суём в public-хелперы. */
 export async function suggestSiTypes(
   query: string,
-  options: { throwOnError?: boolean } = {},
+  options: { throwOnError?: boolean; year?: number | null } = {},
 ): Promise<SiTypeSuggestResponse> {
   if (query.trim().length < 2) return { results: [] };
   try {
-    return await json<SiTypeSuggestResponse>(`/api/catalog/si-types/suggest/?${queryString({ q: query })}`);
+    const params = options.year ? { q: query, year: String(options.year) } : { q: query };
+    return await json<SiTypeSuggestResponse>(`/api/catalog/si-types/suggest/?${queryString(params)}`);
   } catch (exc) {
     if (options.throwOnError) throw exc;
     return { results: [] };

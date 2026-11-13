@@ -382,6 +382,7 @@ function AddInstrumentForm({
         initialQuery={typeSeed.query}
         initialDraft={typeSeed.draft}
         inputId="fw-si-type"
+        manufactureYear={year}
         onDraftChange={setDrafting}
       />
 

@@ -174,7 +174,7 @@ export default function ScanReview({
         </div>
 
         <form className="form-stack" onSubmit={submit}>
-          <SiTypePicker value={siType} onChange={setSiType} initialQuery={r.si_type_query ?? ""} inputId="sr-si-type" />
+          <SiTypePicker value={siType} onChange={setSiType} initialQuery={r.si_type_query ?? ""} inputId="sr-si-type" manufactureYear={year} />
           <div className="field-row">
             <div className="field">
               <label htmlFor="sr-serial">Зав. номер</label>

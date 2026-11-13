@@ -16,6 +16,7 @@ from rest_framework.views import APIView
 
 from apps.arshin.fif import FifClient, FifUnavailable, mark_ambiguous
 from apps.catalog.models import MeasurementFamily, PricingSettings, SiType
+from apps.catalog.registry_year import fits_year, parse_year
 
 
 class SiTypeSuggestionSerializer(serializers.Serializer):
@@ -42,6 +43,7 @@ class SiTypeSuggestView(APIView):
         parameters=[
             OpenApiParameter("q", str, description="Номер в Госреестре или часть наименования"),
             OpenApiParameter("limit", int, description="Сколько вариантов вернуть, по умолчанию 20"),
+            OpenApiParameter("year", int, description="Год выпуска прибора — останутся типы, действовавшие в тот год"),
         ],
         responses=SiTypeSuggestionSerializer(many=True),
     )
@@ -50,6 +52,7 @@ class SiTypeSuggestView(APIView):
         limit = min(int(request.query_params.get("limit") or 20), 50)
         if len(query) < 2:
             return Response([], status=status.HTTP_200_OK)
+        year = parse_year(request.query_params.get("year"))
 
         suggestions = self._local(query, limit)
         seen = {(item["registry_number"], item["manufacturer"].lower()) for item in suggestions}
@@ -68,11 +71,15 @@ class SiTypeSuggestView(APIView):
                     seen.add(key)
                     suggestions.append({"source": "fif", "si_type_id": None, "needs_review": False, **item})
 
-        suggestions = self._flag_duplicates(suggestions)
+        # Сначала отсев по году выпуска, потом «такое название у нескольких»: предупреждать о
+        # двойнике, которого в списке уже нет (16078-05 рядом с 16078-13), незачем.
+        fitting = fits_year(suggestions, year)
+        hidden_by_year = len(suggestions) - len(fitting)
+        suggestions = self._flag_duplicates(fitting)
         from apps.arshin import status as fif_status
 
-        payload = {"results": suggestions, "fif": {"ok": warning is None, "error": warning or "",
-                                                   "routes": fif_status.routes()}}
+        payload = {"results": suggestions, "hidden_by_year": hidden_by_year,
+                   "fif": {"ok": warning is None, "error": warning or "", "routes": fif_status.routes()}}
         if warning:
             # Реестр недоступен — это не ошибка операции: тип заводится вручную.
             payload["warning"] = warning
@@ -119,8 +126,7 @@ class SiTypeSuggestView(APIView):
             key = item["name"].strip().lower()
             counts[key] = counts.get(key, 0) + 1
         for item in suggestions:
-            if counts[item["name"].strip().lower()] > 1:
-                item["ambiguous"] = True
+            item["ambiguous"] = counts[item["name"].strip().lower()] > 1
         return suggestions
 
 

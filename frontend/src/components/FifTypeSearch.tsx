@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SiTypeSuggestion } from "../api";
 import { searchSiTypes } from "../offline/sync";
+import { parseYear } from "../registryYear";
 import RstStatus from "./RstStatus";
 import { loadPresets, type SiTypeDraft } from "./SiTypeForm";
 
@@ -11,6 +12,10 @@ import { loadPresets, type SiTypeDraft } from "./SiTypeForm";
  * Тип в EI_doc обязан существовать в реестре: поверитель выбирает строку из подсказок, и
  * форма типа заполняется сама. Завести тип руками (реестр не отвечает, типа там нет) может
  * только метролог — кнопка видна только ему.
+ *
+ * Если известен год выпуска прибора (`year`), остаются только записи реестра, действовавшие
+ * в тот год: для счётчика 2020 года — 16078-13, а не 16078-05 и не 16078-22. Год не указан —
+ * показываем всё.
  */
 export default function FifTypeSearch({
   onPickFif,
@@ -19,6 +24,7 @@ export default function FifTypeSearch({
   inputId = "fif-type-search",
   initialQuery = "",
   autoFocus,
+  year,
 }: {
   onPickFif: (draft: SiTypeDraft) => void;
   onPickLocal?: (item: SiTypeSuggestion) => void;
@@ -26,6 +32,8 @@ export default function FifTypeSearch({
   inputId?: string;
   initialQuery?: string;
   autoFocus?: boolean;
+  /** Год выпуска прибора, как введён в форме; пустой или недописанный — без отбора по году. */
+  year?: string | number | null;
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SiTypeSuggestion[]>([]);
@@ -36,6 +44,11 @@ export default function FifTypeSearch({
   const [canManual, setCanManual] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [failures, setFailures] = useState(0);
+  const [hiddenByYear, setHiddenByYear] = useState(0);
+  // «Показать все» — поверитель сам снял отбор по году (ошибся годом, редкий случай с типом).
+  const [ignoreYear, setIgnoreYear] = useState(false);
+  const madeIn = parseYear(year);
+  const filterYear = ignoreYear ? null : madeIn;
   const debounce = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -53,8 +66,9 @@ export default function FifTypeSearch({
     }
     setSearching(true);
     debounce.current = setTimeout(async () => {
-      const found = await searchSiTypes(query);
+      const found = await searchSiTypes(query, filterYear);
       setResults(found.results);
+      setHiddenByYear(found.hiddenByYear);
       setOffline(found.offline);
       setFifUnavailable(found.fifUnavailable);
       setSearchError(found.error ?? "");
@@ -63,7 +77,9 @@ export default function FifTypeSearch({
       setSearched(true);
     }, 300);
     return () => clearTimeout(debounce.current);
-  }, [query]);
+  }, [query, filterYear]);
+
+  useEffect(() => setIgnoreYear(false), [madeIn]);
 
   const local = results.filter((item) => item.si_type_id !== null);
   const fif = results.filter((item) => item.si_type_id === null);
@@ -96,6 +112,17 @@ export default function FifTypeSearch({
           Госреестр (ФИФ) сейчас не отвечает — показываю только заведённые типы. Попробуйте чуть позже
           {canManual ? " или заведите тип вручную." : "."}
           {searchError && <span className="sub" style={{ display: "block" }}>{searchError}</span>}
+        </p>
+      )}
+
+      {searched && !searching && madeIn && (hiddenByYear > 0 || ignoreYear) && (
+        <p className="hint">
+          {ignoreYear
+            ? "Показаны все типы, без учёта года выпуска. "
+            : `Показаны типы, действовавшие в ${madeIn} году выпуска; не подходят по году: ${hiddenByYear}. `}
+          <button type="button" className="link" onClick={() => setIgnoreYear((value) => !value)}>
+            {ignoreYear ? `Только подходящие для ${madeIn} года` : "Показать все"}
+          </button>
         </p>
       )}
 
