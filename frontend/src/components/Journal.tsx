@@ -26,6 +26,16 @@ function StatusPill({ row }: { row: JournalRow }) {
   return <span className="pill muted">черновик</span>;
 }
 
+/** В таблице статус — просто текст в ячейке, без «таблеток». */
+function StatusText({ row }: { row: JournalRow }) {
+  if (row.needs_review) return <span className="st warn">на сверку</span>;
+  if (row.protocol_status === "signed") return <span className="st">подписан</span>;
+  if (row.protocol_status === "published") return <span className="st">в ФИФ</span>;
+  if (row.protocol_status === "void") return <span className="st bad">аннулирован</span>;
+  if (row.protocol_status === "numbered") return <span className="st muted">номер присвоен</span>;
+  return <span className="st muted">черновик</span>;
+}
+
 export default function Journal() {
   const phone = useMediaQuery(PHONE);
   const [filters, setFilters] = useState<JournalFilters>({ page: 1 });
@@ -134,7 +144,7 @@ export default function Journal() {
         <>
           <div className="m-list">
             {rows.map((row) => (
-              <div className="m-row" key={row.id}>
+              <div className={`m-row ${row.suitable ? "" : "unfit"}`} key={row.id}>
                 <div className="grow">
                   <div className="row" style={{ justifyContent: "space-between" }}>
                     <span className="cell-mono" style={{ fontWeight: 600 }}>{row.protocol_number || "без номера"}</span>
@@ -143,7 +153,7 @@ export default function Journal() {
                   <div className="m-title">{row.si_name} · № {row.serial_number}</div>
                   <div className="m-meta">{[row.owner, row.address].filter(Boolean).join(" · ")}</div>
                   <div className="row wrap" style={{ marginTop: 4 }}>
-                    {row.suitable ? <span className="pill ok">пригодно</span> : <span className="pill bad">непригодно</span>}
+                    {!row.suitable && <span className="pill bad">непригодно</span>}
                     <StatusPill row={row} />
                     <span className="grow" />
                     {row.protocol_formats.map((fmt) => (
@@ -172,47 +182,45 @@ export default function Journal() {
         </>
       )}
 
-      {!phone && <div className="table-wrap">
-        <table className="data-table journal-table" style={{ minWidth: 980 }}>
+      {!phone && <div className="table-wrap sheet-wrap">
+        <table className="sheet journal-sheet">
           <thead>
             <tr>
-              <th>Протокол</th>
-              <th>Средство измерений</th>
-              <th>Владелец и адрес</th>
+              <th className="rn">№</th>
+              <th>Дата поверки</th>
+              <th>№ протокола</th>
+              <th>Тип СИ</th>
+              <th>Рег. № ГРСИ</th>
+              <th>Зав. №</th>
+              <th>Владелец</th>
+              <th>Адрес</th>
               <th>Поверитель</th>
+              <th>Действует до</th>
               <th>Результат</th>
-              <th>Следующая</th>
-              <th className="right">Файлы</th>
+              <th>Статус</th>
+              <th>Прочие сведения</th>
+              <th>Файлы</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                <td>
-                  <div className="cell-main cell-mono">{row.protocol_number || "без номера"}</div>
-                  <div className="sub num">{formatDate(row.verified_at)}</div>
-                </td>
-                <td>
-                  <div className="cell-main">{row.si_name}</div>
-                  <div className="sub">
-                    <span className="cell-mono">{row.si_registry_number}</span> · зав. № <span className="cell-mono">{row.serial_number}</span>
-                  </div>
-                </td>
-                <td style={{ maxWidth: 280 }}>
-                  <div>{row.owner || "—"}</div>
-                  {row.address && <div className="sub">{row.address}</div>}
-                </td>
-                <td>{row.verifier}</td>
-                <td>
-                  <div className="pills" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-                    {row.suitable ? <span className="pill ok">пригодно</span> : <span className="pill bad">непригодно</span>}
-                    <StatusPill row={row} />
-                  </div>
-                </td>
+            {rows.map((row, index) => (
+              <tr key={row.id} className={row.suitable ? "" : "unfit"}>
+                <td className="rn num">{(page - 1) * PAGE_SIZE + index + 1}</td>
+                <td className="num">{formatDate(row.verified_at)}</td>
+                <td className="cell-mono nowrap">{row.protocol_number || <span className="muted">без номера</span>}</td>
+                <td className="wide">{row.si_name}</td>
+                <td className="cell-mono nowrap">{row.si_registry_number}</td>
+                <td className="cell-mono nowrap">{row.serial_number}</td>
+                <td className="wide">{row.owner}</td>
+                <td className="wide">{row.address}</td>
+                <td className="nowrap">{row.verifier}</td>
                 <td className={`num ${row.suitable && isOverdue(row.next_verification_date) ? "due over" : ""}`}>
-                  {row.suitable ? formatDate(row.next_verification_date) : "—"}
+                  {row.suitable ? formatDate(row.next_verification_date) : ""}
                 </td>
-                <td className="actions-cell">
+                <td className="nowrap unfit-cell">{row.suitable ? "" : "непригодно"}</td>
+                <td className="nowrap"><StatusText row={row} /></td>
+                <td className="note">{row.journal_note}</td>
+                <td className="nowrap files">
                   <span className="dl-group">
                     {row.protocol_formats.map((fmt) => (
                       <button
@@ -229,7 +237,6 @@ export default function Journal() {
                         {fmt === "pdf" ? "PDF" : "DOCX"}
                       </button>
                     ))}
-                    {row.protocol_formats.length === 0 && <span className="muted">—</span>}
                   </span>
                 </td>
               </tr>
