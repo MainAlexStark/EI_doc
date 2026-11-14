@@ -14,9 +14,10 @@ const SPRITE_W = SCALES[0].length;
 const SPRITE_H = SCALES.length;
 const PERIOD_X = 28; // шаг узора по горизонтали, клеток
 const PERIOD_Y = 10; // и по вертикали; нечётные ряды сдвинуты на PERIOD_X/2
+const SKIP_PERCENT = 25; // доля пустых клеток узора
 const STEP_MS = 1800; // как часто узор сдвигается на клетку
 const SPREAD_FRAMES = 8; // разброс начала перезаписи — волна, а не щелчок
-const EDGE_FADE = 0.15; // доля экрана у каждого края, где весы гаснут
+const EDGE_FADE = 0.07; // доля экрана у каждого края, где весы гаснут
 const CURSOR_R = 190; // px — радиус пятна (с мягким спадом)
 const CURSOR_FOLLOW = 0.12; // инерция пятна: доля пути до курсора за кадр
 const LEVELS = 12; // ступени яркости/затухания для кэша цветов
@@ -28,13 +29,27 @@ const GLITCH_RGB = "110, 170, 255";
 const mod = (a: number, n: number) => ((a % n) + n) % n;
 const smooth = (t: number) => t * t * (3 - 2 * t);
 
+// Детерминированный хэш клетки узора — у каждой фигурки свой сдвиг внутри
+// клетки и свой шанс пропасть, и это не меняется, пока узор едет.
+function tileHash(a: number, b: number): number {
+  let h = Math.imul(a, 374761393) ^ Math.imul(b, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
 function patternAt(col: number, row: number, tx: number, ty: number): string {
   const r = row + ty; // узор едет вверх
   const tileRow = Math.floor(r / PERIOD_Y);
   const c = col - tx + (mod(tileRow, 2) ? PERIOD_X / 2 : 0); // и вправо
-  const y = mod(r, PERIOD_Y);
-  const x = mod(c, PERIOD_X);
-  if (y >= SPRITE_H || x >= SPRITE_W) return " ";
+  const tileCol = Math.floor(c / PERIOD_X);
+  const h = tileHash(tileRow, tileCol);
+  if (h % 100 < SKIP_PERCENT) return " "; // часть клеток пустые — меньше «решётки»
+  // фигурка смещена внутри своей клетки — шахматка перестаёт быть линейкой
+  const ox = (h >>> 8) % (PERIOD_X - SPRITE_W + 1);
+  const oy = (h >>> 16) % (PERIOD_Y - SPRITE_H + 1);
+  const y = mod(r, PERIOD_Y) - oy;
+  const x = mod(c, PERIOD_X) - ox;
+  if (y < 0 || x < 0 || y >= SPRITE_H || x >= SPRITE_W) return " ";
   return SCALES[y][x];
 }
 

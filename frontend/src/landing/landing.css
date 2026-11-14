@@ -96,17 +96,6 @@
 @keyframes blink { 50% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .l-hero h1::after { animation: none; } }
 
-/* Витрина приборов — моно-«таблички» */
-.l-devices { margin-top: 26px; }
-.l-devices-head { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--ink); }
-.l-devices ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-.l-devices li {
-  padding: 5px 9px; font-family: var(--mono); font-size: 12px; color: var(--ink-2);
-  border: 1px solid var(--border); background: rgba(8, 14, 29, 0.85); border-radius: 2px;
-  transition: border-color 0.2s, color 0.2s;
-}
-.l-devices li:hover { border-color: var(--l-blue); color: var(--ink); }
-.l-devices li.more { border-style: dashed; color: var(--l-blue-2); }
 .l-lead { margin: 20px 0 0; max-width: 520px; font-size: 17px; line-height: 1.55; color: var(--ink-2); }
 .l-bullets { list-style: none; margin: 24px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 15px; color: var(--ink-2); }
 .l-bullets li::before { content: "[+]"; margin-right: 10px; font-family: var(--mono); font-size: 13px; color: var(--l-blue); }
@@ -169,7 +158,6 @@
   .l-hero { position: static; padding-top: 0; text-align: center; }
   .l-lead { margin-left: auto; margin-right: auto; }
   .l-bullets { display: none; }
-  .l-devices ul { justify-content: center; }
 }
 @media (max-width: 640px) {
   .l-first { padding: 3vh 10px 0; }
