@@ -68,6 +68,7 @@ from apps.verification.api_journal import (
 from apps.verification.api_field import WorkOrderVerificationsView
 from apps.verification.api_orders import (
     ClientLookupView,
+    ClientSuggestView,
     OrderActView,
     OrderCreateView,
     OrderDetailView,
@@ -225,6 +226,7 @@ urlpatterns = [
         WorkOrderVerificationsView.as_view(), name="work_order_verifications",
     ),
     # Заказы — вкладка «Поверки» (приборы привезли сами)
+    path("api/clients/suggest/", ClientSuggestView.as_view(), name="client_suggest"),
     path("api/clients/lookup/", ClientLookupView.as_view(), name="client_lookup"),
     path("api/orders/", OrderCreateView.as_view(), name="order_create"),
     path("api/orders/<int:pk>/", OrderDetailView.as_view(), name="order_detail"),

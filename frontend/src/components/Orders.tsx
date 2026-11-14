@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
   createOrder,
   downloadOrderAct,
   fetchProcurements,
   issueOrder,
   lookupParty,
+  suggestParties,
   updateOrder,
   type OrderPayload,
+  type PartySuggestion,
   type ProcurementRow,
   type WorkOrder,
 } from "../api";
@@ -18,7 +20,10 @@ import { Alert } from "../ui/controls";
  *
  * Заказ — тот же наряд, что и выезд, только без адреса и карты (kind = "lab"),
  * поэтому приборы в нём заводятся и поверяются тем же экраном. Здесь — то,
- * чего у выезда нет: заказчик по ИНН, кто сдал, закупка, акты приёма и выдачи. */
+ * чего у выезда нет: заказчик (поиск по названию или ИНН), кто сдал, закупка, акты приёма и выдачи. */
+
+const partyStatus = (status: string) =>
+  ({ LIQUIDATING: "ликвидируется", LIQUIDATED: "ликвидирована", BANKRUPT: "банкрот", REORGANIZING: "реорганизуется" } as Record<string, string>)[status] ?? status.toLowerCase();
 
 const when = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long" }) : "";
@@ -164,16 +169,98 @@ export function OrderModal({
   const [note, setNote] = useState(order?.note ?? "");
   const [procurement, setProcurement] = useState<number | "">(order?.procurement_id ?? "");
   const [procurements, setProcurements] = useState<ProcurementRow[]>([]);
-  const [lookup, setLookup] = useState<"" | "busy" | "found" | "own" | "none">("");
+  const [lookup, setLookup] = useState<"" | "busy" | "found" | "own" | "none" | "picked">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const last = useRef(order?.client_inn ?? "");
+  // Подсказки по названию: ищем, только когда человек сам печатает в поле.
+  const [typed, setTyped] = useState(false);
+  const [options, setOptions] = useState<PartySuggestion[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showList, setShowList] = useState(false);
+  const [active, setActive] = useState(-1);
+  const picked = useRef<PartySuggestion | null>(null);
 
   useEffect(() => {
     fetchProcurements({ state: "open" }).then(setProcurements).catch(() => undefined);
   }, []);
 
-  // ИНН набран целиком — подтягиваем организацию: сначала из своей базы, потом из DaData.
+  // Примерное название (или начало ИНН) → список организаций: своя база, потом DaData.
+  useEffect(() => {
+    const query = name.trim();
+    if (!typed || query.length < 2) {
+      setOptions([]);
+      setSearching(false);
+      return;
+    }
+    const abort = new AbortController();
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      suggestParties(query, abort.signal)
+        .then((found) => {
+          setOptions(found);
+          setActive(found.length ? 0 : -1);
+          setShowList(true);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (!abort.signal.aborted) setSearching(false);
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      abort.abort();
+    };
+  }, [name, typed]);
+
+  const pick = (item: PartySuggestion) => {
+    picked.current = item;
+    last.current = item.inn; // чтобы поиск по ИНН не перетёр выбранное
+    setTyped(false);
+    setShowList(false);
+    setOptions([]);
+    setName(item.name);
+    setInn(item.inn);
+    setKpp(item.kpp);
+    setAddress(item.address);
+    if (item.phone && !phone) setPhone(item.phone);
+    setLookup(item.source === "own" ? "own" : "picked");
+  };
+
+  const typeName = (value: string) => {
+    setName(value);
+    setTyped(true);
+    // Начали менять выбранную организацию — её реквизиты больше не про неё.
+    const prev = picked.current;
+    if (prev && value.trim() !== prev.name) {
+      picked.current = null;
+      setInn((v) => (v === prev.inn ? "" : v));
+      setKpp((v) => (v === prev.kpp ? "" : v));
+      setAddress((v) => (v === prev.address ? "" : v));
+      last.current = "";
+      setLookup("");
+    }
+  };
+
+  const onNameKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!showList || options.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActive((i) => (i + 1) % options.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive((i) => (i <= 0 ? options.length - 1 : i - 1));
+    } else if (event.key === "Enter" && active >= 0) {
+      event.preventDefault();
+      pick(options[active]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setShowList(false);
+    }
+  };
+
+  // ИНН набран целиком вручную — подтягиваем организацию: сначала из своей базы, потом из DaData.
   useEffect(() => {
     const digits = inn.replace(/\D/g, "");
     if ((digits.length !== 10 && digits.length !== 12) || digits === last.current) return;
@@ -215,12 +302,14 @@ export function OrderModal({
   };
 
   const hint = {
-    "": "Наберите ИНН — название и адрес подставятся сами",
-    busy: "Ищу организацию…",
+    "": "Начните вводить название или ИНН — выберите организацию из списка",
+    busy: "Ищу организацию по ИНН…",
     found: "Нашёл по ИНН — проверьте и при необходимости поправьте",
+    picked: "Реквизиты подставлены — проверьте и при необходимости поправьте",
     own: "Заказчик уже сдавал приборы — данные из нашей базы",
     none: "По ИНН ничего не нашёл — впишите название и адрес вручную",
   }[lookup];
+  const nothingFound = typed && !searching && showList && options.length === 0 && name.trim().length >= 2;
 
   return (
     <Modal
@@ -244,22 +333,80 @@ export function OrderModal({
           void save();
         }}
       >
-        <div className="field">
-          <label htmlFor="order-inn">ИНН заказчика</label>
+        <div className="field suggest-field">
+          <label htmlFor="order-name">Заказчик</label>
           <input
-            id="order-inn"
-            value={inn}
-            onChange={(event) => setInn(event.target.value.replace(/[^\d]/g, "").slice(0, 12))}
-            inputMode="numeric"
+            id="order-name"
+            value={name}
+            onChange={(event) => typeName(event.target.value)}
+            onKeyDown={onNameKey}
+            onFocus={() => setShowList(options.length > 0)}
+            onBlur={() => window.setTimeout(() => setShowList(false), 150)}
             autoComplete="off"
             autoFocus={!order}
-            placeholder="10 цифр — организация, 12 — ИП"
+            placeholder="Название или ИНН — например, Водоканал"
+            role="combobox"
+            aria-expanded={showList}
+            aria-controls="order-name-list"
           />
-          <div className={`hint ${lookup === "found" || lookup === "own" ? "ok" : ""}`}>{hint}</div>
+          {showList && options.length > 0 && (
+            <ul className="suggestions" id="order-name-list" role="listbox">
+              {options.map((item, index) => (
+                <li
+                  key={`${item.source}-${item.inn || item.client_id || item.name}`}
+                  role="option"
+                  aria-selected={index === active}
+                  className={index === active ? "active" : ""}
+                  onMouseEnter={() => setActive(index)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    pick(item);
+                  }}
+                  style={{ flexDirection: "column", gap: 2 }}
+                >
+                  <span>
+                    {item.name}
+                    {item.source === "own" && <span className="sub"> · уже сдавал</span>}
+                    {item.status && item.status !== "ACTIVE" && (
+                      <span className="sub"> · {partyStatus(item.status)}</span>
+                    )}
+                  </span>
+                  <span className="sub" style={{ whiteSpace: "normal", fontSize: 12, opacity: 0.8 }}>
+                    {[item.inn && `ИНН ${item.inn}`, item.address].filter(Boolean).join(" · ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className={`hint ${lookup === "found" || lookup === "own" || lookup === "picked" ? "ok" : ""}`}>
+            {searching ? "Ищу организации…" : nothingFound ? "Ничего не нашёл — впишите название и ИНН вручную" : hint}
+          </div>
         </div>
-        <div className="field">
-          <label htmlFor="order-name">Заказчик</label>
-          <input id="order-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="ООО «Тепловые сети»" />
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="order-inn">ИНН</label>
+            <input
+              id="order-inn"
+              value={inn}
+              onChange={(event) => {
+                picked.current = null;
+                setInn(event.target.value.replace(/[^\d]/g, "").slice(0, 12));
+              }}
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="подставится из списка"
+            />
+          </div>
+          <div className="field" style={{ flex: "0 0 140px" }}>
+            <label htmlFor="order-kpp">КПП</label>
+            <input
+              id="order-kpp"
+              value={kpp}
+              onChange={(event) => setKpp(event.target.value.replace(/[^\d]/g, "").slice(0, 9))}
+              inputMode="numeric"
+              autoComplete="off"
+            />
+          </div>
         </div>
         <div className="field">
           <label htmlFor="order-address">Адрес <span className="opt">— юридический, пойдёт в журнал</span></label>

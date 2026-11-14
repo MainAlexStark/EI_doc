@@ -5,6 +5,7 @@
 выдачи. Адрес объекта у заказа — юридический адрес заказчика: в журнал он
 попадает как адрес владельца.
 
+    GET   /api/clients/suggest/?q=            организации по примерному названию / началу ИНН
     GET   /api/clients/lookup/?inn=           организация по ИНН (своя база → DaData)
     POST  /api/orders/                        принять приборы: новый заказ
     PATCH /api/orders/{id}/                   контакт, примечание, закупка, заказчик
@@ -58,6 +59,12 @@ def _order(request, pk: int) -> WorkOrder:
         if employee is None or order.assigned_employee_id != employee.pk:
             raise NotFound("Заказ не найден")
     return order
+
+
+class ClientSuggestView(APIView):
+    def get(self, request):
+        query = request.query_params.get("q", "")
+        return Response({"results": [item.as_dict() for item in party.suggest(query)]})
 
 
 class ClientLookupView(APIView):

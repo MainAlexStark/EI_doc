@@ -82,6 +82,28 @@ class OrderTests(TestCase):
             found = self.api.get("/api/clients/lookup/", {"inn": "7707083893"}).data
         assert found["source"] == "dadata" and found["name"] == "ООО «Ромашка»" and found["address"].startswith("г Москва")
 
+    def test_suggest_by_name_own_then_dadata(self):
+        assert self.api.get("/api/clients/suggest/", {"q": "в"}).data["results"] == []
+        self.create()
+        Client.objects.create(name="Иванов И. И.", kind="person")  # частник с выезда — не заказчик
+        own = self.api.get("/api/clients/suggest/", {"q": "Водоканал"}).data["results"]
+        assert [p["inn"] for p in own] == ["4345000249"] and own[0]["source"] == "own" and own[0]["client_id"]
+        assert self.api.get("/api/clients/suggest/", {"q": "4345"}).data["results"][0]["inn"] == "4345000249"
+        assert self.api.get("/api/clients/suggest/", {"q": "Иванов"}).data["results"] == []
+        reply = mock.Mock(**{"json.return_value": {"suggestions": [
+            {"value": "МУП Водоканал", "data": {"inn": "4345000249", "ogrn": "1024301340000",
+             "name": {"short_with_opf": "МУП «Водоканал»"}, "address": {"value": "г Киров"}, "state": {"status": "ACTIVE"}}},
+            {"value": "ООО Водоканал-Сервис", "data": {"inn": "4345111111", "kpp": "434501001",
+             "name": {"short_with_opf": "ООО «Водоканал-Сервис»"}, "address": {"value": "г Киров, ул Ленина, д 1"},
+             "state": {"status": "LIQUIDATED"}}},
+        ]}, "raise_for_status.return_value": None})
+        with override_settings(DADATA_API_KEY="k"), mock.patch("apps.verification.party.requests.post", return_value=reply) as post:
+            found = self.api.get("/api/clients/suggest/", {"q": "Водоканал"}).data["results"]
+        assert post.call_args.kwargs["json"]["locations_boost"] == [{"kladr_id": "43"}]
+        assert [p["inn"] for p in found] == ["4345000249", "4345111111"]  # своя запись не дублируется
+        assert found[0]["source"] == "own" and found[0]["ogrn"] == "1024301340000"
+        assert found[1]["source"] == "dadata" and found[1]["status"] == "LIQUIDATED"
+
     def test_issue_and_procurement_progress(self):
         customer = Client.objects.create(name="МУП «Водоканал»", inn="4345000249", kind="org")
         procurement = Procurement.objects.create(title="Поверка манометров", number="0340", customer=customer)

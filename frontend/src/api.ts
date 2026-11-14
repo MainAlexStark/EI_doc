@@ -1634,6 +1634,15 @@ export type PartyLookup =
 
 export const lookupParty = (inn: string) => json<PartyLookup>(`/api/clients/lookup/?inn=${encodeURIComponent(inn)}`);
 
+export type PartySuggestion = {
+  inn: string; name: string; kpp: string; ogrn: string; address: string; phone: string;
+  client_id: number | null; source: "own" | "dadata"; status: string;
+};
+
+/** Организации под примерное название или начало ИНН: своя база, потом DaData. */
+export const suggestParties = (q: string, signal?: AbortSignal) =>
+  json<{ results: PartySuggestion[] }>(`/api/clients/suggest/?q=${encodeURIComponent(q)}`, { signal }).then((r) => r.results);
+
 export type OrderPayload = {
   inn?: string;
   name?: string;
