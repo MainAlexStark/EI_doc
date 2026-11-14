@@ -1195,10 +1195,22 @@ function orderLine(o: WorkOrder, isManager: boolean): string {
   return [o.client, isManager ? o.assigned_employee : "", o.note].filter(Boolean).join(" · ");
 }
 
-export default function FieldWork({ me, isManager = false }: { me: Me | null; isManager?: boolean }) {
+export default function FieldWork({
+  me, isManager = false, openOrderId, backLabel, fallbackTitle, onClose,
+}: {
+  me: Me | null;
+  isManager?: boolean;
+  /** Экран открыт на одном наряде — так его встраивает командировка (адрес = наряд). */
+  openOrderId?: number;
+  backLabel?: string;
+  /** Что показать заголовком, если наряд не удалось загрузить (нет связи). */
+  fallbackTitle?: string;
+  onClose?: () => void;
+}) {
+  const embedded = openOrderId != null;
   const [period, setPeriod] = useState<Period>("active");
   const [orders, setOrders] = useState<WorkOrder[]>([]);
-  const [selectedOrder, setSelectedOrder] = useState<number | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<number | null>(openOrderId ?? null);
   const [verifications, setVerifications] = useState<CachedVerification[]>([]);
   const [selectedVerification, setSelectedVerification] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -1305,11 +1317,15 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
     const employeeId = me?.employee?.id;
     if (!isManager && !employeeId) return;
     setLoading(true);
-    fetchWorkOrders(isManager ? {} : { assigned_employee: String(employeeId) })
+    // Адреса командировок в общий список не попадают — они живут во вкладке «Командировки».
+    const filters = embedded
+      ? { id: String(openOrderId) }
+      : { trip: "none", ...(isManager ? {} : { assigned_employee: String(employeeId) }) };
+    fetchWorkOrders(filters)
       .then(setOrders)
       .catch((exc) => setError(exc instanceof Error ? exc.message : "Не удалось загрузить выезды"))
       .finally(() => setLoading(false));
-  }, [me, isManager]);
+  }, [me, isManager, embedded, openOrderId]);
 
   const cancelOrder = async (target: WorkOrder) => {
     const ok = await confirmDialog({
@@ -1440,7 +1456,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
       <div className="narrow">
         {syncBar}
         <button type="button" className="back" onClick={() => setSelectedVerification(null)}>
-          <Icon name="chevronLeft" size={20} /> {order?.site || "Все счётчики"}
+          <Icon name="chevronLeft" size={20} /> {order?.site || fallbackTitle || "Все счётчики"}
         </button>
         <div className="card">
           <div className="card-head">
@@ -1470,8 +1486,16 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
   return (
     <div className="narrow">
       {syncBar}
-      <button type="button" className="back" onClick={() => { setSelectedOrder(null); setAdding(false); }}>
-        <Icon name="chevronLeft" size={20} /> Поверки
+      <button
+        type="button"
+        className="back"
+        onClick={() => {
+          setAdding(false);
+          if (embedded) onClose?.();
+          else setSelectedOrder(null);
+        }}
+      >
+        <Icon name="chevronLeft" size={20} /> {embedded ? backLabel || "Назад" : "Поверки"}
       </button>
       <div className="detail-title">
         {order && (
@@ -1479,7 +1503,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
             {[formatDate(order.scheduled_date), order.scheduled_time?.slice(0, 5)].filter(Boolean).join(", ")}
           </div>
         )}
-        <h2>{order?.site || "Адрес не указан"}</h2>
+        <h2>{order?.site || fallbackTitle || "Адрес не указан"}</h2>
       </div>
       {order && (
         <div className="kv">
@@ -1495,7 +1519,7 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
           </div>
         </div>
       )}
-      {order && isManager && OPEN_STATUSES.includes(order.status) && (
+      {order && isManager && !embedded && OPEN_STATUSES.includes(order.status) && (
         <div className="row" style={{ justifyContent: "flex-end", margin: "-8px 0 8px" }}>
           <button type="button" className="sm ghost danger" onClick={() => void cancelOrder(order)}>
             <Icon name="ban" size={14} /> Отменить выезд
@@ -1507,7 +1531,11 @@ export default function FieldWork({ me, isManager = false }: { me: Me | null; is
       <h2>Приборы <span className="count">{verifications.length}</span></h2>
       {verifications.length === 0 && !adding && <div className="empty small" style={{ textAlign: "left", padding: "0 4px 12px" }}>Пока ни одного — добавьте первый</div>}
       {verifications.length > 0 && (
-        <p className="hint" style={{ margin: "-8px 4px 14px" }}>Выезд закроется сам, когда все протоколы примут в журнале.</p>
+        <p className="hint" style={{ margin: "-8px 4px 14px" }}>
+          {embedded
+            ? "Закончили с адресом — вернитесь в командировку и поставьте отметку «Выполнен»."
+            : "Выезд закроется сам, когда все протоколы примут в журнале."}
+        </p>
       )}
       <div className="card-list">
         {verifications.map((v) => (

@@ -41,6 +41,19 @@ export default defineConfig(({ command }) => ({
         // а этот путь Django отдаёт отдельно (frontend_root_file) — то же
         // содержимое, что и "/" (frontend_index), только под точным именем,
         // которого просит workbox для directoryIndex-соответствия с "/".
+        // Тайлы карты командировки: что уже смотрели на связи, показываем и без неё.
+        // Ответы cross-origin непрозрачные (status 0) — их надо разрешить явно.
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/tile\.openstreetmap\.org\//,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "map-tiles",
+              expiration: { maxEntries: 1500, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
         manifestTransforms: [
           (entries) => ({
             manifest: entries.map((entry) =>

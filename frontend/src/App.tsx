@@ -8,6 +8,7 @@ import Login from "./components/Login";
 import RequestsInbox from "./components/RequestsInbox";
 import SiTypes from "./components/SiTypes";
 import Tasks from "./components/Tasks";
+import Trips from "./components/Trips";
 import Icon, { type IconName } from "./ui/Icon";
 import { DialogHost } from "./ui/Modal";
 import { PageActionsContext, Spinner } from "./ui/controls";
@@ -21,12 +22,13 @@ const Assistant = lazy(() => import("./assistant/Assistant"));
  * - «Наряды» убраны — выезды живут во вкладке «Поверки»: менеджер видит все,
  *   поверитель — только свои.
  * Раздел хранится в адресе (#/journal) — переживает перезагрузку, работает «Назад». */
-type Tab = "field-work" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
+type Tab = "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
 
-type NavItem = { key: Tab; label: string; icon: IconName; managerOnly?: boolean };
+type NavItem = { key: Tab; label: string; icon: IconName; managerOnly?: boolean; /** Короче — для таб-бара телефона. */ short?: string };
 
 const WORK: NavItem[] = [
   { key: "field-work", label: "Поверки", icon: "checkCircle" },
+  { key: "trips", label: "Командировки", short: "Поездки", icon: "car" },
   { key: "journal", label: "Журнал", icon: "doc" },
   { key: "requests", label: "Заявки", icon: "inbox", managerOnly: true },
   { key: "availability", label: "График", icon: "calendar" },
@@ -44,8 +46,8 @@ const ALL_TABS = new Set<Tab>([...WORK, ...REFERENCE].map((item) => item.key));
 /** Разделы во всю высоту окна — без отступов main: календарь, заявки, ассистент. */
 const FLUSH: Tab[] = ["availability", "requests", "assistant"];
 
-/** На телефоне в таб-баре — три главных, остальное под «Ещё». */
-const PHONE_TABS: Tab[] = ["field-work", "journal", "availability"];
+/** На телефоне в таб-баре — четыре главных, остальное под «Ещё». */
+const PHONE_TABS: Tab[] = ["field-work", "trips", "journal", "availability"];
 
 /** Кто видит фирму целиком. Поверитель — только своё. */
 const isManagerRole = (role: string | undefined) => !!role && role !== "verifier";
@@ -166,6 +168,7 @@ export default function App() {
 
   const heads: Record<Tab, { title: string; subtitle?: string }> = {
     "field-work": { title: isManager ? "Все поверки" : "Мои поверки", subtitle: todayLine() },
+    trips: { title: "Командировки", subtitle: "Выезды по районам и работы по закупкам" },
     journal: { title: "Журнал", subtitle: isManager ? "Протоколы всех поверителей" : "Мои протоколы" },
     requests: { title: "Заявки", subtitle: "С сайта и по телефону" },
     availability: { title: "График", subtitle: "Когда я могу выезжать — заявители на сайте видят эти дни" },
@@ -256,6 +259,7 @@ export default function App() {
 
           <main className={flush ? "flush" : ""}>
             {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
+            {tab === "trips" && <Trips me={me} isManager={isManager} />}
             {tab === "journal" && <JournalTab isManager={isManager} onOpenTypes={() => go("si-types")} />}
             {tab === "requests" && <RequestsInbox onChanged={refreshCounts} />}
             {tab === "availability" && <Availability me={me} />}
@@ -296,7 +300,7 @@ export default function App() {
                 onClick={() => go(item.key)}
               >
                 <Icon name={item.icon} size={22} />
-                {item.label}
+                {item.short ?? item.label}
               </button>
             ))}
             <button

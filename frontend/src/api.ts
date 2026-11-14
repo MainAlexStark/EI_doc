@@ -365,9 +365,19 @@ export type WorkOrder = {
   verifications_accepted: number;
   created_at: string;
   closed_at: string | null;
+  /** Наряд — адрес командировки: в общем списке «Поверок» не показывается. */
+  trip_id: number | null;
+  trip_title: string;
 };
 
-export type WorkOrderFilters = { status?: string; assigned_employee?: string; date_from?: string; date_to?: string };
+export type WorkOrderFilters = {
+  status?: string;
+  assigned_employee?: string;
+  date_from?: string;
+  date_to?: string;
+  id?: string;
+  trip?: string;
+};
 
 export const fetchWorkOrders = (filters: WorkOrderFilters = {}) =>
   json<WorkOrder[]>(`/api/work-orders/?${queryString(filters)}`);
@@ -1267,3 +1277,258 @@ export const fetchFgisHistory = (serial: string) =>
 
 export const fetchFgisVerification = (vriId: string) =>
   json<FgisVerificationCard>(`/api/instruments/history/fgis/${encodeURIComponent(vriId)}/`);
+
+// ---------------------------------------------------------------------------
+// Командировки и закупки (apps/logistics/api.py, claude/trips.md)
+// ---------------------------------------------------------------------------
+export type PersonRef = { id: number; full_name: string };
+
+export type ProcurementBrief = {
+  id: number;
+  label: string;
+  number: string;
+  law: string;
+  law_display: string;
+  title: string;
+  customer: string;
+  contract_number: string;
+  contract_date: string | null;
+  deadline: string | null;
+  status: string;
+  status_display: string;
+};
+
+export type TripBrief = {
+  id: number;
+  kind: "classic" | "procurement";
+  kind_display: string;
+  title: string;
+  destination: string;
+  date_start: string | null;
+  date_end: string | null;
+  status: "planned" | "active" | "done" | "cancelled";
+  status_display: string;
+  lead: PersonRef;
+  members: PersonRef[];
+  note: string;
+  procurement: ProcurementBrief | null;
+  stops_total: number;
+  stops_done: number;
+  instruments_entered: number;
+};
+
+export type StopStatus = "planned" | "done" | "no_answer" | "postponed" | "refused";
+
+export type TripStop = {
+  id: number;
+  position: number;
+  status: StopStatus;
+  status_display: string;
+  site_id: number;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  is_restricted: boolean;
+  access_note: string;
+  client: string;
+  contact_name: string;
+  contact_phone: string;
+  planned_date: string | null;
+  planned_count: number | null;
+  note: string;
+  added_on_site: boolean;
+  carried_from: string;
+  visited_at: string | null;
+  work_order_id: number | null;
+  verifications_total: number;
+  verifications_ready: number;
+  verifications_unsuitable: number;
+};
+
+export type TripSummary = {
+  stops_total: number;
+  stops_done: number;
+  stops_waiting: number;
+  stops_no_answer: number;
+  stops_postponed: number;
+  stops_refused: number;
+  stops_on_site: number;
+  instruments_planned: number;
+  instruments_entered: number;
+  instruments_ready: number;
+  instruments_unsuitable: number;
+};
+
+export type PassCoverage = { employee_id: number; full_name: string; state: "ok" | "pending" | "missing"; text: string };
+
+export type Trip = TripBrief & {
+  stops: TripStop[];
+  summary: TripSummary;
+  can_edit: boolean;
+  can_locate: boolean;
+  visit_number: number | null;
+  passes: PassCoverage[];
+};
+
+export type TripPayload = {
+  title?: string;
+  destination?: string;
+  date_start?: string | null;
+  date_end?: string | null;
+  status?: string;
+  lead_id?: number;
+  member_ids?: number[];
+  procurement_id?: number | null;
+  note?: string;
+};
+
+export type StopPayload = {
+  address?: string;
+  site_id?: number | null;
+  client_name?: string;
+  contact_name?: string;
+  contact_phone?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  postal_code?: string;
+  fias_id?: string;
+  district?: string;
+  planned_date?: string | null;
+  planned_count?: number | null;
+  note?: string;
+  is_restricted?: boolean;
+  access_note?: string;
+  added_on_site?: boolean;
+  status?: StopStatus;
+};
+
+const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
+const patch = (body: unknown): RequestInit => ({ method: "PATCH", body: JSON.stringify(body) });
+
+export const fetchTrips = (filters: { state?: "open" | "closed"; procurement?: number } = {}) =>
+  json<TripBrief[]>(`/api/trips/?${queryString(filters)}`);
+export const fetchTrip = (id: number) => json<Trip>(`/api/trips/${id}/`);
+export const createTrip = (payload: TripPayload) => json<Trip>("/api/trips/", post(payload));
+export const updateTrip = (id: number, payload: TripPayload) => json<Trip>(`/api/trips/${id}/`, patch(payload));
+export const deleteTrip = (id: number) => json<void>(`/api/trips/${id}/`, { method: "DELETE" });
+export const addTripStop = (tripId: number, payload: StopPayload) =>
+  json<TripStop>(`/api/trips/${tripId}/stops/`, post(payload));
+export const addTripStopsBulk = (tripId: number, text: string) =>
+  json<{ added: number; skipped: string[]; trip: Trip }>(`/api/trips/${tripId}/stops/bulk/`, post({ text }));
+export const reorderTripStops = (tripId: number, order: number[]) =>
+  json<Trip>(`/api/trips/${tripId}/stops/reorder/`, post({ order }));
+export const locateTripStops = (tripId: number) =>
+  json<{ found: number; not_found: number; remaining: number; trip: Trip }>(`/api/trips/${tripId}/locate/`, post({}));
+export const startNextVisit = (tripId: number, payload: TripPayload) =>
+  json<Trip>(`/api/trips/${tripId}/next-visit/`, post(payload));
+export const updateTripStop = (id: number, payload: StopPayload) =>
+  json<TripStop>(`/api/trip-stops/${id}/`, patch(payload));
+export const deleteTripStop = (id: number) => json<void>(`/api/trip-stops/${id}/`, { method: "DELETE" });
+
+export type ProcurementProgress = { planned: number; entered: number; ready: number; unsuitable: number };
+export type ProcurementRow = ProcurementBrief & { trips_total: number; progress: ProcurementProgress };
+export type ProcurementItem = { id?: number; title: string; quantity: number };
+export type ProcurementDocument = {
+  id: number;
+  kind: string;
+  kind_display: string;
+  title: string;
+  filename: string;
+  size: number;
+  uploaded_by: string;
+  created_at: string;
+};
+export type ProcurementPass = {
+  id: number;
+  employee: PersonRef | null;
+  vehicle: string;
+  holder: string;
+  site_id: number | null;
+  site: string;
+  number: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  status: "needed" | "requested" | "issued" | "refused";
+  status_display: string;
+  note: string;
+};
+export type Procurement = ProcurementBrief & {
+  customer_id: number;
+  customer_inn: string;
+  date_start: string | null;
+  amount: string | null;
+  eis_url: string;
+  open_url: string;
+  responsible: PersonRef | null;
+  contact: string;
+  note: string;
+  items: ProcurementItem[];
+  documents: ProcurementDocument[];
+  passes: ProcurementPass[];
+  sites: { id: number; address: string; is_restricted: boolean }[];
+  trips: TripBrief[];
+  progress: ProcurementProgress;
+  can_edit: boolean;
+};
+export type ProcurementPayload = {
+  number?: string;
+  law?: string;
+  title?: string;
+  customer_name?: string;
+  customer_inn?: string;
+  contract_number?: string;
+  contract_date?: string | null;
+  date_start?: string | null;
+  deadline?: string | null;
+  amount?: string | null;
+  eis_url?: string;
+  status?: string;
+  contact?: string;
+  note?: string;
+  items?: ProcurementItem[];
+};
+export type PassPayload = {
+  employee_id?: number | null;
+  vehicle?: string;
+  site_id?: number | null;
+  number?: string;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  status?: string;
+  note?: string;
+};
+
+export const fetchProcurements = (filters: { state?: "open" | "closed" } = {}) =>
+  json<ProcurementRow[]>(`/api/procurements/?${queryString(filters)}`);
+export const fetchProcurement = (id: number) => json<Procurement>(`/api/procurements/${id}/`);
+export const createProcurement = (payload: ProcurementPayload) => json<Procurement>("/api/procurements/", post(payload));
+export const updateProcurement = (id: number, payload: ProcurementPayload) =>
+  json<Procurement>(`/api/procurements/${id}/`, patch(payload));
+export const createPass = (procurementId: number, payload: PassPayload) =>
+  json<ProcurementPass>(`/api/procurements/${procurementId}/passes/`, post(payload));
+export const updatePass = (id: number, payload: PassPayload) => json<ProcurementPass>(`/api/passes/${id}/`, patch(payload));
+export const deletePass = (id: number) => json<void>(`/api/passes/${id}/`, { method: "DELETE" });
+
+export async function uploadProcurementDocument(procurementId: number, file: File, kind: string): Promise<ProcurementDocument> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("kind", kind);
+  return json<ProcurementDocument>(`/api/procurements/${procurementId}/documents/`, { method: "POST", body });
+}
+
+export const deleteProcurementDocument = (id: number) =>
+  json<void>(`/api/procurement-documents/${id}/`, { method: "DELETE" });
+
+/** Файл закрыт токеном — качаем через blob, как журнал. */
+export async function downloadProcurementDocument(doc: ProcurementDocument): Promise<void> {
+  const response = await call(`/api/procurement-documents/${doc.id}/`);
+  if (!response.ok) throw new ApiError(`Не удалось скачать файл (${response.status})`, response.status);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = doc.filename || doc.title;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}

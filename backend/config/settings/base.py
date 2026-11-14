@@ -231,6 +231,11 @@ ARSHIN_PRIVATE_KEY = env("ARSHIN_PRIVATE_KEY", default="")
 # роутинг по району в этом случае просто не срабатывает (see apps.hub.address).
 DADATA_API_KEY = env("DADATA_API_KEY", default="")
 
+# Координаты адресов командировки для карты (apps.logistics.geocode):
+# auto — DaData, если есть ключ, иначе Nominatim (OpenStreetMap); off — не искать.
+GEOCODER = env("GEOCODER", default="auto")
+GEOCODER_REGION = env("GEOCODER_REGION", default="Кировская область")
+
 # --------------------------------------------------------------------------
 # Капча (Yandex SmartCaptcha) — публичная форма заявки
 # --------------------------------------------------------------------------

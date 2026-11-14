@@ -32,6 +32,18 @@ class WorkOrderSerializer(serializers.Serializer):
     verifications_accepted = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     closed_at = serializers.DateTimeField(allow_null=True)
+    # Адрес командировки — тот же наряд; экран «Поверки» по этим полям убирает
+    # его из общего списка (десятки адресов одной поездки там только мешают).
+    trip_id = serializers.SerializerMethodField()
+    trip_title = serializers.SerializerMethodField()
+
+    def get_trip_id(self, obj: WorkOrder) -> int | None:
+        stop = getattr(obj, "trip_stop", None)
+        return stop.trip_id if stop else None
+
+    def get_trip_title(self, obj: WorkOrder) -> str:
+        stop = getattr(obj, "trip_stop", None)
+        return stop.trip.title if stop else ""
 
     def get_verifications_total(self, obj: WorkOrder) -> int:
         return obj.verifications.count()
@@ -41,12 +53,21 @@ class WorkOrderSerializer(serializers.Serializer):
 
 
 class WorkOrderListView(APIView):
-    """GET /api/work-orders/?status=&assigned_employee=&date_from=&date_to="""
+    """GET /api/work-orders/?status=&assigned_employee=&date_from=&date_to=&id=&trip="""
 
     def get(self, request):
-        qs = WorkOrder.objects.select_related("client", "site", "assigned_employee").prefetch_related(
-            "verifications"
-        )
+        qs = WorkOrder.objects.select_related(
+            "client", "site", "assigned_employee", "trip_stop__trip"
+        ).prefetch_related("verifications")
+        ids = [int(part) for part in request.query_params.get("id", "").split(",") if part.strip().isdigit()]
+        if ids:
+            # Точечный запрос (открыть наряд адреса командировки) — остальные фильтры не нужны.
+            return Response(WorkOrderSerializer(qs.filter(pk__in=ids), many=True).data)
+        trip_param = request.query_params.get("trip")
+        if trip_param == "none":
+            qs = qs.filter(trip_stop__isnull=True)
+        elif trip_param:
+            qs = qs.filter(trip_stop__trip_id=trip_param)
         status_param = request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
