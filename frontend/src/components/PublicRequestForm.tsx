@@ -353,7 +353,9 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
         <div>
           <h1>Заявка на поверку</h1>
           <p className="sub" style={{ marginTop: 6 }}>
-            Оставьте контакты и адрес — подберём поверителя и согласуем время. Поля со <span className="req">*</span> обязательны.
+            {embedded
+              ? <>Контакты и адрес — остальное уточним по телефону. Поля со <span className="req">*</span> обязательны.</>
+              : <>Оставьте контакты и адрес — подберём поверителя и согласуем время. Поля со <span className="req">*</span> обязательны.</>}
           </p>
         </div>
 
