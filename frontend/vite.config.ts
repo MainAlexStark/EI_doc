@@ -32,7 +32,7 @@ export default defineConfig(({ command }) => ({
         // отдавать сервер честно (публичная форма без офлайна не нуждается
         // в подмене), поэтому в кэш навигации не включаем.
         navigateFallback: "/",
-        navigateFallbackDenylist: [/^\/api\//, /^\/admin\//, /^\/zayavka\//, /^\/tiles\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/admin\//, /^\/zayavka\//, /^\/o-nas\//, /^\/tiles\//],
         // precache-пути по умолчанию относительные — считаются от адреса
         // самого sw.js. Он нарочно лежит в корне "/" (чтобы scope был на всё
         // SPA, см. main.tsx), а бандл раздаётся под /static/frontend/ —

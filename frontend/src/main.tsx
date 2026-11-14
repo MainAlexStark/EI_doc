@@ -2,15 +2,21 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import PublicRequestForm from "./components/PublicRequestForm";
+import Landing from "./landing/Landing";
 import "./styles.css";
 
 // Публичная форма заявки живёт на отдельном пути того же бандла — своего
 // клиентского роутера в проекте нет (см. App.tsx), поэтому выбор экрана
 // здесь один раз, по window.location, а не внутри дерева компонентов.
-const isPublicRequestForm = window.location.pathname.startsWith("/zayavka");
+// Одностраничник фирмы (/o-nas/) — тоже публичный, со встроенной формой заявки.
+const path = window.location.pathname;
+const isLanding = path.startsWith("/o-nas");
+const isPublicRequestForm = isLanding || path.startsWith("/zayavka");
 
 createRoot(document.getElementById("root")!).render(
-  <StrictMode>{isPublicRequestForm ? <PublicRequestForm /> : <App />}</StrictMode>,
+  <StrictMode>
+    {isLanding ? <Landing /> : isPublicRequestForm ? <PublicRequestForm /> : <App />}
+  </StrictMode>,
 );
 
 // Офлайн-режим — только для внутреннего кабинета (см. src/offline/), не для

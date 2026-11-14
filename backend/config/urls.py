@@ -257,6 +257,8 @@ urlpatterns = [
     # Публичная форма заявки — тот же SPA-бандл, main.tsx решает по пути,
     # какой экран показать (см. apps.core.views.frontend_index).
     path("zayavka/", frontend_index, name="public_request_form"),
+    # Одностраничник фирмы с той же формой заявки внутри.
+    path("o-nas/", frontend_index, name="public_landing"),
     # service worker/манифест PWA — обязаны быть в корне, см. frontend_root_file.
     # Последний в списке: односегментный catch-all, не должен перехватывать
     # ничего из путей выше.

@@ -53,8 +53,17 @@ const CONSENT_TEXT =
 const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
 
-/** Публичная форма заявки — /zayavka/. Без авторизации, без вкладок EI_doc. */
-export default function PublicRequestForm() {
+/** Публичная форма заявки — /zayavka/. Без авторизации, без вкладок EI_doc.
+ *  embedded — форма встроена в одностраничник (/o-nas/): без своей шапки,
+ *  подвала и серого фона страницы, только карточка. */
+export default function PublicRequestForm({ embedded = false }: { embedded?: boolean } = {}) {
+  const pageClass = embedded ? "public-embed" : "public-page";
+  const brand = embedded ? null : (
+    <div className="public-brand">
+      <div className="brand-mark">ЕИ</div>
+      <div className="brand-name">Единица Измерения<small>метрологическая служба, г. Киров</small></div>
+    </div>
+  );
   const [form, setForm] = useState<ContactState>(EMPTY);
   const [consentGiven, setConsentGiven] = useState(false);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -324,11 +333,8 @@ export default function PublicRequestForm() {
 
   if (doneId !== null) {
     return (
-      <div className="public-page">
-        <div className="public-brand">
-          <div className="brand-mark">ЕИ</div>
-          <div className="brand-name">Единица Измерения<small>метрологическая служба, г. Киров</small></div>
-        </div>
+      <div className={pageClass}>
+        {brand}
         <div className="public-card thanks">
           <div className="empty-icon"><Icon name="check" size={28} strokeWidth={2.4} /></div>
           <h1>Заявка принята</h1>
@@ -341,11 +347,8 @@ export default function PublicRequestForm() {
   }
 
   return (
-    <div className="public-page">
-      <div className="public-brand">
-        <div className="brand-mark">ЕИ</div>
-        <div className="brand-name">Единица Измерения<small>метрологическая служба, г. Киров</small></div>
-      </div>
+    <div className={pageClass}>
+      {brand}
       <form className="public-card" onSubmit={submit} autoComplete="off">
         <div>
           <h1>Заявка на поверку</h1>
@@ -586,7 +589,9 @@ export default function PublicRequestForm() {
           {submitting ? "Отправляю…" : "Отправить заявку"}
         </button>
       </form>
-      <div className="public-foot">ООО «Единица Измерения» · поверка средств измерений в Кирове и области</div>
+      {!embedded && (
+        <div className="public-foot">ООО «Единица Измерения» · поверка средств измерений в Кирове и области</div>
+      )}
     </div>
   );
 }
