@@ -28,6 +28,7 @@ from apps.catalog.api_types import (
 from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, frontend_root_file, healthz
+from apps.logistics.tiles import TileView
 from apps.hub.api import (
     AddressSuggestView,
     CaptchaConfigView,
@@ -237,6 +238,7 @@ urlpatterns = [
     path("api/attestations/", include("apps.equipment.urls")),
     # Командировки и закупки (claude/trips.md)
     path("api/", include("apps.logistics.urls")),
+    path("tiles/<int:z>/<int:x>/<int:y>.png", TileView.as_view(), name="map_tile"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="docs"),
     # Публичная форма заявки — тот же SPA-бандл, main.tsx решает по пути,

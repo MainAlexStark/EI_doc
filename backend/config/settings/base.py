@@ -126,7 +126,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.AnonRateThrottle",),
-    "DEFAULT_THROTTLE_RATES": {"anon": "20/hour", "address_suggest": "120/min"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "20/hour", "address_suggest": "120/min", "map_tiles": "3000/min"},
     "PAGE_SIZE": 50,
 }
 
@@ -235,6 +235,12 @@ DADATA_API_KEY = env("DADATA_API_KEY", default="")
 # auto — DaData, если есть ключ, иначе Nominatim (OpenStreetMap); off — не искать.
 GEOCODER = env("GEOCODER", default="auto")
 GEOCODER_REGION = env("GEOCODER_REGION", default="Кировская область")
+
+# Тайлы карты командировок идут через наш сервер и кэшируются на диске
+# (apps.logistics.tiles). Источник — любой растровый с шаблоном {z}/{x}/{y}.
+MAP_TILES_UPSTREAM = env("MAP_TILES_UPSTREAM", default="https://tile.openstreetmap.org/{z}/{x}/{y}.png")
+MAP_TILES_CONTACT = env("MAP_TILES_CONTACT", default="")
+MAP_TILES_REFERER = env("MAP_TILES_REFERER", default="")
 
 # --------------------------------------------------------------------------
 # Капча (Yandex SmartCaptcha) — публичная форма заявки

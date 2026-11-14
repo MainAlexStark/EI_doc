@@ -7,14 +7,19 @@ import type { TripStop } from "../api";
  * между ещё не отработанными и моё место. Отдельный чанк (leaflet ~150 КБ) —
  * грузится, только когда карту открыли.
  *
- * Тайлы — OpenStreetMap; service worker складывает просмотренные в кэш
- * (vite.config.ts), так что район, который смотрели на связи, виден и без неё. */
+ * Тайлы OpenStreetMap идут через наш сервер. Service worker складывает
+ * просмотренные в кэш (vite.config.ts), так что район, который смотрели на
+ * связи, виден и без неё. */
 
-const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+// Тайлы — через наш сервер (apps/logistics/tiles.py): он сам ходит в OSM и
+// хранит скачанное. Напрямую браузеры поверителей OSM блокирует («Access blocked»).
+const TILES = "/tiles/{z}/{x}/{y}.png";
 const KIROV: L.LatLngTuple = [58.6035, 49.668];
 
-// Старый кэш тайлов мог запомнить заглушки «Access blocked» (ответы были непрозрачными) — выбрасываем его.
-if (typeof caches !== "undefined") void caches.delete("map-tiles").catch(() => undefined);
+// Старые кэши тайлов прямо с OSM могли запомнить заглушки «Access blocked» — выбрасываем.
+if (typeof caches !== "undefined") {
+  for (const name of ["map-tiles", "map-tiles-v2"]) void caches.delete(name).catch(() => undefined);
+}
 
 export type MapPoint = { latitude: number; longitude: number };
 
@@ -48,17 +53,7 @@ export default function TripMap({
     if (!holder.current) return;
     const instance = L.map(holder.current, { zoomControl: true, attributionControl: true }).setView(KIROV, 10);
     instance.attributionControl.setPrefix(false);
-    L.tileLayer(TILES, {
-      maxZoom: 19,
-      attribution: "© OpenStreetMap",
-      // OSM пускает к тайлам только с заголовком Referer, а Django по умолчанию
-      // (SECURE_REFERRER_POLICY = same-origin) на чужие сайты его не шлёт —
-      // без этой строки вместо карты приходят тайлы «Access blocked».
-      referrerPolicy: "strict-origin-when-cross-origin",
-      // CORS вместо непрозрачных ответов: service worker видит код ответа и
-      // кладёт в кэш только настоящие тайлы, а не 403.
-      crossOrigin: true,
-    }).addTo(instance);
+    L.tileLayer(TILES, { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(instance);
     layer.current = L.layerGroup().addTo(instance);
     instance.on("click", (event: L.LeafletMouseEvent) => {
       handlers.current.onPlace?.({ latitude: event.latlng.lat, longitude: event.latlng.lng });

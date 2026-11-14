@@ -32,7 +32,7 @@ export default defineConfig(({ command }) => ({
         // отдавать сервер честно (публичная форма без офлайна не нуждается
         // в подмене), поэтому в кэш навигации не включаем.
         navigateFallback: "/",
-        navigateFallbackDenylist: [/^\/api\//, /^\/admin\//, /^\/zayavka\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/admin\//, /^\/zayavka\//, /^\/tiles\//],
         // precache-пути по умолчанию относительные — считаются от адреса
         // самого sw.js. Он нарочно лежит в корне "/" (чтобы scope был на всё
         // SPA, см. main.tsx), а бандл раздаётся под /static/frontend/ —
@@ -41,15 +41,14 @@ export default defineConfig(({ command }) => ({
         // а этот путь Django отдаёт отдельно (frontend_root_file) — то же
         // содержимое, что и "/" (frontend_index), только под точным именем,
         // которого просит workbox для directoryIndex-соответствия с "/".
-        // Тайлы карты командировки: что уже смотрели на связи, показываем и без неё.
-        // Тайлы запрашиваются с CORS (TripMap: crossOrigin), поэтому кэшируем только 200 —
-        // ошибку или заглушку «Access blocked» в кэш не положим.
+        // Тайлы карты командировки (идут через наш /tiles/, см. apps/logistics/tiles.py):
+        // что уже смотрели на связи, показываем и без неё. Только ответы 200 — ошибку не запомним.
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/tile\.openstreetmap\.org\//,
+            urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith("/tiles/"),
             handler: "CacheFirst",
             options: {
-              cacheName: "map-tiles-v2",
+              cacheName: "map-tiles-v3",
               expiration: { maxEntries: 1500, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [200] },
             },
