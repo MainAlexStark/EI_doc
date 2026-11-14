@@ -13,6 +13,9 @@ import type { TripStop } from "../api";
 const TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const KIROV: L.LatLngTuple = [58.6035, 49.668];
 
+// Старый кэш тайлов мог запомнить заглушки «Access blocked» (ответы были непрозрачными) — выбрасываем его.
+if (typeof caches !== "undefined") void caches.delete("map-tiles").catch(() => undefined);
+
 export type MapPoint = { latitude: number; longitude: number };
 
 const pin = (stop: TripStop, selected: boolean) =>
@@ -45,7 +48,17 @@ export default function TripMap({
     if (!holder.current) return;
     const instance = L.map(holder.current, { zoomControl: true, attributionControl: true }).setView(KIROV, 10);
     instance.attributionControl.setPrefix(false);
-    L.tileLayer(TILES, { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(instance);
+    L.tileLayer(TILES, {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap",
+      // OSM пускает к тайлам только с заголовком Referer, а Django по умолчанию
+      // (SECURE_REFERRER_POLICY = same-origin) на чужие сайты его не шлёт —
+      // без этой строки вместо карты приходят тайлы «Access blocked».
+      referrerPolicy: "strict-origin-when-cross-origin",
+      // CORS вместо непрозрачных ответов: service worker видит код ответа и
+      // кладёт в кэш только настоящие тайлы, а не 403.
+      crossOrigin: true,
+    }).addTo(instance);
     layer.current = L.layerGroup().addTo(instance);
     instance.on("click", (event: L.LeafletMouseEvent) => {
       handlers.current.onPlace?.({ latitude: event.latlng.lat, longitude: event.latlng.lng });

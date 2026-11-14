@@ -42,15 +42,16 @@ export default defineConfig(({ command }) => ({
         // содержимое, что и "/" (frontend_index), только под точным именем,
         // которого просит workbox для directoryIndex-соответствия с "/".
         // Тайлы карты командировки: что уже смотрели на связи, показываем и без неё.
-        // Ответы cross-origin непрозрачные (status 0) — их надо разрешить явно.
+        // Тайлы запрашиваются с CORS (TripMap: crossOrigin), поэтому кэшируем только 200 —
+        // ошибку или заглушку «Access blocked» в кэш не положим.
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/tile\.openstreetmap\.org\//,
             handler: "CacheFirst",
             options: {
-              cacheName: "map-tiles",
+              cacheName: "map-tiles-v2",
               expiration: { maxEntries: 1500, maxAgeSeconds: 60 * 60 * 24 * 30, purgeOnQuotaError: true },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
         ],
