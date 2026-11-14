@@ -4,10 +4,12 @@ import PublicRequestForm from "../components/PublicRequestForm";
 import AsciiField from "./AsciiField";
 import "./landing.css";
 
-// Контакты фирмы. Пустая строка — не показываем; заполнить, когда решим,
-// какой номер и почту светить на сайте.
-const PHONE: string = "";
+// Контакты фирмы. Пустая строка — не показываем.
+const PHONE: string = "+7 953 137-00-83";
 const EMAIL: string = "";
+const ADDRESS = "г. Киров, ул. Горького, 4";
+const HOURS = "пн–пт, 8:00–17:00";
+const VISITS = "в любой день недели";
 
 const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value);
@@ -64,7 +66,14 @@ export default function Landing() {
               <li>Каждый результат — в федеральном реестре</li>
               <li>Документы для проверяющих и заказчиков</li>
             </ul>
-            {PHONE && <a className="l-hero-phone" href={`tel:${tel}`}>{PHONE}</a>}
+            <dl className="l-contacts">
+              <dt>Телефон</dt>
+              <dd><a href={`tel:${tel}`}>{PHONE}</a></dd>
+              <dt>Офис</dt>
+              <dd>{ADDRESS} · {HOURS}</dd>
+              <dt>Выезды</dt>
+              <dd>{VISITS}</dd>
+            </dl>
           </section>
 
           <section className="l-form" id="zayavka">
@@ -119,7 +128,8 @@ export default function Landing() {
       </main>
 
       <footer className="l-foot">
-        <span>ООО «Единица Измерения» · г. Киров</span>
+        <span>ООО «Единица Измерения» · {ADDRESS}</span>
+        <span>офис {HOURS} · выезды {VISITS}</span>
         {PHONE && <a href={`tel:${tel}`}>{PHONE}</a>}
         {EMAIL && <a href={`mailto:${EMAIL}`}>{EMAIL}</a>}
         <a href="/">Вход для сотрудников</a>

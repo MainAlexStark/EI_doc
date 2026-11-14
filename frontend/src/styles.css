@@ -738,6 +738,11 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
 .slot-chip.active, .slot-chip.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
 .slot-chip .dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: var(--warn-dot); }
 .slot-chip.active .dot { background: #fff; }
+.slot-chip.priority:not(.active) { box-shadow: inset 0 0 0 1px var(--warn-dot); }
+.slot-chip:disabled { opacity: 0.35; text-decoration: line-through; cursor: default; }
+.slot-chip .dot { margin-left: 6px; vertical-align: 1px; }
+.priority-legend { display: flex; align-items: center; gap: 6px; }
+.priority-legend .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--warn-dot); flex: none; }
 
 /* =====================================================================
    Мини-календарь (выбор дат в форме заявки, навигация в «Графике»)

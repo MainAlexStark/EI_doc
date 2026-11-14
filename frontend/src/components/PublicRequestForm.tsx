@@ -50,6 +50,29 @@ const CONSENT_TEXT =
   "данных». Согласие действует до его отзыва по запросу, направленному любым " +
   "удобным способом.";
 
+// Время визита для счётчиков — окнами по 2 часа (так время и называют клиенту).
+const TIME_WINDOWS: { start: string; end: string }[] = [
+  { start: "08:00", end: "10:00" },
+  { start: "10:00", end: "12:00" },
+  { start: "12:00", end: "14:00" },
+  { start: "14:00", end: "16:00" },
+  { start: "16:00", end: "18:00" },
+  { start: "18:00", end: "20:00" },
+];
+
+type WindowOption = { start: string; end: string; available: boolean; priority: boolean };
+
+/** Окно доступно, если его покрывает слот поверителя (слот без времени — весь день). */
+function windowsForDay(daySlots: PublicSlot[], hasSchedule: boolean): WindowOption[] {
+  return TIME_WINDOWS.map((w) => {
+    if (!hasSchedule) return { ...w, available: true, priority: false };
+    const covering = daySlots.filter((s) =>
+      !s.start_time || !s.end_time ? true : s.start_time < w.end && s.end_time > w.start,
+    );
+    return { ...w, available: covering.length > 0, priority: covering.some((s) => s.is_priority) };
+  });
+}
+
 const money = (value: number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(value);
 
@@ -181,11 +204,12 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
     return map;
   }, [slots]);
   const availableDates = useMemo(() => [...slotsByDate.keys()].sort(), [slotsByDate]);
-  const timesForChosenDate = useMemo(() => {
+  const windowsForChosenDate = useMemo(() => {
     if (!chosenDate) return [];
-    return (slotsByDate.get(chosenDate) ?? []).filter((s) => s.start_time && s.end_time);
-  }, [slotsByDate, chosenDate]);
+    return windowsForDay(slotsByDate.get(chosenDate) ?? [], availableDates.length > 0);
+  }, [slotsByDate, chosenDate, availableDates]);
   // Для календаря — какие дни отметить (есть слот в графике сотрудников района).
+  const calendarHasPriority = useMemo(() => slots.some((s) => s.is_priority), [slots]);
   const calendarMarkers = useMemo(() => {
     const map: Record<string, CalendarMarker> = {};
     for (const [date, daySlots] of slotsByDate) {
@@ -244,21 +268,17 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
     const next = chosenDate === date ? "" : date; // повторный клик снимает выбор
     setChosenDate(next);
     setChosenTime("");
-    // Приоритет по умолчанию — если хоть один слот в этот день отмечен
-    // сотрудником как приоритетный. Считаем это независимо от needsTime:
-    // сотрудники чаще всего заводят слоты "весь день" (без времени, см.
-    // Availability.tsx), тогда чипов времени вообще не будет и pickTime()
-    // ниже не вызовется ни разу — раньше это означало, что скидка для
-    // приборов с обязательным временем не применялась практически никогда.
-    // Если время всё же выбирается через чип — pickTime() уточнит по
-    // конкретному слоту.
+    // Для счётчиков приоритет определяется выбранным окном (pickWindow):
+    // слот поверителя «весь день» покрывает все окна, поэтому скидка
+    // доступна и без времени в графике. Для остальных приборов — днём.
     const slotsForDate = next ? slotsByDate.get(next) ?? [] : [];
-    setChosenPriority(slotsForDate.some((s) => s.is_priority));
+    setChosenPriority(!needsTime && slotsForDate.some((s) => s.is_priority));
   };
 
-  const pickTime = (slot: PublicSlot) => {
-    setChosenTime(slot.start_time ?? "");
-    setChosenPriority(slot.is_priority);
+  const pickWindow = (window: WindowOption) => {
+    if (!window.available) return;
+    setChosenTime(window.start);
+    setChosenPriority(window.priority);
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -289,7 +309,7 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
       return;
     }
     if (needsTime && chosenDate && !chosenTime) {
-      setError("Среди выбранных приборов есть счётчики — уточните время");
+      setError("Среди выбранных приборов есть счётчики — выберите время визита");
       return;
     }
     if (captchaConfigured && !captchaToken) {
@@ -508,31 +528,30 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
           />
 
           {chosenDate && needsTime && (
-            timesForChosenDate.length > 0 ? (
-              <div className="slot-grid">
-                {timesForChosenDate.map((slot, index) => (
-                  <button
-                    type="button"
-                    key={`${slot.start_time}-${index}`}
-                    className={`slot-chip ${chosenTime === slot.start_time ? "active" : ""}`}
-                    onClick={() => pickTime(slot)}
-                  >
-                    {slot.start_time}–{slot.end_time}
-                    {slot.is_priority && <span className="dot" title="приоритетное время — скидка" />}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="field">
-                <label htmlFor="rf-time">Удобное время<span className="req">*</span></label>
-                <input
-                  id="rf-time"
-                  type="time"
-                  value={chosenTime}
-                  onChange={(event) => setChosenTime(event.target.value)}
-                />
-              </div>
-            )
+            <div className="slot-grid" role="radiogroup" aria-label="Время визита">
+              {windowsForChosenDate.map((window) => (
+                <button
+                  type="button"
+                  key={window.start}
+                  role="radio"
+                  aria-checked={chosenTime === window.start}
+                  disabled={!window.available}
+                  className={`slot-chip ${chosenTime === window.start ? "active" : ""} ${window.priority ? "priority" : ""}`}
+                  onClick={() => pickWindow(window)}
+                  title={window.priority ? "приоритетное время поверителя — со скидкой" : undefined}
+                >
+                  {window.start}–{window.end}
+                  {window.priority && <span className="dot" />}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {calendarHasPriority && (
+            <div className="hint priority-legend">
+              <span className="dot" /> приоритетные дни и время поверителей
+              {discountPercent > 0 && needsTime ? ` — скидка ${discountPercent}%` : ""}
+            </div>
           )}
 
           {pricing.applyDiscount && chosenDate && (
