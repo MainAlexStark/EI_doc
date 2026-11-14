@@ -179,6 +179,7 @@ export default function Journal({ isManager = false }: { isManager?: boolean }) 
             Фильтры{filtered ? " · есть" : ""}
           </button>
         )}
+        {phone && <span className="flex-break" />}
         {(!phone || showFilters) && <>
         <div className="field date">
           <label htmlFor="journal-from">Поверено с</label>

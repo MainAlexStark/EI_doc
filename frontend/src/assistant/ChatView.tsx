@@ -727,7 +727,7 @@ function Composer({
         />
         {modelSlot}
         <div className="spacer" />
-        <span className="muted small hint">Enter — отправить, Shift+Enter — новая строка</span>
+        <span className="muted small hint kbd-hint">Enter — отправить, Shift+Enter — новая строка</span>
         {running ? (
           <button className="send stop" onClick={onStop} title="Остановить" aria-label="Остановить"><Icon name="stop" size={14} /></button>
         ) : (

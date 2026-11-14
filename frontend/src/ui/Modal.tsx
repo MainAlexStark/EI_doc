@@ -46,7 +46,12 @@ export function Modal({ open, onClose, title, subtitle, children, footer, size =
     const timer = window.setTimeout(() => {
       const card = cardRef.current;
       if (!card || card.contains(document.activeElement)) return;
-      const field = card.querySelector<HTMLElement>("[autofocus], input:not([type=hidden]):not([disabled]), textarea, select");
+      // На телефоне фокус в поле сразу поднимает клавиатуру и закрывает пол-листа —
+      // там фокусируем само окно, а в поле человек попадёт касанием.
+      const touch = window.matchMedia?.("(pointer: coarse)").matches;
+      const field = touch
+        ? null
+        : card.querySelector<HTMLElement>("[autofocus], input:not([type=hidden]):not([disabled]), textarea, select");
       (field ?? card).focus({ preventScroll: true });
     }, 30);
     return () => {

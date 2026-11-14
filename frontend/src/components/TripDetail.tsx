@@ -153,7 +153,7 @@ export default function TripDetail({
   if (missing) {
     return (
       <div className="narrow">
-        <button type="button" className="back" onClick={onBack}><Icon name="chevronLeft" size={20} /> Командировки</button>
+        <button type="button" className="back" onClick={onBack}><Icon name="chevronLeft" size={20} /> Выезды</button>
         <EmptyState icon="car" title="Командировка не найдена">Возможно, её удалили или вы в ней не участвуете.</EmptyState>
       </div>
     );
@@ -161,7 +161,7 @@ export default function TripDetail({
   if (!trip) {
     return (
       <div className="narrow">
-        <button type="button" className="back" onClick={onBack}><Icon name="chevronLeft" size={20} /> Командировки</button>
+        <button type="button" className="back" onClick={onBack}><Icon name="chevronLeft" size={20} /> Выезды</button>
         {error ? <Alert>{error}</Alert> : <Spinner />}
       </div>
     );
@@ -299,7 +299,7 @@ export default function TripDetail({
 
   return (
     <div className={mode === "map" ? "trip-wide" : "narrow"}>
-      <button type="button" className="back" onClick={onBack}><Icon name="chevronLeft" size={20} /> Командировки</button>
+      <button type="button" className="back" onClick={onBack}><Icon name="chevronLeft" size={20} /> Выезды</button>
 
       <div className="detail-title">
         <div className="sub">
@@ -637,10 +637,11 @@ function StopRow({
     .filter(Boolean)
     .join(", ");
   const away = me && hasPoint(stop) && stop.status === "planned" ? distanceKm(me, stop) : null;
+  // телефон и расстояние не рвём посередине — на телефоне строка узкая
   const line = [
     who,
-    stop.contact_phone,
-    away != null ? (away < 1 ? `${Math.round(away * 1000)} м` : `${away.toFixed(1)} км`) : "",
+    stop.contact_phone ? <span className="nowrap">{stop.contact_phone}</span> : "",
+    away != null ? <span className="nowrap">{away < 1 ? `${Math.round(away * 1000)} м` : `${away.toFixed(1)} км`}</span> : "",
     stop.note,
   ].filter(Boolean);
   return (
@@ -648,7 +649,11 @@ function StopRow({
       <span className={`trip-pin ${stop.status}`}>{stop.position}</span>
       <div className="grow">
         <b>{stop.address}</b>
-        {line.length > 0 && <div className="sub">{line.join(" · ")}</div>}
+        {line.length > 0 && (
+          <div className="sub">
+            {line.map((part, i) => <Fragment key={i}>{i > 0 && " · "}{part}</Fragment>)}
+          </div>
+        )}
         <div className="trip-tags">
           {stop.status !== "planned" && <span className={`pill ${STOP_TONE[stop.status]}`}>{stop.status_display}</span>}
           {stop.status === "planned" && stop.eta && (

@@ -88,7 +88,7 @@ export default function FifTypeSearch({
   return (
     <div className="field">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <label htmlFor={inputId}>{label}</label>
+        <label className="field-label" htmlFor={inputId}>{label}</label>
         <RstStatus signal={failures} />
       </div>
       <input

@@ -54,6 +54,18 @@ const saveView = (view: View) => {
   }
 };
 
+/** «Идут»: сначала то, что идёт сейчас, дальше — ближайшие по дате. Сервер отдаёт
+ *  от поздних к ранним (так удобно архиву), и сегодняшний выезд уезжал вниз. */
+const STATUS_ORDER: Record<TripBrief["status"], number> = { active: 0, planned: 1, done: 2, cancelled: 3 };
+function sortOpen(list: TripBrief[]): TripBrief[] {
+  return [...list].sort(
+    (a, b) =>
+      STATUS_ORDER[a.status] - STATUS_ORDER[b.status] ||
+      (a.date_start ?? "9999").localeCompare(b.date_start ?? "9999") ||
+      a.id - b.id,
+  );
+}
+
 export default function Trips({ me, isManager }: { me: Me | null; isManager: boolean }) {
   const [view, setViewState] = useState<View>(loadView);
   const [section, setSection] = useState<Section>("trips");
@@ -232,7 +244,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
 
       {section === "trips" && trips != null && trips.length > 0 && (
         <div className="card-list">
-          {trips.map((trip) => (
+          {(period === "open" ? sortOpen(trips) : trips).map((trip) => (
             <TripCard key={trip.id} trip={trip} showLead={isManager} onOpen={() => setView({ kind: "trip", id: trip.id })} />
           ))}
         </div>

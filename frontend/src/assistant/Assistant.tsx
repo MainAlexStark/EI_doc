@@ -237,7 +237,7 @@ function BuiltinAssistant() {
                   }}
                 />
                 <div className="welcome-input-bar">
-                  <span className="hint">Enter — начать, Shift+Enter — новая строка</span>
+                  <span className="hint kbd-hint">Enter — начать, Shift+Enter — новая строка</span>
                   <button className="primary send" disabled={!draftPrompt.trim()} aria-label="Начать" title="Начать">
                     <Icon name="send" size={17} strokeWidth={2.2} />
                   </button>
