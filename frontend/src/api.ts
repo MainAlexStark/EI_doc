@@ -365,9 +365,22 @@ export type WorkOrder = {
   verifications_accepted: number;
   created_at: string;
   closed_at: string | null;
-  /** Наряд — адрес командировки: в общем списке «Поверок» не показывается. */
+  /** Наряд — адрес выезда: в списке «Поверок» не показывается. */
   trip_id: number | null;
   trip_title: string;
+  /** field — адрес выезда, lab — заказ: заказчик привёз приборы сам. */
+  kind: "field" | "lab";
+  client_id: number;
+  client_inn: string;
+  client_kind: string;
+  client_address: string;
+  client_phone: string;
+  contact: string;
+  received_at: string | null;
+  issued_at: string | null;
+  procurement_id: number | null;
+  procurement_label: string;
+  verifications_ready: number;
 };
 
 export type WorkOrderFilters = {
@@ -377,6 +390,7 @@ export type WorkOrderFilters = {
   date_to?: string;
   id?: string;
   trip?: string;
+  kind?: string;
 };
 
 export const fetchWorkOrders = (filters: WorkOrderFilters = {}) =>
@@ -1300,7 +1314,7 @@ export type ProcurementBrief = {
 
 export type TripBrief = {
   id: number;
-  kind: "classic" | "procurement";
+  kind: "city" | "classic" | "procurement";
   kind_display: string;
   title: string;
   destination: string;
@@ -1343,6 +1357,11 @@ export type TripStop = {
   verifications_total: number;
   verifications_ready: number;
   verifications_unsuitable: number;
+  window_start: string | null;
+  window_end: string | null;
+  service_minutes: number | null;
+  eta: string | null;
+  drive_minutes: number | null;
 };
 
 export type TripSummary = {
@@ -1368,9 +1387,60 @@ export type Trip = TripBrief & {
   can_locate: boolean;
   visit_number: number | null;
   passes: PassCoverage[];
+  route: RouteSummary | null;
+  /** Есть ключ 2ГИС — время в пути с пробками. */
+  routing_traffic: boolean;
+  /** Задан адрес офиса — можно строить маршрут «из офиса». */
+  has_base: boolean;
+};
+
+export type RouteSummary = {
+  planned_at: string;
+  departure: string;
+  finish: string;
+  origin: string;
+  provider: "2gis" | "estimate";
+  provider_label: string;
+  traffic: boolean;
+  notes: string[];
+  drive_minutes: number;
+  km: number;
+  stops: number;
+  late: number;
+  after_day_end: number;
+  service_minutes: number;
+  per_instrument_minutes: number;
+  day_end: string;
+  return_to_start: boolean;
+};
+
+export type RouteRow = {
+  id: number;
+  address: string;
+  eta: string;
+  leave: string;
+  drive_minutes: number;
+  km: number;
+  wait_minutes: number;
+  late_minutes: number;
+  after_day_end: boolean;
+  window: [string | null, string | null];
+};
+
+export type PlanPayload = {
+  start: "base" | "me" | "first";
+  latitude?: number;
+  longitude?: number;
+  departure?: string;
+  service_minutes: number;
+  per_instrument_minutes: number;
+  day_end: string;
+  return_to_start: boolean;
+  apply?: boolean;
 };
 
 export type TripPayload = {
+  kind?: "city" | "classic" | "procurement";
   title?: string;
   destination?: string;
   date_start?: string | null;
@@ -1400,6 +1470,9 @@ export type StopPayload = {
   access_note?: string;
   added_on_site?: boolean;
   status?: StopStatus;
+  window_start?: string | null;
+  window_end?: string | null;
+  service_minutes?: number | null;
 };
 
 const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
@@ -1421,6 +1494,8 @@ export const locateTripStops = (tripId: number) =>
   json<{ found: number; not_found: number; remaining: number; trip: Trip }>(`/api/trips/${tripId}/locate/`, post({}));
 export const startNextVisit = (tripId: number, payload: TripPayload) =>
   json<Trip>(`/api/trips/${tripId}/next-visit/`, post(payload));
+export const planTripRoute = (tripId: number, payload: PlanPayload) =>
+  json<{ summary: RouteSummary; rows: RouteRow[]; trip?: Trip }>(`/api/trips/${tripId}/plan/`, post(payload));
 export const updateTripStop = (id: number, payload: StopPayload) =>
   json<TripStop>(`/api/trip-stops/${id}/`, patch(payload));
 export const deleteTripStop = (id: number) => json<void>(`/api/trip-stops/${id}/`, { method: "DELETE" });
@@ -1527,6 +1602,61 @@ export async function downloadProcurementDocument(doc: ProcurementDocument): Pro
   const link = document.createElement("a");
   link.href = url;
   link.download = doc.filename || doc.title;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+// ---------------------------------------------------------------------------
+// Заказы — вкладка «Поверки» (apps/verification/api_orders.py)
+// ---------------------------------------------------------------------------
+export type PartyLookup =
+  | { found: false; valid: boolean }
+  | { found: true; inn: string; name: string; kpp: string; ogrn: string; address: string; phone: string;
+      client_id: number | null; source: "own" | "dadata"; status: string };
+
+export const lookupParty = (inn: string) => json<PartyLookup>(`/api/clients/lookup/?inn=${encodeURIComponent(inn)}`);
+
+export type OrderPayload = {
+  inn?: string;
+  name?: string;
+  kpp?: string;
+  ogrn?: string;
+  address?: string;
+  phone?: string;
+  contact?: string;
+  note?: string;
+  procurement_id?: number | null;
+  assigned_employee_id?: number;
+};
+
+export const createOrder = (payload: OrderPayload) =>
+  json<WorkOrder>("/api/orders/", { method: "POST", body: JSON.stringify(payload) });
+export const updateOrder = (id: number, payload: OrderPayload) =>
+  json<WorkOrder>(`/api/orders/${id}/`, { method: "PATCH", body: JSON.stringify(payload) });
+export const issueOrder = (id: number, issued: boolean) =>
+  json<WorkOrder>(`/api/orders/${id}/issue/`, { method: "POST", body: JSON.stringify({ issued }) });
+
+export async function downloadOrderAct(id: number, kind: "receive" | "issue"): Promise<void> {
+  const response = await call(`/api/orders/${id}/act/${kind}.pdf`);
+  if (!response.ok) {
+    let detail = `Не удалось сформировать акт (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      /* не JSON */
+    }
+    throw new ApiError(detail, response.status);
+  }
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+  const name = match ? decodeURIComponent(match[1]) : `Акт ${kind === "receive" ? "приёма" : "выдачи"} ${id}.pdf`;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
   document.body.appendChild(link);
   link.click();
   link.remove();

@@ -30,6 +30,7 @@ import Icon from "../ui/Icon";
 import { confirmDialog } from "../ui/Modal";
 import { EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
 import ScanReview from "./ScanReview";
+import { OrderHeader, OrderLine, OrderModal, orderStage, orderTitle } from "./Orders";
 import SiTypeDocuments from "./FifDocuments";
 import InstrumentHistory from "./InstrumentHistory";
 import type { SiTypeDraft } from "./SiTypeForm";
@@ -330,7 +331,7 @@ function AddInstrumentForm({
 
   return (
     <form className="card" onSubmit={submit}>
-      <h3>Новый счётчик</h3>
+      <h3>Новый прибор</h3>
       <div className="field-row">
         <div className="field">
           <label htmlFor="fw-serial">Заводской номер<span className="req">*</span></label>
@@ -1159,41 +1160,28 @@ const OPEN_STATUSES = ["planned", "in_progress"];
 
 type Period = "active" | "closed";
 
-const dayKey = (value: string | null) => (value ? new Date(value).toDateString() : "");
-
-function sortOrders(list: WorkOrder[]): WorkOrder[] {
-  const key = (o: WorkOrder) => `${o.scheduled_date ?? "9999"}T${o.scheduled_time ?? "99"}`;
-  return [...list].sort((a, b) => key(a).localeCompare(key(b)));
-}
-
-/** Разбивка выездов на секции, как в списке «Почты»: сегодня, завтра, скоро. */
-function groupOrders(list: WorkOrder[], period: Period): { title: string; orders: WorkOrder[]; withDate: boolean }[] {
+/** «Поверки» — заказы: группы по тому, где заказ сейчас, а не по дате выезда. */
+function groupLab(list: WorkOrder[], period: Period): { title: string; orders: WorkOrder[]; withDate: boolean }[] {
+  const recent = [...list].sort((a, b) => (b.received_at ?? b.created_at).localeCompare(a.received_at ?? a.created_at));
+  const labOnly = recent.filter((o) => o.kind === "lab");
+  const field = recent.filter((o) => o.kind !== "lab");
   if (period === "closed") {
-    const sorted = sortOrders(list).reverse();
     return [
-      { title: "Закрыты", orders: sorted.filter((o) => o.status === "done"), withDate: true },
-      { title: "Отменены", orders: sorted.filter((o) => o.status === "cancelled"), withDate: true },
+      { title: "Выданы", orders: labOnly.filter((o) => o.issued_at && o.status !== "cancelled"), withDate: true },
+      { title: "Закрытые выезды без даты", orders: field.filter((o) => !OPEN_STATUSES.includes(o.status)), withDate: true },
+      { title: "Отменены", orders: labOnly.filter((o) => o.status === "cancelled"), withDate: true },
     ].filter((g) => g.orders.length > 0);
   }
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  const sorted = sortOrders(list);
-  const at = (o: WorkOrder) => (o.scheduled_date ? new Date(o.scheduled_date) : null);
+  const stage = (o: WorkOrder) => orderStage(o).label;
   return [
-    { title: "Просрочены", orders: sorted.filter((o) => { const d = at(o); return d != null && d < today && dayKey(o.scheduled_date) !== today.toDateString(); }), withDate: true },
-    { title: "Сегодня", orders: sorted.filter((o) => dayKey(o.scheduled_date) === today.toDateString()), withDate: false },
-    { title: "Завтра", orders: sorted.filter((o) => dayKey(o.scheduled_date) === tomorrow.toDateString()), withDate: false },
-    { title: "Скоро", orders: sorted.filter((o) => { const d = at(o); return d != null && d > tomorrow && dayKey(o.scheduled_date) !== tomorrow.toDateString(); }), withDate: true },
-    { title: "Без даты", orders: sorted.filter((o) => !o.scheduled_date), withDate: false },
+    { title: "Готовы к выдаче", orders: labOnly.filter((o) => stage(o) === "Готов к выдаче"), withDate: false },
+    { title: "В работе", orders: labOnly.filter((o) => stage(o) === "Поверка" || stage(o) === "Приём"), withDate: false },
+    { title: "Выезды без даты — назначьте день, и они уйдут во «Выезды»", orders: field, withDate: false },
   ].filter((g) => g.orders.length > 0);
 }
 
-/** Строка под адресом выезда. Время показано отдельной колонкой слева — здесь только кто и что. */
-function orderLine(o: WorkOrder, isManager: boolean): string {
-  return [o.client, isManager ? o.assigned_employee : "", o.note].filter(Boolean).join(" · ");
-}
+const isOpenOrder = (o: WorkOrder) =>
+  o.kind === "lab" ? !o.issued_at && o.status !== "cancelled" : OPEN_STATUSES.includes(o.status);
 
 export default function FieldWork({
   me, isManager = false, openOrderId, backLabel, fallbackTitle, onClose,
@@ -1220,6 +1208,7 @@ export default function FieldWork({
   const [online, setOnline] = useState(isOnline());
   const [queued, setQueued] = useState(0);
   const [outboxProblems, setOutboxProblems] = useState<OutboxItem[]>([]);
+  const [creatingOrder, setCreatingOrder] = useState(false);
 
   // Бланк с QR и распознавание — второй срез офлайна (claude/scans.md).
   // В отличие от остального экрана это НЕ офлайн-функция: печать и
@@ -1387,17 +1376,33 @@ export default function FieldWork({
 
   // --- Шаг 1: выезды ---------------------------------------------------
   if (selectedOrder == null) {
-    const shown = orders.filter((o) => OPEN_STATUSES.includes(o.status) === (period === "active"));
-    const sections = groupOrders(shown, period);
+    const shown = orders.filter((o) => isOpenOrder(o) === (period === "active"));
+    const sections = groupLab(shown, period);
     return (
       <div className="narrow">
         {syncBar}
+        <PageActions>
+          <button type="button" className="primary" onClick={() => setCreatingOrder(true)}>
+            <Icon name="plus" size={16} /> Приём
+          </button>
+        </PageActions>
+        {creatingOrder && (
+          <OrderModal
+            onClose={() => setCreatingOrder(false)}
+            onSaved={(created) => {
+              setCreatingOrder(false);
+              setOrders((current) => [created, ...current]);
+              setSelectedOrder(created.id);
+              setAdding(true);
+            }}
+          />
+        )}
         <div className="toolbar">
           <Segmented
             value={period}
             options={[
               { value: "active", label: "Активные" },
-              { value: "closed", label: "Завершённые" },
+              { value: "closed", label: "Выданные" },
             ]}
             onChange={setPeriod}
           />
@@ -1405,14 +1410,16 @@ export default function FieldWork({
         {error && <div className="error">{error}</div>}
         {loading && <Spinner />}
         {!loading && shown.length === 0 && (
-          <EmptyState icon={period === "closed" ? "checkCircle" : "car"} title={
-            period === "closed"
-              ? "Завершённых выездов пока нет"
-              : isManager
-                ? "Открытых выездов нет"
-                : "Открытых выездов на вас нет"
-          }>
-            {period === "active" && (isManager ? "Выезды появляются, когда заявку подтверждают в «Заявках»." : "Когда диспетчер назначит выезд, он появится здесь и в «Графике».")}
+          <EmptyState
+            icon={period === "closed" ? "checkCircle" : "inbox"}
+            title={period === "closed" ? "Выданных заказов пока нет" : "Заказов в работе нет"}
+            action={period === "active" ? (
+              <button type="button" className="primary" onClick={() => setCreatingOrder(true)}>
+                <Icon name="plus" size={16} /> Принять приборы
+              </button>
+            ) : undefined}
+          >
+            {period === "active" && "Привезли приборы — заведите заказ по ИНН заказчика, внесите приборы и распечатайте акт приёма. Выезды по адресам — во вкладке «Выезды»."}
           </EmptyState>
         )}
         {sections.map((section) => (
@@ -1424,16 +1431,17 @@ export default function FieldWork({
               {section.orders.map((o) => (
                 <button type="button" className="card tap" key={o.id} onClick={() => setSelectedOrder(o.id)}>
                   <div className="order-row">
-                    <div className="order-time">
+                    {o.kind !== "lab" && <div className="order-time">
                       {o.scheduled_time ? o.scheduled_time.slice(0, 5) : section.withDate && o.scheduled_date ? "" : "—"}
                       {section.withDate && o.scheduled_date && (
                         <small>{new Date(o.scheduled_date).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }).replace(".", "")}</small>
                       )}
-                    </div>
+                    </div>}
                     <div className="grow">
-                      <b>{o.site || "Адрес не указан"}</b>
-                      <div className="sub">{orderLine(o, isManager)}</div>
+                      <b>{orderTitle(o)}</b>
+                      <OrderLine o={o} isManager={isManager} />
                     </div>
+                    {o.kind === "lab" && <span className={`pill ${orderStage(o).tone}`}>{orderStage(o).label}</span>}
                     {o.verifications_total > 0 && (
                       <div className="order-progress">
                         {o.verifications_accepted} из {o.verifications_total}
@@ -1456,7 +1464,7 @@ export default function FieldWork({
       <div className="narrow">
         {syncBar}
         <button type="button" className="back" onClick={() => setSelectedVerification(null)}>
-          <Icon name="chevronLeft" size={20} /> {order?.site || fallbackTitle || "Все счётчики"}
+          <Icon name="chevronLeft" size={20} /> {order ? orderTitle(order) : fallbackTitle || "Все приборы"}
         </button>
         <div className="card">
           <div className="card-head">
@@ -1497,6 +1505,13 @@ export default function FieldWork({
       >
         <Icon name="chevronLeft" size={20} /> {embedded ? backLabel || "Назад" : "Поверки"}
       </button>
+      {order?.kind === "lab" ? (
+        <OrderHeader
+          order={order}
+          onError={setError}
+          onChanged={(fresh) => setOrders((current) => current.map((o) => (o.id === fresh.id ? fresh : o)))}
+        />
+      ) : (<>
       <div className="detail-title">
         {order && (
           <div className="sub">
@@ -1526,6 +1541,7 @@ export default function FieldWork({
           </button>
         </div>
       )}
+      </>)}
       {error && <div className="error">{error}</div>}
 
       <h2>Приборы <span className="count">{verifications.length}</span></h2>

@@ -6,6 +6,7 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.utils import timezone
@@ -30,6 +31,7 @@ from apps.verification.models import (
     Verification,
     VerificationStatus,
     WorkOrder,
+    WorkOrderKind,
     WorkOrderStatus,
 )
 
@@ -150,6 +152,68 @@ def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None) -
         contact_phone=data.contact_phone.strip(),
         note=data.note.strip()[:300],
         added_on_site=data.added_on_site,
+    )
+
+
+# ---------------------------------------------------------------------------
+# День поверителя в городе
+# ---------------------------------------------------------------------------
+MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
+          "сентября", "октября", "ноября", "декабря"]
+
+
+def city_title(date: dt.date) -> str:
+    return f"{getattr(settings, 'CITY_NAME', 'Киров')} — {date.day} {MONTHS[date.month - 1]}"
+
+
+def city_day_for(employee: Employee, date: dt.date) -> Trip:
+    """Выезд «город, день поверителя»: один на сотрудника и дату, заводится сам."""
+    trip = (
+        Trip.objects.filter(kind=TripKind.CITY, lead=employee, date_start=date)
+        .exclude(status=TripStatus.CANCELLED)
+        .order_by("id")
+        .first()
+    )
+    if trip is None:
+        trip = Trip.objects.create(
+            kind=TripKind.CITY, title=city_title(date), destination=getattr(settings, "CITY_NAME", "Киров"),
+            date_start=date, date_end=date, lead=employee,
+        )
+    return trip
+
+
+def window_for(time: dt.time | None) -> tuple[dt.time | None, dt.time | None]:
+    """Окно ожидания из времени, обещанного клиенту на сайте: с него и ``CITY_WINDOW_MINUTES`` вперёд."""
+    if time is None:
+        return None, None
+    minutes = int(getattr(settings, "CITY_WINDOW_MINUTES", 60))
+    end = (dt.datetime.combine(dt.date(2000, 1, 1), time) + dt.timedelta(minutes=minutes)).time()
+    return time, (end if end > time else dt.time(23, 59))
+
+
+@transaction.atomic
+def attach_to_city_day(order: WorkOrder) -> TripStop | None:
+    """Наряд на выезд в городе с датой → адрес в дне поверителя.
+
+    Заявка с сайта подтверждается диспетчером, и адрес сразу встаёт в день
+    исполнителя: там его увидят на карте и уложат в маршрут вместе с остальными.
+    Наряды без даты, заказы (вкладка «Поверки») и уже привязанные не трогает.
+    """
+    if order.kind != WorkOrderKind.FIELD or order.scheduled_date is None or order.is_closed:
+        return None
+    if TripStop.objects.filter(work_order=order).exists():
+        return None
+    trip = city_day_for(order.assigned_employee, order.scheduled_date)
+    start, end = window_for(order.scheduled_time)
+    request = order.request
+    last = trip.stops.aggregate(last=Max("position"))["last"] or 0
+    return TripStop.objects.create(
+        trip=trip, position=last + 1, site=order.site, client=order.client, work_order=order,
+        planned_date=order.scheduled_date, window_start=start, window_end=end,
+        planned_count=sum(item.quantity for item in request.items.all()) if request else None,
+        contact_name=order.client.name if order.client.kind == ClientKind.PERSON else "",
+        contact_phone=order.client.phone,
+        note=(request.comment[:300] if request and request.comment else order.note[:300] if order.note else ""),
     )
 
 
@@ -342,7 +406,9 @@ def trip_counts(trip_ids: list[int]) -> dict[int, dict]:
 def procurement_progress(procurement: Procurement) -> dict:
     """Объём по контракту: сколько приборов надо и сколько поверено за все заходы."""
     planned = sum(item.quantity for item in procurement.items.all())
-    verifications = Verification.objects.filter(work_order__trip_stop__trip__procurement=procurement)
+    verifications = Verification.objects.filter(
+        Q(work_order__trip_stop__trip__procurement=procurement) | Q(work_order__procurement=procurement)
+    ).distinct()
     return {
         "planned": planned,
         "entered": verifications.count(),

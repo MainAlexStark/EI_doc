@@ -34,8 +34,26 @@ class WorkOrderSerializer(serializers.Serializer):
     closed_at = serializers.DateTimeField(allow_null=True)
     # Адрес командировки — тот же наряд; экран «Поверки» по этим полям убирает
     # его из общего списка (десятки адресов одной поездки там только мешают).
+    kind = serializers.CharField()
+    client_id = serializers.IntegerField()
+    client_inn = serializers.CharField(source="client.inn")
+    client_kind = serializers.CharField(source="client.kind")
+    client_address = serializers.CharField(source="client.legal_address")
+    client_phone = serializers.CharField(source="client.phone")
+    contact = serializers.CharField()
+    received_at = serializers.DateTimeField(allow_null=True)
+    issued_at = serializers.DateTimeField(allow_null=True)
+    procurement_id = serializers.IntegerField(allow_null=True)
+    procurement_label = serializers.SerializerMethodField()
+    verifications_ready = serializers.SerializerMethodField()
     trip_id = serializers.SerializerMethodField()
     trip_title = serializers.SerializerMethodField()
+
+    def get_procurement_label(self, obj: WorkOrder) -> str:
+        return f"{obj.procurement.label} · {obj.procurement.customer.name}" if obj.procurement_id else ""
+
+    def get_verifications_ready(self, obj: WorkOrder) -> int:
+        return obj.verifications.filter(status__in=["ready", "accepted"]).count()
 
     def get_trip_id(self, obj: WorkOrder) -> int | None:
         stop = getattr(obj, "trip_stop", None)
@@ -57,8 +75,11 @@ class WorkOrderListView(APIView):
 
     def get(self, request):
         qs = WorkOrder.objects.select_related(
-            "client", "site", "assigned_employee", "trip_stop__trip"
+            "client", "site", "assigned_employee", "trip_stop__trip", "procurement__customer"
         ).prefetch_related("verifications")
+        kind = request.query_params.get("kind")
+        if kind:
+            qs = qs.filter(kind=kind)
         ids = [int(part) for part in request.query_params.get("id", "").split(",") if part.strip().isdigit()]
         if ids:
             # Точечный запрос (открыть наряд адреса командировки) — остальные фильтры не нужны.
@@ -100,6 +121,9 @@ class WorkOrderCreateView(APIView):
         payload = WorkOrderCreateSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         obj = WorkOrder.objects.create(**payload.validated_data)
+        from apps.logistics.service import attach_to_city_day
+
+        attach_to_city_day(obj)  # с датой — сразу в день исполнителя во «Выездах»
         return Response(WorkOrderSerializer(obj).data, status=201)
 
 

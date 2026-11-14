@@ -42,6 +42,10 @@ def confirm_request(
             note=note or "",
         )
         obj.mark_confirmed(employee=employee)
+        # Адрес заявки — сразу в день поверителя (вкладка «Выезды»), там карта и маршрут.
+        from apps.logistics.service import attach_to_city_day
+
+        attach_to_city_day(work_order)
     notify_work_order_assigned(work_order)
     return work_order
 

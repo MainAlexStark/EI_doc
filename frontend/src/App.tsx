@@ -19,7 +19,9 @@ const Assistant = lazy(() => import("./assistant/Assistant"));
 /* Навигация (решение 17.10.2026, холст «EI_doc — новый интерфейс», вариант 2):
  * - «Журнал» и «Нормоконтроль» — одна вкладка «Журнал»: у поверителя просто
  *   журнал своих протоколов, у менеджера ещё нумерация и работа с Аршин;
- * - «Наряды» убраны — выезды живут во вкладке «Поверки»: менеджер видит все,
+ * - «Наряды» убраны (14.11.2026 разделено заново): всё с адресами и картой —
+ *   «Выезды» (день поверителя в городе, командировки, закупки); «Поверки» —
+ *   заказы от заказчиков, которые привезли приборы сами. Менеджер видит все,
  *   поверитель — только свои.
  * Раздел хранится в адресе (#/journal) — переживает перезагрузку, работает «Назад». */
 type Tab = "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
@@ -27,8 +29,8 @@ type Tab = "field-work" | "trips" | "journal" | "requests" | "availability" | "t
 type NavItem = { key: Tab; label: string; icon: IconName; managerOnly?: boolean; /** Короче — для таб-бара телефона. */ short?: string };
 
 const WORK: NavItem[] = [
+  { key: "trips", label: "Выезды", icon: "car" },
   { key: "field-work", label: "Поверки", icon: "checkCircle" },
-  { key: "trips", label: "Командировки", short: "Поездки", icon: "car" },
   { key: "journal", label: "Журнал", icon: "doc" },
   { key: "requests", label: "Заявки", icon: "inbox", managerOnly: true },
   { key: "availability", label: "График", icon: "calendar" },
@@ -47,7 +49,7 @@ const ALL_TABS = new Set<Tab>([...WORK, ...REFERENCE].map((item) => item.key));
 const FLUSH: Tab[] = ["availability", "requests", "assistant"];
 
 /** На телефоне в таб-баре — четыре главных, остальное под «Ещё». */
-const PHONE_TABS: Tab[] = ["field-work", "trips", "journal", "availability"];
+const PHONE_TABS: Tab[] = ["trips", "field-work", "journal", "availability"];
 
 /** Кто видит фирму целиком. Поверитель — только своё. */
 const isManagerRole = (role: string | undefined) => !!role && role !== "verifier";
@@ -167,8 +169,8 @@ export default function App() {
   };
 
   const heads: Record<Tab, { title: string; subtitle?: string }> = {
-    "field-work": { title: isManager ? "Все поверки" : "Мои поверки", subtitle: todayLine() },
-    trips: { title: "Командировки", subtitle: "Выезды по районам и работы по закупкам" },
+    "field-work": { title: "Поверки", subtitle: "Заказы: приборы, которые заказчики привезли сами" },
+    trips: { title: "Выезды", subtitle: `${todayLine()} · город, командировки, закупки` },
     journal: { title: "Журнал", subtitle: isManager ? "Протоколы всех поверителей" : "Мои протоколы" },
     requests: { title: "Заявки", subtitle: "С сайта и по телефону" },
     availability: { title: "График", subtitle: "Когда я могу выезжать — заявители на сайте видят эти дни" },

@@ -1600,3 +1600,30 @@ button.trip-mark.active.refused { background: var(--crit-soft); color: var(--cri
   .trip-people { flex-basis: 100%; order: 3; }
   .tabbar .tab { min-width: 0; }
 }
+
+/* маршрут дня */
+.trip-route {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 12px 10px 14px;
+  background: var(--accent-softer); border-radius: var(--radius-lg); box-shadow: inset 0 0 0 0.5px rgba(0, 122, 255, 0.18);
+}
+.trip-route-main { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--muted); }
+.trip-route-main b { color: var(--ink); font-size: 14px; font-weight: 600; }
+.trip-route-actions { display: flex; gap: 6px; }
+.warn-text { color: var(--warn); }
+.crit { color: var(--crit); }
+.trip-wide > .trip-route { max-width: 760px; }
+.plan-preview { background: var(--surface-2); border-radius: var(--radius-lg); padding: 12px 14px; }
+.plan-rows { list-style: none; margin: 10px 0 0; padding: 0; counter-reset: plan; max-height: 46vh; overflow: auto; }
+.plan-rows li { display: flex; gap: 12px; align-items: flex-start; padding: 7px 0; font-size: 14px; counter-increment: plan; }
+.plan-rows li + li { box-shadow: inset 0 0.5px 0 var(--hair); }
+.plan-rows li small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
+.plan-rows li.late small { color: var(--crit); }
+.plan-time { flex: 0 0 auto; width: 46px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.plan-time::before { content: counter(plan) ". "; color: var(--faint); font-weight: 500; font-size: 12px; }
+.plan-time { width: 64px; }
+.order-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: -6px 0 16px; }
+.order-actions .spacer { flex: 1; }
+@media (max-width: 760px) {
+  .order-actions button { flex: 1; }
+  .order-actions .spacer { display: none; }
+}

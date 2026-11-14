@@ -8,6 +8,7 @@ import {
   fetchProcurement,
   fetchTrip,
   locateTripStops,
+  planTripRoute,
   reorderTripStops,
   startNextVisit,
   suggestAddress,
@@ -16,7 +17,10 @@ import {
   type AddressSuggestion,
   type Employee,
   type Me,
+  type PlanPayload,
   type Procurement,
+  type RouteRow,
+  type RouteSummary,
   type StopPayload,
   type StopStatus,
   type Trip,
@@ -38,7 +42,6 @@ import {
   hasPoint,
   instruments,
   locateMe,
-  nearestOrder,
   routeUrl,
   ruDate,
   searchUrl,
@@ -85,6 +88,7 @@ export default function TripDetail({
   const [adding, setAdding] = useState<null | "one" | "bulk">(null);
   const [editing, setEditing] = useState(false);
   const [nextVisit, setNextVisit] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [myPoint, setMyPoint] = useState<Point | null>(null);
@@ -245,21 +249,6 @@ export default function TripDetail({
     [ids[index], ids[target]] = [ids[target], ids[index]];
     void run("order", async () => setTrip(await reorderTripStops(trip.id, ids)), "Не удалось поменять порядок");
   };
-
-  const sortNearest = () =>
-    run("order", async () => {
-      let from: Point | null = myPoint;
-      if (!from) {
-        try {
-          from = await locateMe(6000);
-          setMyPoint(from);
-        } catch {
-          from = null; // без моего места начинаем с первого адреса
-        }
-      }
-      setTrip(await reorderTripStops(trip.id, nearestOrder(stops, from)));
-      setNotice(from ? "Адреса выстроены от вас к ближайшему и дальше по цепочке" : "Адреса выстроены по цепочке от первого");
-    }, "Не удалось упорядочить");
 
   const locateAll = (prefix = "") =>
     run("locate", async () => {
@@ -425,17 +414,42 @@ export default function TripDetail({
             onChange={setMode}
           />
           <span className="spacer" />
-          {canEdit && waitingPoints.length > 1 && (
-            <button type="button" className="sm" disabled={!!busy} onClick={() => void sortNearest()} title="Выстроить ждущие адреса по цепочке: каждый раз к ближайшему">
-              <Icon name="bolt" size={14} /> {busy === "order" ? "Строю…" : "По близости"}
+          {canEdit && waitingPoints.length > 0 && (
+            <button type="button" className="sm tinted" disabled={!!busy} onClick={() => setPlanning(true)} title="Порядок объезда с учётом времени в пути, пробок и обещанного клиентам времени">
+              <Icon name="bolt" size={14} /> Маршрут дня
             </button>
           )}
           {waitingPoints.length > 0 && (
-            <a className="btn sm" href={routeUrl(waitingPoints.slice(0, 14), myPoint)} target="_blank" rel="noreferrer">
-              <Icon name="external" size={14} /> Маршрут
+            <a className="btn sm" href={routeUrl(waitingPoints.slice(0, 14), myPoint)} target="_blank" rel="noreferrer" title="Открыть ждущие адреса по порядку в Яндекс Картах">
+              <Icon name="external" size={14} /> В навигатор
             </a>
           )}
         </div>
+      )}
+
+      {trip.route && summary.stops_waiting > 0 && (
+        <RouteCard
+          route={trip.route}
+          canEdit={canEdit}
+          busy={!!busy}
+          onReplan={() => setPlanning(true)}
+          onFromMe={() =>
+            void run("plan", async () => {
+              const point = myPoint ?? (await locateMe(8000));
+              setMyPoint(point);
+              const result = await planTripRoute(trip.id, {
+                ...planDefaults(trip),
+                start: "me",
+                latitude: point.latitude,
+                longitude: point.longitude,
+                departure: new Date().toISOString(),
+                apply: true,
+              });
+              if (result.trip) setTrip(result.trip);
+              setNotice("Маршрут пересчитан от вашего места, с текущего времени");
+            }, "Не удалось пересчитать маршрут")
+          }
+        />
       )}
 
       {stops.length > 0 && unlocated > 0 && (
@@ -584,6 +598,18 @@ export default function TripDetail({
           }}
         />
       )}
+      {planning && (
+        <PlanModal
+          trip={trip}
+          me={myPoint}
+          onClose={() => setPlanning(false)}
+          onApplied={(fresh, text) => {
+            setPlanning(false);
+            setTrip(fresh);
+            setNotice(text);
+          }}
+        />
+      )}
       {nextVisit && (
         <NextVisitModal
           trip={trip}
@@ -617,6 +643,14 @@ function StopRow({ stop, me, active, onOpen }: { stop: TripStop; me: Point | nul
         {line.length > 0 && <div className="sub">{line.join(" · ")}</div>}
         <div className="trip-tags">
           {stop.status !== "planned" && <span className={`pill ${STOP_TONE[stop.status]}`}>{stop.status_display}</span>}
+          {stop.status === "planned" && stop.eta && (
+            <span className={`pill ${isLate(stop) ? "bad" : "info"} plain`} title="Приезд по плану маршрута">
+              ≈ {clock(stop.eta)}{stop.drive_minutes != null ? ` · ${duration(stop.drive_minutes)} в пути` : ""}
+            </span>
+          )}
+          {stop.window_start && (
+            <span className="pill warn plain" title="Когда клиент ждёт">ждут {windowText(stop)}</span>
+          )}
           {stop.added_on_site && <span className="pill info plain">на месте</span>}
           {stop.is_restricted && <span className="pill warn plain">режимный</span>}
           {stop.carried_from && <span className="pill purple plain">перенесён</span>}
@@ -659,12 +693,17 @@ function StopSheet({
   const [count, setCount] = useState(stop.planned_count != null ? String(stop.planned_count) : "");
   const [phone, setPhone] = useState(stop.contact_phone);
   const [name, setName] = useState(stop.contact_name);
+  const [from, setFrom] = useState(stop.window_start ?? "");
+  const [till, setTill] = useState(stop.window_end ?? "");
+  const [minutes, setMinutes] = useState(stop.service_minutes != null ? String(stop.service_minutes) : "");
   const [saving, setSaving] = useState("");
   const [local, setLocal] = useState("");
   const open = trip.status === "planned" || trip.status === "active";
 
   const dirty =
     note !== stop.note || phone !== stop.contact_phone || name !== stop.contact_name ||
+    from !== (stop.window_start ?? "") || till !== (stop.window_end ?? "") ||
+    minutes !== (stop.service_minutes != null ? String(stop.service_minutes) : "") ||
     count !== (stop.planned_count != null ? String(stop.planned_count) : "");
 
   const save = async (payload: StopPayload, label: string) => {
@@ -775,13 +814,30 @@ function StopSheet({
                 <input id="stop-note" value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} placeholder="Домофон, собака, после 18:00…" />
               </div>
             </div>
+            <div className="field-row">
+              <div className="field">
+                <label htmlFor="stop-from">Ждут с</label>
+                <input id="stop-from" type="time" value={from} onChange={(event) => setFrom(event.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="stop-till">до</label>
+                <input id="stop-till" type="time" value={till} onChange={(event) => setTill(event.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="stop-minutes">Минут на адрес</label>
+                <input id="stop-minutes" inputMode="numeric" value={minutes} placeholder="как у всех" onChange={(event) => setMinutes(event.target.value.replace(/\D/g, ""))} />
+              </div>
+            </div>
             {dirty && (
               <button
                 type="button"
                 className="primary"
                 disabled={!!saving}
                 onClick={() =>
-                  void save({ note, contact_phone: phone, contact_name: name, planned_count: count ? Number(count) : null }, "fields")
+                  void save({
+                    note, contact_phone: phone, contact_name: name, planned_count: count ? Number(count) : null,
+                    window_start: from || null, window_end: till || null, service_minutes: minutes ? Number(minutes) : null,
+                  }, "fields")
                 }
               >
                 {saving === "fields" ? "Сохраняю…" : "Сохранить"}
@@ -1266,6 +1322,244 @@ function NextVisitModal({ trip, onClose, onCreated }: { trip: Trip; onClose: () 
         </div>
         {dateStart && <div className="hint">Выезд {ruDate(dateStart)}</div>}
         {error && <Alert>{error}</Alert>}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Маршрут дня (apps/logistics/planner.py)
+// ---------------------------------------------------------------------------
+const clock = (iso: string) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+
+const duration = (minutes: number) => {
+  if (minutes < 60) return `${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
+};
+
+const windowText = (stop: TripStop) =>
+  stop.window_end ? `${stop.window_start}–${stop.window_end}` : `с ${stop.window_start}`;
+
+const isLate = (stop: TripStop) => {
+  if (!stop.eta || !stop.window_end) return false;
+  const eta = new Date(stop.eta);
+  const [h, m] = stop.window_end.split(":").map(Number);
+  return eta.getHours() * 60 + eta.getMinutes() > h * 60 + m;
+};
+
+const localInput = (date: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+/** Когда выезжаем: если день выезда сегодня или уже идёт — сейчас (с округлением), иначе 9:00 дня выезда. */
+function defaultDeparture(trip: Trip): string {
+  const now = new Date();
+  const day = trip.date_start ? new Date(`${trip.date_start}T09:00:00`) : null;
+  if (!day || day.getTime() <= now.getTime() || trip.status === "active") {
+    const rounded = new Date(Math.ceil(now.getTime() / 300_000) * 300_000);
+    return localInput(rounded);
+  }
+  return localInput(day);
+}
+
+function planDefaults(trip: Trip): PlanPayload {
+  const last = trip.route;
+  return {
+    start: trip.has_base ? "base" : "me",
+    service_minutes: last?.service_minutes ?? 20,
+    per_instrument_minutes: last?.per_instrument_minutes ?? 5,
+    day_end: last?.day_end ?? "18:00",
+    return_to_start: last?.return_to_start ?? false,
+  };
+}
+
+function RouteCard({
+  route, canEdit, busy, onReplan, onFromMe,
+}: {
+  route: RouteSummary;
+  canEdit: boolean;
+  busy: boolean;
+  onReplan: () => void;
+  onFromMe: () => void;
+}) {
+  return (
+    <div className="trip-route">
+      <div className="trip-route-main">
+        <b>
+          Выезд {clock(route.departure)} {route.origin} · {route.stops} адр. · в пути {duration(route.drive_minutes)}, {route.km} км
+        </b>
+        <span>
+          закончите ≈ {clock(route.finish)}
+          {route.late > 0 && <> · <span className="crit">опозданий: {route.late}</span></>}
+          {route.after_day_end > 0 && <> · <span className="crit">после {route.day_end}: {route.after_day_end}</span></>}
+          {" · "}
+          <span className={route.traffic ? "" : "warn-text"}>{route.provider_label}</span>
+        </span>
+        {route.notes.map((note) => <span key={note} className="warn-text">{note}</span>)}
+      </div>
+      {canEdit && (
+        <div className="trip-route-actions">
+          <button type="button" className="sm" disabled={busy} onClick={onFromMe} title="Пересчитать оставшиеся адреса от того места, где вы сейчас">
+            <Icon name="mapPin" size={14} /> От меня
+          </button>
+          <button type="button" className="sm" disabled={busy} onClick={onReplan}>Настроить</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanModal({
+  trip, me, onClose, onApplied,
+}: {
+  trip: Trip;
+  me: Point | null;
+  onClose: () => void;
+  onApplied: (trip: Trip, notice: string) => void;
+}) {
+  const initial = planDefaults(trip);
+  const [start, setStart] = useState<PlanPayload["start"]>(initial.start);
+  const [departure, setDeparture] = useState(defaultDeparture(trip));
+  const [service, setService] = useState(String(initial.service_minutes));
+  const [perInstrument, setPerInstrument] = useState(String(initial.per_instrument_minutes));
+  const [dayEnd, setDayEnd] = useState(initial.day_end);
+  const [back, setBack] = useState(initial.return_to_start);
+  const [preview, setPreview] = useState<{ summary: RouteSummary; rows: RouteRow[] } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const payload = async (): Promise<PlanPayload> => {
+    const body: PlanPayload = {
+      start,
+      departure: new Date(departure).toISOString(),
+      service_minutes: Math.max(1, Number(service) || 20),
+      per_instrument_minutes: Math.max(0, Number(perInstrument) || 0),
+      day_end: dayEnd || "18:00",
+      return_to_start: back,
+    };
+    if (start === "me") {
+      const point = me ?? (await locateMe(10_000));
+      body.latitude = point.latitude;
+      body.longitude = point.longitude;
+    }
+    return body;
+  };
+
+  const calculate = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      setPreview(await planTripRoute(trip.id, await payload()));
+    } catch (exc) {
+      setError(errorText(exc, "Не удалось построить маршрут"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const apply = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await planTripRoute(trip.id, { ...(await payload()), apply: true });
+      if (result.trip) onApplied(result.trip, `Маршрут сохранён: ${result.rows.length} адр., закончите ≈ ${clock(result.summary.finish)}`);
+    } catch (exc) {
+      setError(errorText(exc, "Не удалось сохранить маршрут"));
+      setBusy(false);
+    }
+  };
+
+  // Любая настройка меняет результат — старый предпросмотр убираем.
+  useEffect(() => setPreview(null), [start, departure, service, perInstrument, dayEnd, back]);
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      title="Маршрут дня"
+      subtitle={trip.routing_traffic ? "Время в пути — 2ГИС с учётом пробок на время выезда" : "Ключа 2ГИС нет — время в пути оценивается по прямой, без пробок"}
+      footer={
+        <>
+          <button type="button" onClick={onClose}>Отмена</button>
+          {!preview ? (
+            <button type="button" className="primary" disabled={busy} onClick={() => void calculate()}>{busy ? "Считаю…" : "Рассчитать"}</button>
+          ) : (
+            <button type="button" className="primary" disabled={busy} onClick={() => void apply()}>{busy ? "Сохраняю…" : "Применить порядок"}</button>
+          )}
+        </>
+      }
+    >
+      <div className="form-stack">
+        <div className="field">
+          <span className="field-label">Откуда выезжаем</span>
+          <Segmented
+            value={start}
+            options={[
+              ...(trip.has_base ? [{ value: "base" as const, label: "Офис", icon: "briefcase" as const }] : []),
+              { value: "me", label: "От меня", icon: "mapPin" },
+              { value: "first", label: "С первого адреса", icon: "flag" },
+            ]}
+            onChange={setStart}
+          />
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="plan-departure">Выезд</label>
+            <input id="plan-departure" type="datetime-local" value={departure} onChange={(event) => setDeparture(event.target.value)} />
+          </div>
+          <div className="field" style={{ flex: "0 0 120px" }}>
+            <label htmlFor="plan-end">Конец дня</label>
+            <input id="plan-end" type="time" value={dayEnd} onChange={(event) => setDayEnd(event.target.value)} />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="plan-service">Минут на адрес</label>
+            <input id="plan-service" inputMode="numeric" value={service} onChange={(event) => setService(event.target.value.replace(/\D/g, ""))} />
+          </div>
+          <div className="field">
+            <label htmlFor="plan-per">+ на каждый следующий прибор</label>
+            <input id="plan-per" inputMode="numeric" value={perInstrument} onChange={(event) => setPerInstrument(event.target.value.replace(/\D/g, ""))} />
+          </div>
+        </div>
+        <Switch checked={back} onChange={setBack} label="Вернуться в точку выезда" hint="Учесть дорогу обратно в конце дня" />
+        <div className="hint">
+          Учитываются только ждущие адреса с точкой на карте. Окна «ждут с … до …» соблюдаются: раньше приехать можно — подождём,
+          опоздание программа старается не допускать. Своё время на адрес можно задать в карточке адреса.
+        </div>
+        {error && <Alert>{error}</Alert>}
+        {preview && (
+          <div className="plan-preview">
+            <div className="trip-route-main">
+              <b>{preview.rows.length} адр. · в пути {duration(preview.summary.drive_minutes)}, {preview.summary.km} км · закончите ≈ {clock(preview.summary.finish)}</b>
+              <span className={preview.summary.traffic ? "" : "warn-text"}>{preview.summary.provider_label}</span>
+              {preview.summary.notes.map((note) => <span key={note} className="warn-text">{note}</span>)}
+            </div>
+            <ol className="plan-rows">
+              {preview.rows.map((row) => (
+                <li key={row.id} className={row.late_minutes > 0 || row.after_day_end ? "late" : ""}>
+                  <span className="plan-time">{clock(row.eta)}</span>
+                  <span className="grow">
+                    {row.address}
+                    <small>
+                      {[
+                        row.drive_minutes ? `${duration(row.drive_minutes)} в пути, ${row.km} км` : "старт",
+                        row.window[0] ? `ждут ${row.window[0]}${row.window[1] ? `–${row.window[1]}` : ""}` : "",
+                        row.wait_minutes > 0 ? `ожидание ${duration(row.wait_minutes)}` : "",
+                        row.late_minutes > 0 ? `опоздание ${duration(row.late_minutes)}` : "",
+                        row.after_day_end ? "после конца дня" : "",
+                      ].filter(Boolean).join(" · ")}
+                    </small>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
       </div>
     </Modal>
   );

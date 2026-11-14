@@ -15,13 +15,15 @@ import { Alert, EmptyState, PageActions, Segmented, Spinner } from "../ui/contro
 import ProcurementView, { ProcurementForm } from "./Procurements";
 import TripDetail from "./TripDetail";
 import { DeadlinePill } from "./TripBits";
-import { TRIP_TONE, dateRange, errorText, instruments, isoDay } from "./tripUtil";
+import { TRIP_TONE, dateRange, errorText, instruments, isoDay, ruDate } from "./tripUtil";
 
-/** Раздел «Командировки» (claude/trips.md).
+/** Раздел «Выезды» (claude/trips.md).
  *
- * Два вида поездок в одном списке: обычная (район, даты, адреса) и по закупке,
- * где главное — контракт: номер, документы, пропуска, объём. У закупки заходов
- * сколько угодно, поэтому у неё своя карточка, а командировка — один заход.
+ * Всё, где есть адреса и карта, в одном списке: день поверителя в городе
+ * (заводится сам, когда подтверждают заявку с сайта), командировка (район,
+ * даты) и командировка по закупке, где главное — контракт: номер, документы,
+ * пропуска, объём. У закупки заходов сколько угодно, поэтому у неё своя
+ * карточка, а выезд — один заход.
  *
  * Где человек был — командировка или закупка — помнит sessionStorage: телефон
  * часто выгружает вкладку, пока ходишь по квартирам, и возвращаться каждый раз
@@ -161,7 +163,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
             setCreating(section === "procurements" && isManager ? "procurement" : "trip");
           }}
         >
-          <Icon name="plus" size={16} /> {section === "procurements" && isManager ? "Закупка" : "Командировка"}
+          <Icon name="plus" size={16} /> {section === "procurements" && isManager ? "Закупка" : "Выезд"}
         </button>
       </PageActions>
 
@@ -169,7 +171,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
         <Segmented
           value={section}
           options={[
-            { value: "trips", label: "Командировки", icon: "car" },
+            { value: "trips", label: "Выезды", icon: "car" },
             { value: "procurements", label: "Закупки", icon: "briefcase" },
           ]}
           onChange={setSection}
@@ -192,17 +194,17 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
       {section === "trips" && trips != null && trips.length === 0 && (
         <EmptyState
           icon="car"
-          title={period === "open" ? "Командировок пока нет" : "В архиве пусто"}
+          title={period === "open" ? "Выездов пока нет" : "В архиве пусто"}
           action={
             period === "open" ? (
               <button type="button" className="primary" onClick={() => setCreating("trip")}>
-                <Icon name="plus" size={16} /> Завести командировку
+                <Icon name="plus" size={16} /> Завести выезд
               </button>
             ) : undefined
           }
         >
           {period === "open" &&
-            "Заведите поездку, накидайте адреса из плана — остальные добавите на месте. Поверки по адресам попадут в журнал как обычно."}
+            "Подтверждённые заявки с сайта сами встают в день поверителя. Командировку заведите кнопкой «Выезд»: адреса из плана, остальные — на месте."}
         </EmptyState>
       )}
 
@@ -251,6 +253,8 @@ function TripCard({ trip, showLead, onOpen }: { trip: TripBrief; showLead: boole
           <div className="sub">{line.join(" · ")}</div>
           <div className="trip-tags">
             <span className={`pill ${TRIP_TONE[trip.status]}`}>{trip.status_display}</span>
+            {trip.kind === "city" && <span className="pill info plain">город</span>}
+            {trip.kind === "classic" && <span className="pill muted plain">командировка</span>}
             {trip.procurement && <span className="pill purple plain">Закупка {trip.procurement.label}</span>}
           </div>
         </div>
@@ -304,7 +308,7 @@ function NewTripModal({
 }) {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const [kind, setKind] = useState<"classic" | "procurement">(procurementId ? "procurement" : "classic");
+  const [kind, setKind] = useState<"city" | "classic" | "procurement">(procurementId ? "procurement" : "city");
   const [destination, setDestination] = useState("");
   const [title, setTitle] = useState("");
   const [dateStart, setDateStart] = useState(isoDay(tomorrow));
@@ -338,11 +342,13 @@ function NewTripModal({
     setBusy(true);
     setError("");
     try {
+      const city = kind === "city";
       const trip = await createTrip({
-        title: title.trim(),
-        destination: destination.trim(),
+        kind,
+        title: title.trim() || (city ? `Киров — ${ruDate(dateStart)}` : ""),
+        destination: city ? destination.trim() || "Киров" : destination.trim(),
         date_start: dateStart || null,
-        date_end: dateEnd || null,
+        date_end: city ? dateStart || null : dateEnd || null,
         lead_id: Number(leadId),
         member_ids: members,
         procurement_id: kind === "procurement" ? Number(procurement) : null,
@@ -362,7 +368,7 @@ function NewTripModal({
     <Modal
       open
       onClose={onClose}
-      title="Новая командировка"
+      title="Новый выезд"
       footer={
         <>
           <button type="button" onClick={onClose}>Отмена</button>
@@ -382,11 +388,17 @@ function NewTripModal({
         <Segmented
           value={kind}
           options={[
-            { value: "classic", label: "Обычная", icon: "car" },
+            { value: "city", label: "Город", icon: "mapPin" },
+            { value: "classic", label: "Командировка", icon: "car" },
             { value: "procurement", label: "По закупке", icon: "briefcase" },
           ]}
           onChange={setKind}
         />
+        {kind === "city" && (
+          <div className="hint">
+            День по городу. Обычно его заводить не нужно: подтверждённые заявки с сайта сами встают в день исполнителя.
+          </div>
+        )}
 
         {kind === "procurement" && (
           <div className="field">
@@ -415,7 +427,7 @@ function NewTripModal({
           </div>
         )}
 
-        <div className="field">
+        {kind !== "city" && <div className="field">
           <label htmlFor="trip-destination">Куда</label>
           <input
             id="trip-destination"
@@ -424,7 +436,7 @@ function NewTripModal({
             placeholder="Район или населённый пункт"
             autoFocus={kind === "classic"}
           />
-        </div>
+        </div>}
         <div className="field">
           <label htmlFor="trip-title">Название <span className="opt">— необязательно</span></label>
           <input
@@ -436,13 +448,13 @@ function NewTripModal({
         </div>
         <div className="field-row">
           <div className="field">
-            <label htmlFor="trip-start">Выезд</label>
+            <label htmlFor="trip-start">{kind === "city" ? "День" : "Выезд"}</label>
             <input id="trip-start" type="date" value={dateStart} onChange={(event) => setDateStart(event.target.value)} />
           </div>
-          <div className="field">
+          {kind !== "city" && <div className="field">
             <label htmlFor="trip-end">Возвращение <span className="opt">— если известно</span></label>
             <input id="trip-end" type="date" value={dateEnd} min={dateStart} onChange={(event) => setDateEnd(event.target.value)} />
-          </div>
+          </div>}
         </div>
 
         {isManager && (

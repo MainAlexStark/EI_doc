@@ -242,6 +242,17 @@ MAP_TILES_UPSTREAM = env("MAP_TILES_UPSTREAM", default="https://tile.openstreetm
 MAP_TILES_CONTACT = env("MAP_TILES_CONTACT", default="")
 MAP_TILES_REFERER = env("MAP_TILES_REFERER", default="")
 
+# Маршрут дня (apps.logistics.planner): время в пути — 2ГИС Distance Matrix с пробками
+# (ключ — platform.2gis.ru, начать можно с демо-ключа), без ключа — оценка по прямой.
+DGIS_API_KEY = env("DGIS_API_KEY", default="")
+# Откуда выезжаем по умолчанию. Координаты точнее; без них — найдём по адресу.
+ROUTE_BASE_ADDRESS = env("ROUTE_BASE_ADDRESS", default="Киров, улица Красноармейская, 43А")
+ROUTE_BASE_LAT = env.float("ROUTE_BASE_LAT", default=None)
+ROUTE_BASE_LON = env.float("ROUTE_BASE_LON", default=None)
+# Выезды по городу: в какой город, сколько минут клиента ждать от обещанного времени.
+CITY_NAME = env("CITY_NAME", default="Киров")
+CITY_WINDOW_MINUTES = env.int("CITY_WINDOW_MINUTES", default=60)
+
 # --------------------------------------------------------------------------
 # Капча (Yandex SmartCaptcha) — публичная форма заявки
 # --------------------------------------------------------------------------

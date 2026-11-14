@@ -65,6 +65,13 @@ from apps.verification.api_journal import (
     SignProtocolsView,
 )
 from apps.verification.api_field import WorkOrderVerificationsView
+from apps.verification.api_orders import (
+    ClientLookupView,
+    OrderActView,
+    OrderCreateView,
+    OrderDetailView,
+    OrderIssueView,
+)
 from apps.verification.api_history import FgisVerificationCardView, InstrumentHistoryView
 from apps.verification.api_templates import (
     TemplateApproveView,
@@ -215,6 +222,12 @@ urlpatterns = [
         "api/work-orders/<int:pk>/verifications/",
         WorkOrderVerificationsView.as_view(), name="work_order_verifications",
     ),
+    # Заказы — вкладка «Поверки» (приборы привезли сами)
+    path("api/clients/lookup/", ClientLookupView.as_view(), name="client_lookup"),
+    path("api/orders/", OrderCreateView.as_view(), name="order_create"),
+    path("api/orders/<int:pk>/", OrderDetailView.as_view(), name="order_detail"),
+    path("api/orders/<int:pk>/issue/", OrderIssueView.as_view(), name="order_issue"),
+    path("api/orders/<int:pk>/act/<str:kind>.pdf", OrderActView.as_view(), name="order_act"),
     # Бланк с QR и распознавание (второй срез офлайна, claude/scans.md)
     path(
         "api/work-orders/<int:pk>/blank/",

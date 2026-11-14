@@ -9,6 +9,7 @@ urlpatterns = [
     path("trips/<int:pk>/stops/bulk/", api.TripStopsBulkView.as_view(), name="trip_stops_bulk"),
     path("trips/<int:pk>/stops/reorder/", api.TripStopsReorderView.as_view(), name="trip_stops_reorder"),
     path("trips/<int:pk>/locate/", api.TripLocateView.as_view(), name="trip_locate"),
+    path("trips/<int:pk>/plan/", api.TripPlanView.as_view(), name="trip_plan"),
     path("trips/<int:pk>/next-visit/", api.TripNextVisitView.as_view(), name="trip_next_visit"),
     path("trip-stops/<int:pk>/", api.TripStopDetailView.as_view(), name="trip_stop_detail"),
     path("procurements/", api.ProcurementListView.as_view(), name="procurement_list"),

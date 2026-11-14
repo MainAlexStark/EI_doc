@@ -27,6 +27,9 @@ class Client(models.Model):
     kind = models.CharField("тип", max_length=10, choices=ClientKind.choices, default=ClientKind.PERSON)
     name = models.CharField("наименование / ФИО", max_length=250)
     inn = models.CharField("ИНН", max_length=12, blank=True, db_index=True)
+    kpp = models.CharField("КПП", max_length=9, blank=True)
+    ogrn = models.CharField("ОГРН", max_length=15, blank=True)
+    legal_address = models.CharField("юридический адрес", max_length=350, blank=True)
     phone = models.CharField("телефон", max_length=32, blank=True)
     email = models.EmailField("email", blank=True)
     note = models.TextField("примечание", blank=True)
@@ -481,6 +484,11 @@ class VerificationPhoto(models.Model):
 # ---------------------------------------------------------------------------
 # Наряды
 # ---------------------------------------------------------------------------
+class WorkOrderKind(models.TextChoices):
+    FIELD = "field", "Выезд"
+    LAB = "lab", "Заказ"
+
+
 class WorkOrderStatus(models.TextChoices):
     PLANNED = "planned", "Запланирован"
     IN_PROGRESS = "in_progress", "В работе"
@@ -521,6 +529,20 @@ class WorkOrder(models.Model):
                   "если среди приборов был хоть один, требующий выбора времени",
     )
     note = models.TextField("примечание", blank=True)
+
+    # Заказ (вкладка «Поверки»): заказчик привёз приборы сам — адресов и карты нет,
+    # главное юрлицо, ИНН, что приняли и когда отдали (акты приёма и выдачи).
+    kind = models.CharField(
+        "вид", max_length=8, choices=WorkOrderKind.choices, default=WorkOrderKind.FIELD, db_index=True,
+    )
+    procurement = models.ForeignKey(
+        "logistics.Procurement", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="orders", verbose_name="закупка",
+        help_text="Заказ в счёт контракта — идёт в план/факт закупки",
+    )
+    contact = models.CharField("кто сдал / контакт", max_length=200, blank=True)
+    received_at = models.DateTimeField("приборы приняты", null=True, blank=True)
+    issued_at = models.DateTimeField("приборы выданы", null=True, blank=True)
 
     created_at = models.DateTimeField("создан", auto_now_add=True)
     closed_at = models.DateTimeField("закрыт", null=True, blank=True)

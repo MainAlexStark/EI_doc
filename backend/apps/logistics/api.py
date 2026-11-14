@@ -22,8 +22,10 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from decimal import Decimal
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import Http404
@@ -36,7 +38,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.models import Employee, Role
-from apps.logistics import geocode, service
+from apps.logistics import geocode, planner, service
 from apps.logistics.models import (
     DocumentKind,
     Pass,
@@ -189,6 +191,11 @@ def stop_data(stop: TripStop) -> dict:
         "added_on_site": stop.added_on_site,
         "carried_from": stop.carried_from.trip.title if stop.carried_from_id else "",
         "visited_at": stop.visited_at,
+        "window_start": stop.window_start.strftime("%H:%M") if stop.window_start else None,
+        "window_end": stop.window_end.strftime("%H:%M") if stop.window_end else None,
+        "service_minutes": stop.service_minutes,
+        "eta": stop.eta,
+        "drive_minutes": round(stop.drive_seconds / 60) if stop.drive_seconds is not None else None,
         "work_order_id": stop.work_order_id,
         "verifications_total": getattr(stop, "verifications_total", 0),
         "verifications_ready": getattr(stop, "verifications_ready", 0),
@@ -205,6 +212,9 @@ def trip_detail(trip: Trip, user) -> dict:
         summary=summary,
         can_edit=can_edit_trip(user, trip),
         can_locate=geocode.is_enabled(),
+        route=trip.route or None,
+        routing_traffic=bool(getattr(settings, "DGIS_API_KEY", "")),
+        has_base=bool(getattr(settings, "ROUTE_BASE_ADDRESS", "") or getattr(settings, "ROUTE_BASE_LAT", None)),
         visit_number=trip.visit_number,
         passes=service.pass_coverage(trip)
         if trip.procurement_id and trip.procurement.passes.exists() else [],
@@ -283,6 +293,7 @@ def procurement_detail(item: Procurement, user) -> dict:
 # Командировки
 # ---------------------------------------------------------------------------
 class TripWriteSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=TripKind.choices, required=False)
     title = serializers.CharField(max_length=200, required=False, allow_blank=True)
     destination = serializers.CharField(max_length=200, required=False, allow_blank=True)
     date_start = serializers.DateField(required=False, allow_null=True)
@@ -340,8 +351,13 @@ class TripListView(APIView):
             else:
                 title = (data.get("destination") or "").strip() or "Командировка"
 
+        kind = TripKind.PROCUREMENT if procurement else (
+            TripKind.CITY if data.get("kind") == TripKind.CITY else TripKind.CLASSIC
+        )
+        if kind == TripKind.CITY and data.get("date_start") and not data.get("date_end"):
+            data["date_end"] = data["date_start"]
         trip = Trip.objects.create(
-            kind=TripKind.PROCUREMENT if procurement else TripKind.CLASSIC,
+            kind=kind,
             title=title,
             destination=(data.get("destination") or "").strip(),
             procurement=procurement,
@@ -408,6 +424,9 @@ class StopWriteSerializer(serializers.Serializer):
     access_note = serializers.CharField(required=False, allow_blank=True)
     added_on_site = serializers.BooleanField(required=False)
     status = serializers.ChoiceField(choices=StopStatus.choices, required=False)
+    window_start = serializers.TimeField(required=False, allow_null=True)
+    window_end = serializers.TimeField(required=False, allow_null=True)
+    service_minutes = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=600)
 
 
 def _stop_response(stop: TripStop, code: int = 200) -> Response:
@@ -422,12 +441,17 @@ class TripStopsView(APIView):
         payload.is_valid(raise_exception=True)
         data = dict(payload.validated_data)
         data.pop("status", None)
+        timing = {key: data.pop(key) for key in ("window_start", "window_end", "service_minutes") if key in data}
         if data.get("site_id") and not Site.objects.filter(pk=data["site_id"]).exists():
             raise ValidationError({"detail": "Объект не найден"})
         # Кто завёл адрес на месте — тот и поверяет; плановые адреса достаются старшему.
         me = employee_of(request.user)
         verifier = me if data.get("added_on_site") and me else None
         stop = guarded(lambda: service.add_stop(trip, service.StopInput(**data), employee=verifier))
+        if timing:
+            for key, value in timing.items():
+                setattr(stop, key, value)
+            stop.save(update_fields=list(timing))
         return _stop_response(stop, status.HTTP_201_CREATED)
 
 
@@ -481,6 +505,41 @@ class TripNextVisitView(APIView):
         return Response(trip_detail(trip, request.user), status=status.HTTP_201_CREATED)
 
 
+class PlanSerializer(serializers.Serializer):
+    start = serializers.ChoiceField(choices=["base", "me", "first"], default="base")
+    latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
+    departure = serializers.DateTimeField(required=False, allow_null=True)
+    service_minutes = serializers.IntegerField(default=20, min_value=1, max_value=600)
+    per_instrument_minutes = serializers.IntegerField(default=5, min_value=0, max_value=120)
+    day_end = serializers.TimeField(default=dt.time(18, 0))
+    return_to_start = serializers.BooleanField(default=False)
+    apply = serializers.BooleanField(default=False)
+
+
+class TripPlanView(APIView):
+    """POST /api/trips/{id}/plan/ — порядок объезда с учётом пробок и окон; apply=true — сохранить."""
+
+    def post(self, request, pk: int):
+        trip = require_trip(request, pk, write=True)
+        payload = PlanSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        me = (data["latitude"], data["longitude"]) if data.get("latitude") is not None and data.get("longitude") is not None else None
+        options = planner.PlanOptions(
+            start=data["start"], me=me, departure=data.get("departure"),
+            service_minutes=data["service_minutes"], per_instrument_minutes=data["per_instrument_minutes"],
+            day_end=data["day_end"], return_to_start=data["return_to_start"],
+        )
+        try:
+            result = planner.plan(trip, options, apply=data["apply"])
+        except planner.PlanError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        if data["apply"]:
+            result["trip"] = trip_detail(trip, request.user)
+        return Response(result)
+
+
 class TripStopDetailView(APIView):
     def _stop(self, request, pk: int) -> TripStop:
         stop = get_object_or_404(TripStop.objects.select_related("trip", "site", "work_order"), pk=pk)
@@ -494,7 +553,10 @@ class TripStopDetailView(APIView):
         data = payload.validated_data
 
         changed = []
-        for field in ("contact_name", "contact_phone", "planned_date", "planned_count", "note"):
+        for field in (
+            "contact_name", "contact_phone", "planned_date", "planned_count", "note",
+            "window_start", "window_end", "service_minutes",
+        ):
             if field in data:
                 setattr(stop, field, data[field])
                 changed.append(field)

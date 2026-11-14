@@ -218,7 +218,8 @@ class Pass(models.Model):
 # Командировка
 # ---------------------------------------------------------------------------
 class TripKind(models.TextChoices):
-    CLASSIC = "classic", "Обычная"
+    CITY = "city", "Город"
+    CLASSIC = "classic", "Командировка"
     PROCUREMENT = "procurement", "По закупке"
 
 
@@ -251,13 +252,17 @@ class Trip(models.Model):
         help_text="Кроме старшего",
     )
     note = models.TextField("примечание", blank=True)
+    route = models.JSONField(
+        "последний расчёт маршрута", default=dict, blank=True,
+        help_text="Откуда, когда выезд, чем считали время в пути, итоги — см. apps.logistics.planner",
+    )
     created_at = models.DateTimeField("заведена", auto_now_add=True)
 
     history = HistoricalRecords()
 
     class Meta:
-        verbose_name = "командировка"
-        verbose_name_plural = "командировки"
+        verbose_name = "выезд"
+        verbose_name_plural = "выезды"
         ordering = ["-date_start", "-created_at"]
         indexes = [models.Index(fields=["status", "date_start"])]
 
@@ -311,6 +316,13 @@ class TripStop(models.Model):
     contact_name = models.CharField("кто встречает", max_length=160, blank=True)
     contact_phone = models.CharField("телефон", max_length=32, blank=True)
     note = models.CharField("заметка", max_length=300, blank=True)
+    window_start = models.TimeField("ждут с", null=True, blank=True)
+    window_end = models.TimeField("ждут до", null=True, blank=True)
+    service_minutes = models.PositiveSmallIntegerField(
+        "минут на адрес", null=True, blank=True, help_text="Пусто — по умолчанию из расчёта маршрута",
+    )
+    eta = models.DateTimeField("приезд по плану", null=True, blank=True)
+    drive_seconds = models.PositiveIntegerField("ехать от предыдущего, с", null=True, blank=True)
     added_on_site = models.BooleanField(
         "добавлен на месте", default=False,
         help_text="Не из плана: клиент появился уже в командировке",
