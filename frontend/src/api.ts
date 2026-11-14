@@ -1670,3 +1670,37 @@ export async function downloadOrderAct(id: number, kind: "receive" | "issue"): P
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
+
+// ---------------------------------------------------------------------------
+// Запись на поверку из сервиса (apps/logistics/api.py: VisitCreateView)
+// ---------------------------------------------------------------------------
+export type VisitDefaults = { work_day: [string, string]; city: string; can_assign: boolean };
+export type VisitPayload = {
+  contact_name?: string;
+  contact_phone?: string;
+  address: string;
+  postal_code?: string;
+  fias_id?: string;
+  district?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  date: string;
+  window_start?: string | null;
+  window_end?: string | null;
+  employee_id?: number | null;
+  quantity?: number | null;
+  comment?: string;
+  source?: "phone" | "manual" | "email";
+};
+export type VisitResult = {
+  request_id: number;
+  work_order_id: number;
+  trip_id: number;
+  stop_id: number;
+  employee: string;
+  trip_title: string;
+};
+
+export const fetchVisitDefaults = () => json<VisitDefaults>("/api/visits/");
+export const createVisit = (payload: VisitPayload) =>
+  json<VisitResult>("/api/visits/", { method: "POST", body: JSON.stringify(payload) });

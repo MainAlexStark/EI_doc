@@ -11,6 +11,7 @@ urlpatterns = [
     path("trips/<int:pk>/locate/", api.TripLocateView.as_view(), name="trip_locate"),
     path("trips/<int:pk>/plan/", api.TripPlanView.as_view(), name="trip_plan"),
     path("trips/<int:pk>/next-visit/", api.TripNextVisitView.as_view(), name="trip_next_visit"),
+    path("visits/", api.VisitCreateView.as_view(), name="visit_create"),
     path("trip-stops/<int:pk>/", api.TripStopDetailView.as_view(), name="trip_stop_detail"),
     path("procurements/", api.ProcurementListView.as_view(), name="procurement_list"),
     path("procurements/<int:pk>/", api.ProcurementDetailView.as_view(), name="procurement_detail"),

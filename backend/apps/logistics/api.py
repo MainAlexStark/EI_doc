@@ -832,3 +832,121 @@ class PassDetailView(APIView):
         require_manager(request)
         get_object_or_404(Pass, pk=pk).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Запись на поверку из сервиса (по телефону, лично) — без формы на сайте
+# ---------------------------------------------------------------------------
+class VisitItemSerializer(serializers.Serializer):
+    family_id = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1, max_value=999)
+
+
+class VisitSerializer(serializers.Serializer):
+    contact_name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    contact_phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    address = serializers.CharField(max_length=350)
+    postal_code = serializers.CharField(max_length=6, required=False, allow_blank=True)
+    fias_id = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    district = serializers.CharField(max_length=120, required=False, allow_blank=True)
+    latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
+    date = serializers.DateField()
+    window_start = serializers.TimeField(required=False, allow_null=True)
+    window_end = serializers.TimeField(required=False, allow_null=True)
+    employee_id = serializers.IntegerField(required=False, allow_null=True)
+    quantity = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=999)
+    items = VisitItemSerializer(many=True, required=False)
+    comment = serializers.CharField(required=False, allow_blank=True)
+    source = serializers.ChoiceField(choices=["phone", "manual", "email"], default="phone")
+
+    def validate(self, attrs):
+        start, end = attrs.get("window_start"), attrs.get("window_end")
+        if start and end and end <= start:
+            raise serializers.ValidationError("Конец интервала раньше начала")
+        if not attrs.get("address", "").strip():
+            raise serializers.ValidationError("Укажите адрес")
+        return attrs
+
+
+class VisitCreateView(APIView):
+    """POST /api/visits/ — записать клиента на поверку прямо в сервисе.
+
+    Заводится обычная заявка (источник — телефон / вручную, чтобы она была видна
+    в «Заявках» и в отчётах наравне с сайтом) и сразу подтверждается: наряд,
+    адрес в дне исполнителя, окно «ждут с … до …». Исполнителя не выбрали —
+    подбирается тем же роутингом по району, что и заявки с сайта, иначе — кто записал.
+    """
+
+    def get(self, request):
+        """Что нужно форме записи: рабочий день, город, можно ли выбирать исполнителя."""
+        return Response({
+            "work_day": [t.strftime("%H:%M") for t in planner.work_day()],
+            "city": getattr(settings, "CITY_NAME", "Киров"),
+            "can_assign": is_manager(request.user),
+        })
+
+    def post(self, request):
+        from apps.catalog.models import MeasurementFamily
+        from apps.hub import routing as hub_routing
+        from apps.hub.models import Request as HubRequest
+        from apps.hub.models import RequestItem
+        from apps.hub.service import confirm_request
+
+        payload = VisitSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        me = employee_of(request.user)
+
+        lat, lon = data.get("latitude"), data.get("longitude")
+        if lat is None or lon is None:
+            point = geocode.geocode(data["address"], getattr(settings, "CITY_NAME", ""))
+            lat, lon = point if point else (None, None)
+
+        with transaction.atomic():
+            visit = HubRequest.objects.create(
+                source=data["source"],
+                contact_name=(data.get("contact_name") or "").strip() or service.ANONYMOUS_CLIENT,
+                contact_phone=(data.get("contact_phone") or "").strip(),
+                address=" ".join(data["address"].split()),
+                postal_code=data.get("postal_code", ""),
+                fias_id=data.get("fias_id", ""),
+                district=hub_routing.resolve_district(data.get("district", "")),
+                latitude=service._coord(lat), longitude=service._coord(lon),
+                is_address_confirmed=bool(data.get("fias_id")),
+                desired_date=data["date"], desired_time=data.get("window_start"),
+                comment=data.get("comment", ""),
+            )
+            for row in data.get("items", []):
+                family = MeasurementFamily.objects.filter(pk=row["family_id"]).first()
+                if family is not None:
+                    RequestItem.objects.create(request=visit, family=family, quantity=row["quantity"])
+
+            employee = None
+            if data.get("employee_id"):
+                if not is_manager(request.user) and (me is None or data["employee_id"] != me.pk):
+                    raise PermissionDenied("Записывать на другого сотрудника могут руководители и менеджеры")
+                employee = get_object_or_404(Employee, pk=data["employee_id"], is_active=True)
+            if employee is None:
+                hub_routing.route(visit)
+                employee = visit.suggested_employee or me
+            if employee is None:
+                raise ValidationError({"detail": "Выберите исполнителя"})
+
+            order = confirm_request(visit, employee=employee, scheduled_date=data["date"],
+                                    scheduled_time=data.get("window_start"))
+            stop = TripStop.objects.get(work_order=order)
+            changed = []
+            if data.get("window_end"):
+                stop.window_end = data["window_end"]
+                changed.append("window_end")
+            if data.get("quantity") and not data.get("items"):
+                stop.planned_count = data["quantity"]
+                changed.append("planned_count")
+            if changed:
+                stop.save(update_fields=changed)
+        return Response(
+            {"request_id": visit.pk, "work_order_id": order.pk, "trip_id": stop.trip_id, "stop_id": stop.pk,
+             "employee": employee.full_name, "trip_title": stop.trip.title},
+            status=status.HTTP_201_CREATED,
+        )

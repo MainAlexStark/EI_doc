@@ -14,6 +14,7 @@ import { Modal } from "../ui/Modal";
 import { Alert, EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
 import ProcurementView, { ProcurementForm } from "./Procurements";
 import TripDetail from "./TripDetail";
+import VisitModal from "./Visit";
 import { DeadlinePill } from "./TripBits";
 import { TRIP_TONE, dateRange, errorText, instruments, isoDay, ruDate } from "./tripUtil";
 
@@ -60,7 +61,8 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
   const [trips, setTrips] = useState<TripBrief[] | null>(null);
   const [procurements, setProcurements] = useState<ProcurementRow[] | null>(null);
   const [error, setError] = useState("");
-  const [creating, setCreating] = useState<null | "trip" | "procurement">(null);
+  const [creating, setCreating] = useState<null | "trip" | "procurement" | "visit">(null);
+  const [booked, setBooked] = useState("");
   const [forProcurement, setForProcurement] = useState<number | null>(null);
 
   const setView = useCallback((next: View) => {
@@ -103,6 +105,17 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
           onNewProcurement={() => setCreating("procurement")}
         />
       )}
+      {creating === "visit" && me && (
+        <VisitModal
+          me={me}
+          onClose={() => setCreating(null)}
+          onCreated={(result) => {
+            setCreating(null);
+            setBooked(`Записано: ${result.trip_title}, исполнитель ${result.employee}`);
+            setView({ kind: "trip", id: result.trip_id });
+          }}
+        />
+      )}
       {creating === "procurement" && (
         <ProcurementForm
           onClose={() => setCreating(null)}
@@ -117,6 +130,8 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
 
   if (view.kind === "trip") {
     return (
+      <>
+      {booked && <Alert tone="ok" onClose={() => setBooked("")}>{booked}</Alert>}
       <TripDetail
         key={view.id}
         tripId={view.id}
@@ -126,6 +141,8 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
         onOpenProcurement={(id) => setView({ kind: "procurement", id })}
         onOpenTrip={(id) => setView({ kind: "trip", id })}
       />
+      {modals}
+      </>
     );
   }
 
@@ -155,9 +172,14 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
   return (
     <div className="narrow">
       <PageActions>
+        {section === "trips" && (
+          <button type="button" className="primary" onClick={() => setCreating("visit")}>
+            <Icon name="plus" size={16} /> Запись
+          </button>
+        )}
         <button
           type="button"
-          className="primary"
+          className={section === "trips" ? "" : "primary"}
           onClick={() => {
             setForProcurement(null);
             setCreating(section === "procurements" && isManager ? "procurement" : "trip");
@@ -204,7 +226,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
           }
         >
           {period === "open" &&
-            "Подтверждённые заявки с сайта сами встают в день поверителя. Командировку заведите кнопкой «Выезд»: адреса из плана, остальные — на месте."}
+            "Подтверждённые заявки с сайта сами встают в день поверителя. Клиент позвонил — кнопка «Запись». Командировку заведите кнопкой «Выезд»."}
         </EmptyState>
       )}
 
