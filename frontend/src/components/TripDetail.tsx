@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addTripStop,
   addTripStopsBulk,
@@ -510,7 +510,7 @@ export default function TripDetail({
             {shown.length === 0 && <div className="empty small">Таких адресов нет</div>}
             <div className="card-list">
               {shown.map((stop) => (
-                <StopRow key={stop.id} stop={stop} me={myPoint} active={stop.id === openStop} onOpen={() => setOpenStop(stop.id)} />
+                <StopRow key={stop.id} stop={stop} me={myPoint} active={stop.id === openStop} onOpen={() => setOpenStop(stop.id)} showDay={spansDays(trip)} />
               ))}
             </div>
           </div>
@@ -624,7 +624,15 @@ export default function TripDetail({
   );
 }
 
-function StopRow({ stop, me, active, onOpen }: { stop: TripStop; me: Point | null; active: boolean; onOpen: () => void }) {
+function StopRow({
+  stop, me, active, onOpen, showDay = false,
+}: {
+  stop: TripStop;
+  me: Point | null;
+  active: boolean;
+  onOpen: () => void;
+  showDay?: boolean;
+}) {
   const who = [stop.client !== "Физическое лицо" ? stop.client : "", stop.contact_name !== stop.client ? stop.contact_name : ""]
     .filter(Boolean)
     .join(", ");
@@ -645,7 +653,7 @@ function StopRow({ stop, me, active, onOpen }: { stop: TripStop; me: Point | nul
           {stop.status !== "planned" && <span className={`pill ${STOP_TONE[stop.status]}`}>{stop.status_display}</span>}
           {stop.status === "planned" && stop.eta && (
             <span className={`pill ${isLate(stop) ? "bad" : "info"} plain`} title="Приезд по плану маршрута">
-              ≈ {clock(stop.eta)}{stop.drive_minutes != null ? ` · ${duration(stop.drive_minutes)} в пути` : ""}
+              ≈ {showDay ? `${dayLabel(stop.eta.slice(0, 10))}, ` : ""}{clock(stop.eta)}{stop.drive_minutes != null ? ` · ${duration(stop.drive_minutes)} в пути` : ""}
             </span>
           )}
           {stop.window_start && (
@@ -814,10 +822,32 @@ function StopSheet({
                 <input id="stop-note" value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} placeholder="Домофон, собака, после 18:00…" />
               </div>
             </div>
+            <div className="field">
+              <span className="field-label">Когда ждут</span>
+              <WindowPresets
+                from={from}
+                till={till}
+                workDay={trip.work_day}
+                onPick={(a, b) => {
+                  setFrom(a);
+                  setTill(b);
+                }}
+              />
+            </div>
             <div className="field-row">
               <div className="field">
                 <label htmlFor="stop-from">Ждут с</label>
-                <input id="stop-from" type="time" value={from} onChange={(event) => setFrom(event.target.value)} />
+                <input
+                  id="stop-from"
+                  type="time"
+                  value={from}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    // Обычно клиенту называют интервал в два часа — «до» подставляем сами.
+                    if (next && (!till || till === plusHours(from, 2))) setTill(plusHours(next, 2));
+                    setFrom(next);
+                  }}
+                />
               </div>
               <div className="field">
                 <label htmlFor="stop-till">до</label>
@@ -893,6 +923,8 @@ function AddStopModal({
   const [note, setNote] = useState("");
   const [restricted, setRestricted] = useState(false);
   const [accessNote, setAccessNote] = useState("");
+  const [windowFrom, setWindowFrom] = useState("");
+  const [windowTill, setWindowTill] = useState("");
   const [point, setPoint] = useState<Point | null>(null);
   const [locating, setLocating] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -977,6 +1009,7 @@ function AddStopModal({
         planned_count: count ? Number(count) : null,
         note: note.trim(),
         added_on_site: onSite,
+        ...(windowFrom ? { window_start: windowFrom, window_end: windowTill || null } : {}),
         ...(coords ?? {}),
         ...(picked && picked.value === address
           ? { postal_code: picked.postal_code, fias_id: picked.fias_id, district: picked.district }
@@ -1093,6 +1126,21 @@ function AddStopModal({
             <input id="stop-new-note" value={note} maxLength={300} onChange={(event) => setNote(event.target.value)} />
           </div>
         </div>
+
+        {!onSite && (
+          <div className="field">
+            <span className="field-label">Когда ждут <span className="opt">— если договорились</span></span>
+            <WindowPresets
+              from={windowFrom}
+              till={windowTill}
+              workDay={trip.work_day}
+              onPick={(a, b) => {
+                setWindowFrom(a);
+                setWindowTill(b);
+              }}
+            />
+          </div>
+        )}
 
         {byContract && !siteId && (
           <>
@@ -1354,10 +1402,10 @@ const localInput = (date: Date) => {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
-/** Когда выезжаем: если день выезда сегодня или уже идёт — сейчас (с округлением), иначе 9:00 дня выезда. */
+/** Когда выезжаем: если день выезда сегодня или уже идёт — сейчас (с округлением), иначе начало рабочего дня. */
 function defaultDeparture(trip: Trip): string {
   const now = new Date();
-  const day = trip.date_start ? new Date(`${trip.date_start}T09:00:00`) : null;
+  const day = trip.date_start ? new Date(`${trip.date_start}T${trip.work_day[0]}:00`) : null;
   if (!day || day.getTime() <= now.getTime() || trip.status === "active") {
     const rounded = new Date(Math.ceil(now.getTime() / 300_000) * 300_000);
     return localInput(rounded);
@@ -1365,16 +1413,23 @@ function defaultDeparture(trip: Trip): string {
   return localInput(day);
 }
 
+const spansDays = (trip: Trip) => !!(trip.date_start && trip.date_end && trip.date_end > trip.date_start);
+
 function planDefaults(trip: Trip): PlanPayload {
   const last = trip.route;
   return {
     start: trip.has_base ? "base" : "me",
     service_minutes: last?.service_minutes ?? 20,
     per_instrument_minutes: last?.per_instrument_minutes ?? 5,
-    day_end: last?.day_end ?? "18:00",
+    day_start: last?.day_start ?? trip.work_day[0],
+    day_end: last?.day_end ?? trip.work_day[1],
     return_to_start: last?.return_to_start ?? false,
+    multi_day: last?.multi_day ?? spansDays(trip),
   };
 }
+
+const dayLabel = (iso: string) =>
+  new Date(`${iso}T12:00:00`).toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" });
 
 function RouteCard({
   route, canEdit, busy, onReplan, onFromMe,
@@ -1389,10 +1444,11 @@ function RouteCard({
     <div className="trip-route">
       <div className="trip-route-main">
         <b>
-          Выезд {clock(route.departure)} {route.origin} · {route.stops} адр. · в пути {duration(route.drive_minutes)}, {route.km} км
+          Выезд {clock(route.departure)} {route.origin} · {route.stops} адр.
+          {route.days && route.days.length > 1 ? ` за ${route.days.length} дн.` : ""} · в пути {duration(route.drive_minutes)}, {route.km} км
         </b>
         <span>
-          закончите ≈ {clock(route.finish)}
+          закончите ≈ {route.days && route.days.length > 1 ? `${dayLabel(route.finish.slice(0, 10))}, ` : ""}{clock(route.finish)}
           {route.late > 0 && <> · <span className="crit">опозданий: {route.late}</span></>}
           {route.after_day_end > 0 && <> · <span className="crit">после {route.day_end}: {route.after_day_end}</span></>}
           {" · "}
@@ -1425,7 +1481,9 @@ function PlanModal({
   const [departure, setDeparture] = useState(defaultDeparture(trip));
   const [service, setService] = useState(String(initial.service_minutes));
   const [perInstrument, setPerInstrument] = useState(String(initial.per_instrument_minutes));
+  const [dayStart, setDayStart] = useState(initial.day_start);
   const [dayEnd, setDayEnd] = useState(initial.day_end);
+  const [multiDay, setMultiDay] = useState(initial.multi_day ?? false);
   const [back, setBack] = useState(initial.return_to_start);
   const [preview, setPreview] = useState<{ summary: RouteSummary; rows: RouteRow[] } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1437,8 +1495,10 @@ function PlanModal({
       departure: new Date(departure).toISOString(),
       service_minutes: Math.max(1, Number(service) || 20),
       per_instrument_minutes: Math.max(0, Number(perInstrument) || 0),
-      day_end: dayEnd || "18:00",
+      day_start: dayStart || trip.work_day[0],
+      day_end: dayEnd || trip.work_day[1],
       return_to_start: back,
+      multi_day: multiDay,
     };
     if (start === "me") {
       const point = me ?? (await locateMe(10_000));
@@ -1473,7 +1533,7 @@ function PlanModal({
   };
 
   // Любая настройка меняет результат — старый предпросмотр убираем.
-  useEffect(() => setPreview(null), [start, departure, service, perInstrument, dayEnd, back]);
+  useEffect(() => setPreview(null), [start, departure, service, perInstrument, dayStart, dayEnd, back, multiDay]);
 
   return (
     <Modal
@@ -1506,16 +1566,28 @@ function PlanModal({
             onChange={setStart}
           />
         </div>
+        <div className="field">
+          <label htmlFor="plan-departure">Выезд</label>
+          <input id="plan-departure" type="datetime-local" value={departure} onChange={(event) => setDeparture(event.target.value)} />
+        </div>
         <div className="field-row">
           <div className="field">
-            <label htmlFor="plan-departure">Выезд</label>
-            <input id="plan-departure" type="datetime-local" value={departure} onChange={(event) => setDeparture(event.target.value)} />
+            <label htmlFor="plan-day-start">Рабочий день с</label>
+            <input id="plan-day-start" type="time" value={dayStart} onChange={(event) => setDayStart(event.target.value)} />
           </div>
-          <div className="field" style={{ flex: "0 0 120px" }}>
-            <label htmlFor="plan-end">Конец дня</label>
+          <div className="field">
+            <label htmlFor="plan-end">до</label>
             <input id="plan-end" type="time" value={dayEnd} onChange={(event) => setDayEnd(event.target.value)} />
           </div>
         </div>
+        {spansDays(trip) && (
+          <Switch
+            checked={multiDay}
+            onChange={setMultiDay}
+            label={`Разложить по дням: ${dateRange(trip.date_start, trip.date_end)}`}
+            hint="Что не влезает в рабочий день — на следующий, утром от места, где закончили"
+          />
+        )}
         <div className="field-row">
           <div className="field">
             <label htmlFor="plan-service">Минут на адрес</label>
@@ -1535,13 +1607,17 @@ function PlanModal({
         {preview && (
           <div className="plan-preview">
             <div className="trip-route-main">
-              <b>{preview.rows.length} адр. · в пути {duration(preview.summary.drive_minutes)}, {preview.summary.km} км · закончите ≈ {clock(preview.summary.finish)}</b>
+              <b>{preview.rows.length} адр.{preview.summary.days.length > 1 ? ` за ${preview.summary.days.length} дн.` : ""} · в пути {duration(preview.summary.drive_minutes)}, {preview.summary.km} км · закончите ≈ {clock(preview.summary.finish)}</b>
               <span className={preview.summary.traffic ? "" : "warn-text"}>{preview.summary.provider_label}</span>
               {preview.summary.notes.map((note) => <span key={note} className="warn-text">{note}</span>)}
             </div>
             <ol className="plan-rows">
-              {preview.rows.map((row) => (
-                <li key={row.id} className={row.late_minutes > 0 || row.after_day_end ? "late" : ""}>
+              {preview.rows.map((row, index) => (
+                <Fragment key={row.id}>
+                {preview.summary.days.length > 1 && (index === 0 || preview.rows[index - 1].day !== row.day) && (
+                  <li className="plan-day">{dayLabel(row.day)}</li>
+                )}
+                <li className={row.late_minutes > 0 || row.after_day_end ? "late" : ""}>
                   <span className="plan-time">{clock(row.eta)}</span>
                   <span className="grow">
                     {row.address}
@@ -1551,16 +1627,64 @@ function PlanModal({
                         row.window[0] ? `ждут ${row.window[0]}${row.window[1] ? `–${row.window[1]}` : ""}` : "",
                         row.wait_minutes > 0 ? `ожидание ${duration(row.wait_minutes)}` : "",
                         row.late_minutes > 0 ? `опоздание ${duration(row.late_minutes)}` : "",
-                        row.after_day_end ? "после конца дня" : "",
+                        row.after_day_end ? "не успеваете до конца дня" : "",
                       ].filter(Boolean).join(" · ")}
                     </small>
                   </span>
                 </li>
+                </Fragment>
               ))}
             </ol>
           </div>
         )}
       </div>
     </Modal>
+  );
+}
+
+const plusHours = (time: string, hours: number) => {
+  if (!time) return "";
+  const [h, m] = time.split(":").map(Number);
+  const total = Math.min(h * 60 + m + hours * 60, 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+};
+
+/** Интервалы, которые обычно называют клиенту: по два часа, плюс «весь день» для выездов в районы. */
+function WindowPresets({
+  from, till, workDay, onPick,
+}: {
+  from: string;
+  till: string;
+  workDay: [string, string];
+  onPick: (from: string, till: string) => void;
+}) {
+  const startHour = Number(workDay[0].slice(0, 2)) || 8;
+  const endHour = Number(workDay[1].slice(0, 2)) || 17;
+  const slots: [string, string][] = [];
+  for (let hour = startHour; hour + 2 <= Math.max(endHour, startHour + 2) + 1 && slots.length < 5; hour += 2) {
+    slots.push([`${String(hour).padStart(2, "0")}:00`, `${String(hour + 2).padStart(2, "0")}:00`]);
+  }
+  const options: { label: string; value: [string, string] }[] = [
+    ...slots.map((slot) => ({ label: `${Number(slot[0].slice(0, 2))}–${Number(slot[1].slice(0, 2))}`, value: slot })),
+    { label: "Весь день", value: workDay },
+    { label: "Без времени", value: ["", ""] },
+  ];
+  return (
+    <div className="chip-row">
+      {options.map((option) => {
+        const active = option.value[0] === from && option.value[1] === till;
+        return (
+          <button
+            type="button"
+            key={option.label}
+            className={`chip ${active ? "active" : ""}`}
+            aria-pressed={active}
+            onClick={() => onPick(option.value[0], option.value[1])}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }

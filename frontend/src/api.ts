@@ -1392,6 +1392,8 @@ export type Trip = TripBrief & {
   routing_traffic: boolean;
   /** Задан адрес офиса — можно строить маршрут «из офиса». */
   has_base: boolean;
+  /** Рабочий день по умолчанию, «08:00»–«17:00». */
+  work_day: [string, string];
 };
 
 export type RouteSummary = {
@@ -1410,12 +1412,16 @@ export type RouteSummary = {
   after_day_end: number;
   service_minutes: number;
   per_instrument_minutes: number;
+  day_start: string;
   day_end: string;
   return_to_start: boolean;
+  days: string[];
+  multi_day: boolean;
 };
 
 export type RouteRow = {
   id: number;
+  day: string;
   address: string;
   eta: string;
   leave: string;
@@ -1434,8 +1440,10 @@ export type PlanPayload = {
   departure?: string;
   service_minutes: number;
   per_instrument_minutes: number;
+  day_start: string;
   day_end: string;
   return_to_start: boolean;
+  multi_day?: boolean;
   apply?: boolean;
 };
 

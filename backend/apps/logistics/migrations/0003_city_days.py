@@ -39,7 +39,7 @@ def forwards(apps, schema_editor):
         start = order.scheduled_time
         end = None
         if start is not None:
-            end = (dt.datetime.combine(dt.date(2000, 1, 1), start) + dt.timedelta(hours=1)).time()
+            end = (dt.datetime.combine(dt.date(2000, 1, 1), start) + dt.timedelta(hours=2)).time()
             if end <= start:
                 end = dt.time(23, 59)
         position = TripStop.objects.filter(trip=trip).count() + 1

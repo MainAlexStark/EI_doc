@@ -94,7 +94,7 @@ class PlannerTests(PlannerBase):
             start="me", me=BASE, departure=self.departure, service_minutes=15, per_instrument_minutes=10,
             day_end=dt.time(12, 0)))
         last = result["rows"][-1]
-        assert last["after_day_end"] is True and result["summary"]["after_day_end"] == 1
+        assert last["after_day_end"] is True and result["summary"]["after_day_end"] == 2  # 6,5 часа на первом адресе
 
     def test_done_and_unlocated_stops_keep_out_of_the_route(self):
         done = self.stop(2, position=1, status=StopStatus.DONE)
@@ -137,6 +137,41 @@ class PlannerTests(PlannerBase):
         response = self.api.post(f"/api/trips/{self.trip.pk}/plan/", {"start": "me", "latitude": 58.6, "longitude": 49.6},
                                  format="json")
         assert response.status_code == 400
+
+
+class MultiDayTests(PlannerBase):
+    def test_addresses_that_do_not_fit_move_to_the_next_working_day(self):
+        self.trip.kind = TripKind.CLASSIC
+        self.trip.date_end = dt.date(2026, 11, 17)
+        self.trip.save()
+        stops = [self.stop(km, position=i + 1, count=1) for i, km in enumerate((1, 2, 3, 4, 5, 6))]
+        # По 2 часа на адрес, выезд в 9:00, день до 13:30: в первый день влезают два адреса.
+        options = planner.PlanOptions(start="me", me=BASE, departure=self.departure, service_minutes=120,
+                                      per_instrument_minutes=0, day_start=dt.time(8, 0), day_end=dt.time(13, 30),
+                                      last_day=dt.date(2026, 11, 17))
+        result = planner.plan(self.trip, options, apply=True)
+        days = [row["day"] for row in result["rows"]]
+        assert days[:2] == ["2026-11-16"] * 2 and days[2:4] == ["2026-11-17"] * 2
+        assert result["summary"]["days"] == ["2026-11-16", "2026-11-17"] and result["summary"]["multi_day"]
+        morning = dt.datetime.fromisoformat(result["rows"][2]["eta"])
+        assert (morning.date(), morning.hour) == (dt.date(2026, 11, 17), 8)  # утром от места ночёвки, без дороги из Кирова
+        # дальше дней нет — последние адреса помечены «после конца дня», но не потеряны
+        assert all(row["after_day_end"] for row in result["rows"][4:])
+        third = TripStop.objects.get(pk=result["rows"][2]["id"])
+        assert third.planned_date == dt.date(2026, 11, 17)
+        assert len(stops) == len(result["rows"])
+
+    def test_api_spreads_over_trip_days_by_default(self):
+        self.trip.date_end = dt.date(2026, 11, 18)
+        self.trip.save()
+        for i in range(8):
+            self.stop(i + 1, position=i + 1)
+        body = {"start": "me", "latitude": BASE[0], "longitude": BASE[1], "departure": self.departure.isoformat(),
+                "service_minutes": 90}
+        spread = self.api.post(f"/api/trips/{self.trip.pk}/plan/", body, format="json").data
+        assert len(spread["summary"]["days"]) == 2 and spread["summary"]["day_end"] == "17:00"
+        one_day = self.api.post(f"/api/trips/{self.trip.pk}/plan/", {**body, "multi_day": False}, format="json").data
+        assert one_day["summary"]["days"] == ["2026-11-16"] and one_day["summary"]["after_day_end"] > 0
 
 
 class DgisMatrixTests(PlannerBase):
@@ -206,7 +241,7 @@ class CityDayTests(TestCase):
         other_day = service.attach_to_city_day(self.order(scheduled_date=dt.date(2026, 11, 17)))
         assert first.trip == second.trip != other_day.trip
         assert first.trip.kind == TripKind.CITY and first.trip.title == "Киров — 16 ноября"
-        assert (first.window_start, first.window_end) == (dt.time(10, 30), dt.time(11, 30))
+        assert (first.window_start, first.window_end) == (dt.time(10, 30), dt.time(12, 30))
         assert second.window_start is None and second.position == 2
         assert first.contact_phone == "+79000000001"
 

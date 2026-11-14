@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from decimal import Decimal
 
 from django.conf import settings
@@ -214,6 +213,7 @@ def trip_detail(trip: Trip, user) -> dict:
         can_locate=geocode.is_enabled(),
         route=trip.route or None,
         routing_traffic=bool(getattr(settings, "DGIS_API_KEY", "")),
+        work_day=[t.strftime("%H:%M") for t in planner.work_day()],
         has_base=bool(getattr(settings, "ROUTE_BASE_ADDRESS", "") or getattr(settings, "ROUTE_BASE_LAT", None)),
         visit_number=trip.visit_number,
         passes=service.pass_coverage(trip)
@@ -512,8 +512,10 @@ class PlanSerializer(serializers.Serializer):
     departure = serializers.DateTimeField(required=False, allow_null=True)
     service_minutes = serializers.IntegerField(default=20, min_value=1, max_value=600)
     per_instrument_minutes = serializers.IntegerField(default=5, min_value=0, max_value=120)
-    day_end = serializers.TimeField(default=dt.time(18, 0))
+    day_start = serializers.TimeField(required=False)
+    day_end = serializers.TimeField(required=False)
     return_to_start = serializers.BooleanField(default=False)
+    multi_day = serializers.BooleanField(required=False)
     apply = serializers.BooleanField(default=False)
 
 
@@ -526,10 +528,15 @@ class TripPlanView(APIView):
         payload.is_valid(raise_exception=True)
         data = payload.validated_data
         me = (data["latitude"], data["longitude"]) if data.get("latitude") is not None and data.get("longitude") is not None else None
+        start, end = planner.work_day()
+        # Выезд на несколько дней — раскладываем адреса по рабочим дням до даты возвращения.
+        spans = bool(trip.date_start and trip.date_end and trip.date_end > trip.date_start)
         options = planner.PlanOptions(
             start=data["start"], me=me, departure=data.get("departure"),
             service_minutes=data["service_minutes"], per_instrument_minutes=data["per_instrument_minutes"],
-            day_end=data["day_end"], return_to_start=data["return_to_start"],
+            day_start=data.get("day_start") or start, day_end=data.get("day_end") or end,
+            return_to_start=data["return_to_start"],
+            last_day=trip.date_end if data.get("multi_day", spans) and trip.date_end else None,
         )
         try:
             result = planner.plan(trip, options, apply=data["apply"])

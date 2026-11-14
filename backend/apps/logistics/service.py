@@ -186,7 +186,7 @@ def window_for(time: dt.time | None) -> tuple[dt.time | None, dt.time | None]:
     """Окно ожидания из времени, обещанного клиенту на сайте: с него и ``CITY_WINDOW_MINUTES`` вперёд."""
     if time is None:
         return None, None
-    minutes = int(getattr(settings, "CITY_WINDOW_MINUTES", 60))
+    minutes = int(getattr(settings, "CITY_WINDOW_MINUTES", 120))
     end = (dt.datetime.combine(dt.date(2000, 1, 1), time) + dt.timedelta(minutes=minutes)).time()
     return time, (end if end > time else dt.time(23, 59))
 

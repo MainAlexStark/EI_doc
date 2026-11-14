@@ -251,7 +251,10 @@ ROUTE_BASE_LAT = env.float("ROUTE_BASE_LAT", default=None)
 ROUTE_BASE_LON = env.float("ROUTE_BASE_LON", default=None)
 # Выезды по городу: в какой город, сколько минут клиента ждать от обещанного времени.
 CITY_NAME = env("CITY_NAME", default="Киров")
-CITY_WINDOW_MINUTES = env.int("CITY_WINDOW_MINUTES", default=60)
+CITY_WINDOW_MINUTES = env.int("CITY_WINDOW_MINUTES", default=120)  # клиенту называют интервал в 2 часа
+# Рабочий день — граница маршрута; в командировке адреса, что не влезли, уходят на следующий день.
+WORK_DAY_START = env("WORK_DAY_START", default="08:00")
+WORK_DAY_END = env("WORK_DAY_END", default="17:00")
 
 # --------------------------------------------------------------------------
 # Капча (Yandex SmartCaptcha) — публичная форма заявки

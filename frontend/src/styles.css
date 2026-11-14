@@ -1627,3 +1627,4 @@ button.trip-mark.active.refused { background: var(--crit-soft); color: var(--cri
   .order-actions button { flex: 1; }
   .order-actions .spacer { display: none; }
 }
+.plan-rows li.plan-day { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: capitalize; padding: 12px 0 4px; counter-increment: none; }
