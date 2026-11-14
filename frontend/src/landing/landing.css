@@ -59,7 +59,7 @@
 .landing::after {
   /* лёгкое затемнение к центру, чтобы текст и форма читались поверх весов */
   content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background: radial-gradient(ellipse 45% 55% at 28% 42%, rgba(4, 6, 12, 0.75), transparent 80%);
+  background: radial-gradient(ellipse 45% 55% at 28% 42%, rgba(4, 6, 12, 0.6), transparent 80%);
 }
 
 /* ---------- верх ---------- */

@@ -2,24 +2,31 @@ import { useEffect, useRef } from "react";
 import { GLITCH, SCALES } from "./ascii";
 
 // Сетка символов на canvas во весь экран. Узор из весов в шахматном порядке
-// шагает по диагонали снизу-слева вверх-вправо. Шаг — это не плавный сдвиг,
-// а перезапись: каждая изменившаяся клетка пару кадров показывает случайный
-// символ и только потом встаёт на своё место. Рядом с курсором символы ярче
-// и «сбоят» сами по себе.
+// шагает по диагонали снизу-слева вверх-вправо. Шаг — не плавный сдвиг,
+// а перезапись: изменившиеся клетки с небольшим разбросом во времени
+// показывают случайный символ и встают на место. К краям экрана весы
+// гаснут. Рядом с курсором — мягкое пятно: символы светлее и изредка сбоят;
+// граница пятна размыта и неровная, а само пятно догоняет курсор с инерцией.
 
 const FONT_PX = 12;
 const ROW_PX = 15;
 const SPRITE_W = SCALES[0].length;
 const SPRITE_H = SCALES.length;
-const PERIOD_X = 22; // шаг узора по горизонтали, клеток
-const PERIOD_Y = 8; // и по вертикали; нечётные ряды сдвинуты на PERIOD_X/2
-const STEP_MS = 650; // как часто узор сдвигается на клетку
-const CURSOR_R = 140; // px
-const BASE = "rgba(63, 134, 255, 0.62)";
-const BRIGHT = "rgba(160, 200, 255, 1)";
-const GLITCH_COLOR = "rgba(110, 170, 255, 0.85)";
+const PERIOD_X = 28; // шаг узора по горизонтали, клеток
+const PERIOD_Y = 10; // и по вертикали; нечётные ряды сдвинуты на PERIOD_X/2
+const STEP_MS = 1800; // как часто узор сдвигается на клетку
+const SPREAD_FRAMES = 8; // разброс начала перезаписи — волна, а не щелчок
+const EDGE_FADE = 0.15; // доля экрана у каждого края, где весы гаснут
+const CURSOR_R = 190; // px — радиус пятна (с мягким спадом)
+const CURSOR_FOLLOW = 0.12; // инерция пятна: доля пути до курсора за кадр
+const LEVELS = 12; // ступени яркости/затухания для кэша цветов
+
+const BASE: [number, number, number, number] = [63, 134, 255, 0.7];
+const BRIGHT: [number, number, number, number] = [165, 205, 255, 1];
+const GLITCH_RGB = "110, 170, 255";
 
 const mod = (a: number, n: number) => ((a % n) + n) % n;
+const smooth = (t: number) => t * t * (3 - 2 * t);
 
 function patternAt(col: number, row: number, tx: number, ty: number): string {
   const r = row + ty; // узор едет вверх
@@ -29,6 +36,22 @@ function patternAt(col: number, row: number, tx: number, ty: number): string {
   const x = mod(c, PERIOD_X);
   if (y >= SPRITE_H || x >= SPRITE_W) return " ";
   return SCALES[y][x];
+}
+
+// Цвет по (яркость от курсора, затухание у края) — строки кэшируются.
+const colorCache = new Map<number, string>();
+function colorFor(light: number, fade: number): string {
+  const key = light * 100 + fade;
+  let color = colorCache.get(key);
+  if (!color) {
+    const t = light / LEVELS;
+    const f = fade / LEVELS;
+    const ch = (i: number) => Math.round(BASE[i] + (BRIGHT[i] - BASE[i]) * t);
+    const a = (BASE[3] + (BRIGHT[3] - BASE[3]) * t) * f;
+    color = `rgba(${ch(0)}, ${ch(1)}, ${ch(2)}, ${a.toFixed(3)})`;
+    colorCache.set(key, color);
+  }
+  return color;
 }
 
 export default function AsciiField() {
@@ -48,17 +71,20 @@ export default function AsciiField() {
     let shown: string[] = []; // что нарисовано сейчас
     let scramble = new Int8Array(0); // сколько кадров клетка ещё «перезаписывается»
     let delay = new Int8Array(0); // через сколько кадров начнёт
-    let bright = new Uint8Array(0);
+    let light = new Uint8Array(0); // текущая ступень яркости от курсора
+    let fade = new Uint8Array(0); // затухание у края, 0..LEVELS — считается при resize
+    let noise = new Float32Array(0); // неровность края пятна курсора
     let tx = 0;
     let ty = 0;
     let steps = 0;
     const mouse = { x: -9999, y: -9999 };
+    const spot = { x: -9999, y: -9999, power: 0 }; // пятно догоняет мышь
 
     const drawCell = (i: number, ch: string, color: string) => {
       const x = (i % cols) * cellW;
       const y = Math.floor(i / cols) * ROW_PX;
       ctx.clearRect(x, y, cellW, ROW_PX);
-      if (ch !== " ") {
+      if (ch !== " " && fade[i] > 0) {
         ctx.fillStyle = color;
         ctx.fillText(ch, x, y + ROW_PX - 3);
       }
@@ -82,12 +108,20 @@ export default function AsciiField() {
       shown = new Array(n);
       scramble = new Int8Array(n);
       delay = new Int8Array(n);
-      bright = new Uint8Array(n);
+      light = new Uint8Array(n);
+      fade = new Uint8Array(n);
+      noise = new Float32Array(n);
       ctx.clearRect(0, 0, w, h);
       for (let i = 0; i < n; i++) {
-        target[i] = patternAt(i % cols, Math.floor(i / cols), tx, ty);
+        const c = i % cols;
+        const r = (i - c) / cols;
+        const ex = Math.min(c / cols, 1 - c / cols) / EDGE_FADE;
+        const ey = Math.min(r / rows, 1 - r / rows) / EDGE_FADE;
+        fade[i] = Math.round(smooth(Math.min(1, ex)) * smooth(Math.min(1, ey)) * LEVELS);
+        noise[i] = (Math.random() - 0.5) * 0.35;
+        target[i] = patternAt(c, r, tx, ty);
         shown[i] = target[i];
-        drawCell(i, shown[i], BASE);
+        drawCell(i, shown[i], colorFor(0, fade[i]));
       }
     };
     resize();
@@ -101,7 +135,7 @@ export default function AsciiField() {
         const next = patternAt(i % cols, Math.floor(i / cols), tx, ty);
         if (next !== target[i]) {
           target[i] = next;
-          delay[i] = Math.floor(Math.random() * 2);
+          delay[i] = Math.floor(Math.random() * SPREAD_FRAMES);
           scramble[i] = 1 + Math.floor(Math.random() * 2);
         }
       }
@@ -118,33 +152,49 @@ export default function AsciiField() {
         lastStep = now;
         step();
       }
-      const mc = mouse.x / cellW;
-      const mr = mouse.y / ROW_PX;
+
+      // Пятно плавно догоняет курсор, проявляется и гаснет тоже плавно.
+      const present = mouse.x > -9000;
+      if (present) {
+        if (spot.x < -9000) { spot.x = mouse.x; spot.y = mouse.y; }
+        spot.x += (mouse.x - spot.x) * CURSOR_FOLLOW;
+        spot.y += (mouse.y - spot.y) * CURSOR_FOLLOW;
+      }
+      spot.power += ((present ? 1 : 0) - spot.power) * 0.08;
+
+      const sc = spot.x / cellW;
+      const sr = spot.y / ROW_PX;
       const rc = CURSOR_R / cellW;
       const rr = CURSOR_R / ROW_PX;
       for (let i = 0; i < target.length; i++) {
+        if (fade[i] === 0) continue;
         const c = i % cols;
         const r = (i - c) / cols;
-        const dx = (c - mc) / rc;
-        const dy = (r - mr) / rr;
-        const near = dx * dx + dy * dy < 1;
+        const dx = (c - sc) / rc;
+        const dy = (r - sr) / rr;
+        // мягкий спад к краю пятна + шум, чтобы край не был ровным кругом
+        const d = Math.sqrt(dx * dx + dy * dy) + noise[i];
+        const k = d < 1 ? smooth(1 - Math.max(0, d)) * spot.power : 0;
+        const lvl = Math.round(k * LEVELS);
         const hasGlyph = target[i] !== " " || shown[i] !== " ";
-        // рядом с курсором символы сбоят сами по себе
-        if (near && target[i] !== " " && scramble[i] === 0 && Math.random() < 0.06) {
-          scramble[i] = 2 + Math.floor(Math.random() * 2);
+        // ближе к центру пятна символы изредка сбоят сами по себе
+        if (k > 0.15 && target[i] !== " " && scramble[i] === 0 && Math.random() < 0.035 * k) {
+          scramble[i] = 1 + Math.floor(Math.random() * 2);
         }
         if (delay[i] > 0) { delay[i] -= 1; continue; }
-        const isBright = near ? 1 : 0;
         if (scramble[i] > 0) {
           scramble[i] -= 1;
-          const ch = scramble[i] === 0 ? target[i] : GLITCH[(Math.random() * GLITCH.length) | 0];
+          const settled = scramble[i] === 0;
+          const ch = settled ? target[i] : GLITCH[(Math.random() * GLITCH.length) | 0];
           shown[i] = ch;
-          bright[i] = isBright;
-          drawCell(i, ch, scramble[i] === 0 ? (isBright ? BRIGHT : BASE) : GLITCH_COLOR);
-        } else if (hasGlyph && (shown[i] !== target[i] || bright[i] !== isBright)) {
+          light[i] = lvl;
+          drawCell(i, ch, settled
+            ? colorFor(lvl, fade[i])
+            : `rgba(${GLITCH_RGB}, ${(0.85 * fade[i] / LEVELS).toFixed(3)})`);
+        } else if (hasGlyph && (shown[i] !== target[i] || light[i] !== lvl)) {
           shown[i] = target[i];
-          bright[i] = isBright;
-          drawCell(i, shown[i], isBright ? BRIGHT : BASE);
+          light[i] = lvl;
+          drawCell(i, shown[i], colorFor(lvl, fade[i]));
         }
       }
     };
