@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from unittest import mock
 
 from django.test import TestCase, override_settings
@@ -133,7 +134,32 @@ class TemplateJobTests(TestCase):
         spec = host.tool_spec("ei_template_job_save", host.registry(self.verifier)["ei_template_job_save"])
         assert spec["annotations"]["readOnlyHint"] is True  # без карточки: черновик проверит метролог
 
-    @override_settings(AGENT_SERVICE_TOKEN="")
+    @override_settings(AGENT_SERVICE_TOKEN="", OPENROUTER_API_KEY="k", ASSISTANT_DEFAULT_MODEL="openrouter:test/model")
+    def test_without_agent_service_builtin_assistant_makes_template(self):
+        """Сервиса агента нет, но есть ключ модели — работу делает встроенный ассистент, а не «ничего»."""
+        from apps.assistant import llm
+
+        calls = []
+
+        def fake_chat(model, messages, tools=None, **kw):
+            calls.append({"model": model, "tools": [t["function"]["name"] for t in tools or []]})
+            if len(calls) == 1:
+                job_id = int(messages[-1]["content"].split("job_id=")[1].split(")")[0])
+                args = {"job_id": job_id, **self.save}
+                return llm.Completion(tool_calls=[llm.ToolCall("c1", "ei_template_job_save", json.dumps(args))])
+            return llm.Completion(text="Шаблон по МИ 2124-90, эталоны из перечня.")
+
+        with mock.patch("apps.assistant.llm.chat", fake_chat), \
+                mock.patch("apps.assistant.agent.all_tools", lambda: ({}, [])):
+            si_type = self.create_type(self.verifier, FakeAgent(None))
+        job = TemplateJob.objects.get(si_type=si_type)
+        assert job.status == TemplateJob.Status.DONE, job.error
+        assert calls[0]["model"] == "openrouter:test/model" and "ei_template_job_save" in calls[0]["tools"]
+        assert job.verification_template.needs_review and "МИ 2124-90" in job.summary
+        assert job.session_id.startswith("conv:")
+
+    @override_settings(AGENT_SERVICE_TOKEN="", OPENROUTER_API_KEY="", YANDEX_VISION_API_KEY="",
+                       ASSISTANT_DEFAULT_MODEL="")
     def test_without_agent_job_fails_with_reason(self):
         si_type = self.create_type(self.verifier, FakeAgent(self.save))
         job = TemplateJob.objects.get(si_type=si_type)

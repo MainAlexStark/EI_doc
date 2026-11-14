@@ -143,7 +143,7 @@ def _add_usage(total: dict, usage: dict) -> None:
             total[key] = round(total.get(key, 0) + float(usage[key]), 6)
 
 
-def execute_run(run_id: int) -> None:
+def execute_run(run_id: int, *, extra_tools: list | None = None) -> None:
     with transaction.atomic():
         run = Run.objects.select_for_update().select_related("conversation__user").get(pk=run_id)
         if run.status != Run.Status.QUEUED:
@@ -154,7 +154,7 @@ def execute_run(run_id: int) -> None:
     conversation = run.conversation
     user = conversation.user
     try:
-        _loop(run, conversation, user)
+        _loop(run, conversation, user, extra_tools=extra_tools)
         run.refresh_from_db(fields=["status"])
         run.status = Run.Status.CANCELLED if run.status == Run.Status.CANCELLING else Run.Status.DONE
     except llm.LLMError as exc:
@@ -170,9 +170,11 @@ def execute_run(run_id: int) -> None:
         Conversation.objects.filter(pk=conversation.pk).update(updated_at=timezone.now())
 
 
-def _loop(run: Run, conversation: Conversation, user) -> None:
+def _loop(run: Run, conversation: Conversation, user, *, extra_tools: list | None = None) -> None:
     config = AssistantSettings.current()
     tools, mcp_errors = all_tools()
+    # Фоновая работа (шаблон для нового типа СИ) добавляет свои инструменты, которых нет в чате.
+    tools.update({tool.name: tool for tool in extra_tools or []})
     schemas = [tool.schema() for tool in tools.values()]
     system = build_system_prompt(user, tool_names=list(tools), mcp_errors=mcp_errors)
     vision = bool(llm.model_info(run.model).get("vision"))

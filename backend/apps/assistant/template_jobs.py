@@ -36,7 +36,20 @@ class JobError(RuntimeError):
 
 
 def configured() -> bool:
+    """Подключён сервис агента (agentkit) — работа уходит ему."""
     return bool(settings.AGENT_INTERNAL_URL and settings.AGENT_SERVICE_TOKEN)
+
+
+def builtin_model() -> str:
+    """Модель встроенного ассистента EI_doc — запасной путь, если сервиса агента нет. Пусто — нет и его."""
+    from apps.assistant import llm
+
+    model = llm.default_model()
+    return model if model and llm.provider_configured(llm.split_model(model)[0]) else ""
+
+
+def available() -> bool:
+    return configured() or bool(builtin_model())
 
 
 def latest(si_type) -> TemplateJob | None:
@@ -74,10 +87,11 @@ def start(si_type, user, *, comment: str = "") -> TemplateJob:
         _finish(job, TemplateJob.Status.SKIPPED,
                 summary="Счётчики воды считает встроенный калькулятор EI_doc — отдельный шаблон поверки не нужен.")
         return job
-    if not configured():
+    if not available():
         _finish(job, TemplateJob.Status.FAILED,
-                error="Ассистент (сервис агента) не подключён: в .env EI_doc нет AGENT_SERVICE_TOKEN / "
-                      "AGENT_INTERNAL_URL. Шаблон можно попросить у ассистента в чате или завести вручную.")
+                error="Ассистент не подключён: в .env EI_doc нет ни сервиса агента (AGENT_SERVICE_TOKEN), "
+                      "ни ключа модели для встроенного ассистента (OPENROUTER_API_KEY или YANDEX_VISION_*). "
+                      "Шаблон можно завести вручную.")
         return job
     _enqueue(job.pk)
     return job
@@ -178,6 +192,9 @@ def run(job_id: int) -> None:
     job.started_at = timezone.now()
     job.save(update_fields=["status", "started_at"])
     user = job.requested_by
+    if user is not None and not configured():
+        _run_builtin(job, user)
+        return
     try:
         if user is None:
             raise JobError("Нет пользователя, от имени которого работать")
@@ -208,6 +225,43 @@ def run(job_id: int) -> None:
         _finish(job, TemplateJob.Status.FAILED, summary=text,
                 error="Агент закончил, но шаблон не сохранил" + (f" (статус прогона: {body.get('status')})"
                                                                 if body.get("status") not in (None, "done") else ""))
+
+
+def _run_builtin(job: TemplateJob, user) -> None:
+    """Сервиса агента нет — ту же задачу выполняет встроенный ассистент EI_doc (его агентный цикл).
+
+    Разговор виден во вкладке «Ассистент» (встроенный чат), инструмент сохранения — тот же
+    ``ei_template_job_save``, что и у сервиса агента, поэтому правила черновика одинаковые.
+    """
+    from apps.assistant import agent, host
+    from apps.assistant.models import Conversation, Message, Run
+
+    model = builtin_model()
+    if not model:
+        _finish(job, TemplateJob.Status.FAILED, error="Ассистент не подключён: нет модели для встроенного ассистента")
+        return
+    conversation = Conversation.objects.create(user=user, model=model,
+                                               title=agent.title_from(f"Шаблон поверки: {job.si_type.name}"))
+    Message.objects.create(conversation=conversation, role=Message.Role.USER, content=task_text(job))
+    run = Run.objects.create(conversation=conversation, model=model)
+    job.session_id = f"conv:{conversation.pk}"
+    job.save(update_fields=["session_id"])
+    save_tool = next(t for t in host.HOST_ONLY if t.name == "ei_template_job_save")
+    try:
+        agent.execute_run(run.pk, extra_tools=[save_tool])
+    except Exception as exc:  # noqa: BLE001 — работа не должна зависнуть в «агент работает»
+        log.exception("Встроенный ассистент упал на работе %s", job.pk)
+        run.error = str(exc)
+    run.refresh_from_db()
+    job.refresh_from_db()
+    last = conversation.messages.filter(role=Message.Role.ASSISTANT).exclude(content="").order_by("-pk").first()
+    text = (last.content if last else "").strip()
+    if job.saved_at:
+        _finish(job, TemplateJob.Status.DONE, summary=text,
+                error=f"Ассистент не дописал итог: {run.error}" if run.error else "")
+    else:
+        _finish(job, TemplateJob.Status.FAILED, summary=text,
+                error=f"Ассистент не смог: {run.error}" if run.error else "Ассистент закончил, но шаблон не сохранил")
 
 
 def reap_stale(minutes: int = 40) -> int:

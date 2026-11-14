@@ -4,6 +4,14 @@ import Icon from "../ui/Icon";
 
 const OPEN = new Set(["queued", "running"]);
 
+/** Время попытки — чтобы повторный запуск с тем же итогом не выглядел как «ничего не произошло». */
+function attemptTime(iso: string): string {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return d.toLocaleString("ru-RU", sameDay ? { hour: "2-digit", minute: "2-digit", second: "2-digit" }
+    : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 /**
  * Шаблон поверки нового типа — что сделал агент.
  *
@@ -84,7 +92,12 @@ export default function TemplateStatus({ siType }: { siType: SiType }) {
         </div>
       )}
       {job && !running && job.summary && <blockquote style={{ whiteSpace: "pre-wrap" }}>{job.summary}</blockquote>}
-      {job && !running && job.error && <div className="hint warn-text">{job.error}</div>}
+      {job && !running && job.error && (
+        <div className="hint warn-text">
+          {job.error}
+          {job.finished_at && <> (попытка {attemptTime(job.finished_at)})</>}
+        </div>
+      )}
       {!running && (template || program) && (
         <div className="sub">
           {template && <>Черновик поверки: «{template.title}». </>}
