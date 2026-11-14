@@ -156,10 +156,14 @@ def export_xlsx(verifications: QuerySet[Verification] | list[Verification]) -> b
     return buffer.getvalue()
 
 
-def filename(start: date | None = None, end: date | None = None) -> str:
+def filename(start: date | None = None, end: date | None = None, *, verifier: str = "") -> str:
+    """Имя файла выгрузки. Журнал одного поверителя подписан его фамилией."""
+    name = "Журнал учёта поверочных работ"
+    if verifier:
+        name += f" — {verifier}"
     if start and end:
-        return f"Журнал учёта поверочных работ {start:%Y-%m-%d}—{end:%Y-%m-%d}.xlsx"
-    return "Журнал учёта поверочных работ.xlsx"
+        name += f" {start:%Y-%m-%d}—{end:%Y-%m-%d}"
+    return f"{name}.xlsx"
 
 
 def normocontrol_summary(scope) -> dict:

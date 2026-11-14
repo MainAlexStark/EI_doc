@@ -84,6 +84,37 @@ class JournalApiTestCase(JournalTestCaseMixin, TestCase):
         assert response.status_code == 200, response.data
         return response.data["results"]
 
+    def test_separate_journal_per_verifier(self):
+        other = f.make_employee(tab="07", name="Иванов И. И.")
+        f.attest(other, self.family)
+        foreign = f.make_verification(self.family, other, day=5, serial="SN005", si_type=self.si_type)
+
+        everyone = self.rows()
+        assert {row["verifier_id"] for row in everyone} == {self.employee.pk, other.pk}
+
+        mine = self.rows(verifier=self.employee.pk)
+        assert [row["serial_number"] for row in mine] == ["SN007", "SN003"]
+        assert [row["serial_number"] for row in self.rows(verifier=other.pk)] == [
+            foreign.instrument.serial_number
+        ]
+
+    def test_verifiers_list_in_stable_order_with_counts(self):
+        other = f.make_employee(tab="07", name="Иванов И. И.")
+        f.make_verification(self.family, other, day=5, serial="SN005", si_type=self.si_type)
+        f.make_employee(tab="09", name="Без поверок")  # без поверок — своего журнала нет
+
+        response = self.api.get(reverse("journal_verifiers"))
+        assert response.status_code == 200
+        assert [(v["full_name"], v["count"], v["is_me"]) for v in response.data] == [
+            ("Стариков А. А.", 2, True),
+            ("Иванов И. И.", 1, False),
+        ]
+
+    def test_export_of_one_verifier_named_after_him(self):
+        response = self.api.get(reverse("journal_export"), {"verifier": self.employee.pk})
+        assert response.status_code == 200
+        assert "%D0%A1%D1%82%D0%B0%D1%80%D0%B8%D0%BA%D0%BE%D0%B2" in response["Content-Disposition"]
+
     def test_journal_lists_newest_first(self):
         rows = self.rows()
         assert [row["serial_number"] for row in rows] == ["SN007", "SN003"]

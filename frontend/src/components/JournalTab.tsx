@@ -11,7 +11,7 @@ type View = "protocols" | "arshin";
 export default function JournalTab({ isManager, onOpenTypes }: { isManager: boolean; onOpenTypes: () => void }) {
   const [view, setView] = useState<View>("protocols");
 
-  if (!isManager) return <Journal />;
+  if (!isManager) return <Journal />;  // поверитель открывает свой журнал, общий — рядом
 
   return (
     <>
@@ -25,7 +25,7 @@ export default function JournalTab({ isManager, onOpenTypes }: { isManager: bool
           ]}
         />
       </div>
-      {view === "protocols" ? <Journal /> : <Normocontrol onOpenTypes={onOpenTypes} />}
+      {view === "protocols" ? <Journal isManager /> : <Normocontrol onOpenTypes={onOpenTypes} />}
     </>
   );
 }

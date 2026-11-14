@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import django_filters as filters
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -17,6 +19,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core.models import Employee
 from apps.verification import journal, numbering
 from apps.verification.models import (
     NumberingScope,
@@ -71,6 +74,7 @@ class JournalRowSerializer(serializers.Serializer):
     owner = serializers.CharField()
     address = serializers.CharField()
     verifier = serializers.CharField()
+    verifier_id = serializers.IntegerField()
     suitable = serializers.BooleanField()
     status = serializers.CharField()
     needs_review = serializers.BooleanField()
@@ -92,6 +96,7 @@ class JournalRowSerializer(serializers.Serializer):
             "owner": str(verification.instrument.owner) if verification.instrument.owner_id else "",
             "address": str(verification.instrument.site) if verification.instrument.site_id else "",
             "verifier": verification.verifier.full_name,
+            "verifier_id": verification.verifier_id,
             "suitable": verification.suitable,
             "status": verification.status,
             "needs_review": verification.needs_review,
@@ -141,9 +146,33 @@ class JournalExportView(APIView):
             content,
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-        name = journal.filename()
-        response["Content-Disposition"] = f'attachment; filename*=UTF-8\'\'{name}'
+        verifier = None
+        if request.query_params.get("verifier"):
+            verifier = Employee.objects.filter(pk=request.query_params["verifier"]).first()
+        name = journal.filename(verifier=verifier.full_name if verifier else "")
+        response["Content-Disposition"] = f'attachment; filename*=UTF-8\'\'{quote(name)}'
         return response
+
+
+class JournalVerifiersView(APIView):
+    """GET /api/journal/verifiers/ — у кого есть свой журнал.
+
+    Поверители, на которых записана хоть одна поверка, по порядку карточек
+    (по id): так цвет поверителя в общем журнале не меняется, когда
+    появляется новый человек, — новый просто получает следующий цвет.
+    """
+
+    def get(self, request):
+        verifiers = (
+            Employee.objects.filter(verifications__isnull=False)
+            .annotate(count=Count("verifications"))
+            .order_by("id")
+        )
+        me = getattr(request.user, "employee", None)
+        return Response([
+            {"id": e.pk, "full_name": e.full_name, "count": e.count, "is_me": bool(me and me.pk == e.pk)}
+            for e in verifiers
+        ])
 
 
 class NormocontrolScopesView(APIView):

@@ -58,6 +58,7 @@ from apps.verification.api import (
 )
 from apps.verification.api_journal import (
     JournalExportView,
+    JournalVerifiersView,
     JournalView,
     NormocontrolScopesView,
     NumberingApplyView,
@@ -147,6 +148,7 @@ urlpatterns = [
     ),
     path("api/journal/", JournalView.as_view(), name="journal"),
     path("api/journal/export/", JournalExportView.as_view(), name="journal_export"),
+    path("api/journal/verifiers/", JournalVerifiersView.as_view(), name="journal_verifiers"),
     path("api/normocontrol/scopes/", NormocontrolScopesView.as_view(), name="normocontrol_scopes"),
     path(
         "api/normocontrol/scopes/<int:pk>/preview/",

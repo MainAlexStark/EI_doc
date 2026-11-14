@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import Icon from "../ui/Icon";
 import { Alert, EmptyState, PageActions, SearchField, Spinner } from "../ui/controls";
 import { PHONE, useMediaQuery } from "../ui/hooks";
@@ -6,11 +6,22 @@ import {
   downloadJournal,
   downloadVerificationProtocol,
   fetchJournal,
+  fetchJournalVerifiers,
   type JournalFilters,
   type JournalRow,
+  type JournalVerifier,
 } from "../api";
 
 const PAGE_SIZE = 50;
+
+/** Цвета поверителей в общем журнале. Красного нет — он занят непригодными.
+ * Цвет даётся по порядку карточки (по id), поэтому у человека он постоянный. */
+const VERIFIER_COLORS = [
+  "#0a84ff", "#ff9f0a", "#30b158", "#af52de", "#30b0c7",
+  "#5856d6", "#a2845e", "#d4a800", "#00a89f", "#ff6fb1",
+];
+
+type Journals = "all" | number;
 
 const formatDate = (value: string | null) =>
   value ? new Date(value).toLocaleDateString("ru-RU") : "—";
@@ -36,9 +47,16 @@ function StatusText({ row }: { row: JournalRow }) {
   return <span className="st muted">черновик</span>;
 }
 
-export default function Journal() {
+function VerifierDot({ color }: { color?: string }) {
+  return <span className="v-dot" style={{ background: color ?? "var(--muted)" }} aria-hidden="true" />;
+}
+
+/** Журнал: общий (все поверители, у каждого свой цвет) или журнал одного поверителя.
+ * Поверитель по умолчанию открывает свой журнал, менеджер — общий. */
+export default function Journal({ isManager = false }: { isManager?: boolean }) {
   const phone = useMediaQuery(PHONE);
   const [filters, setFilters] = useState<JournalFilters>({ page: 1 });
+  const [verifiers, setVerifiers] = useState<JournalVerifier[] | null>(null);
   const [rows, setRows] = useState<JournalRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -60,11 +78,38 @@ export default function Journal() {
     }
   }, []);
 
-  // Поиск не дёргает сервер на каждую букву.
   useEffect(() => {
+    fetchJournalVerifiers()
+      .then((list) => {
+        setVerifiers(list);
+        const mine = list.find((v) => v.is_me);
+        if (!isManager && mine) setFilters((current) => ({ ...current, verifier: mine.id, page: 1 }));
+      })
+      // Без списка поверителей журнал всё равно работает — просто как общий.
+      .catch(() => setVerifiers([]));
+  }, [isManager]);
+
+  const colors = useMemo(() => {
+    const map = new Map<number, string>();
+    (verifiers ?? []).forEach((v, index) => map.set(v.id, VERIFIER_COLORS[index % VERIFIER_COLORS.length]));
+    return map;
+  }, [verifiers]);
+
+  // Поиск не дёргает сервер на каждую букву. Пока не знаем, чей журнал открыть, — ждём.
+  useEffect(() => {
+    if (verifiers === null) return;
     const timer = setTimeout(() => void load(filters), filters.q ? 300 : 0);
     return () => clearTimeout(timer);
-  }, [filters, load]);
+  }, [filters, load, verifiers]);
+
+  const journal: Journals = filters.verifier ?? "all";
+  const current = journal === "all" ? null : verifiers?.find((v) => v.id === journal) ?? null;
+  const shared = journal === "all";
+  const openJournal = (next: Journals) =>
+    setFilters((f) => ({ ...f, verifier: next === "all" ? undefined : next, page: 1 }));
+  const totalAll = (verifiers ?? []).reduce((sum, v) => sum + v.count, 0);
+  const rowStyle = (row: JournalRow) =>
+    (shared ? { "--vc": colors.get(row.verifier_id) ?? "transparent" } : undefined) as CSSProperties | undefined;
 
   const update = (patch: Partial<JournalFilters>) =>
     setFilters((current) => ({ ...current, ...patch, page: patch.page ?? 1 }));
@@ -76,7 +121,7 @@ export default function Journal() {
   const exportXlsx = async () => {
     setExporting(true);
     try {
-      await downloadJournal(filters);
+      await downloadJournal(filters, current?.full_name ?? "");
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось выгрузить журнал");
     } finally {
@@ -92,6 +137,35 @@ export default function Journal() {
           <span className="hide-phone">{exporting ? "Готовлю файл…" : "Выгрузить в Excel"}</span>
         </button>
       </PageActions>
+
+      {verifiers && verifiers.length > 0 && (
+        <div className="chip-row journals" role="tablist" aria-label="Чей журнал">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={shared}
+            className={`chip ${shared ? "active" : ""}`}
+            onClick={() => openJournal("all")}
+          >
+            Общий журнал <span className="chip-count">{totalAll}</span>
+          </button>
+          {verifiers.map((v) => (
+            <button
+              type="button"
+              role="tab"
+              key={v.id}
+              aria-selected={journal === v.id}
+              className={`chip ${journal === v.id ? "active" : ""}`}
+              style={{ "--vc": colors.get(v.id) } as CSSProperties}
+              onClick={() => openJournal(v.id)}
+              title={v.is_me ? "Мой журнал" : `Журнал поверителя ${v.full_name}`}
+            >
+              <VerifierDot color={colors.get(v.id)} />
+              {v.full_name}{v.is_me ? " (я)" : ""} <span className="chip-count">{v.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="filters">
         <SearchField
@@ -132,7 +206,7 @@ export default function Journal() {
         </div>
         </>}
         {filtered && (
-          <button type="button" className="ghost" onClick={() => setFilters({ page: 1 })}>
+          <button type="button" className="ghost" onClick={() => setFilters({ page: 1, verifier: filters.verifier })}>
             Сбросить
           </button>
         )}
@@ -144,7 +218,7 @@ export default function Journal() {
         <>
           <div className="m-list">
             {rows.map((row) => (
-              <div className={`m-row ${row.suitable ? "" : "unfit"}`} key={row.id}>
+              <div className={`m-row ${row.suitable ? "" : "unfit"} ${shared ? "by-verifier" : ""}`} key={row.id} style={rowStyle(row)}>
                 <div className="grow">
                   <div className="row" style={{ justifyContent: "space-between" }}>
                     <span className="cell-mono" style={{ fontWeight: 600 }}>{row.protocol_number || "без номера"}</span>
@@ -152,6 +226,9 @@ export default function Journal() {
                   </div>
                   <div className="m-title">{row.si_name} · № {row.serial_number}</div>
                   <div className="m-meta">{[row.owner, row.address].filter(Boolean).join(" · ")}</div>
+                  {shared && (
+                    <div className="m-meta v-name"><VerifierDot color={colors.get(row.verifier_id)} />{row.verifier}</div>
+                  )}
                   <div className="row wrap" style={{ marginTop: 4 }}>
                     {!row.suitable && <span className="pill bad">непригодно</span>}
                     <StatusPill row={row} />
@@ -183,7 +260,7 @@ export default function Journal() {
       )}
 
       {!phone && <div className="table-wrap sheet-wrap">
-        <table className="sheet journal-sheet">
+        <table className={`sheet journal-sheet ${shared ? "by-verifier" : ""}`}>
           <thead>
             <tr>
               <th className="rn">№</th>
@@ -194,7 +271,7 @@ export default function Journal() {
               <th>Зав. №</th>
               <th>Владелец</th>
               <th>Адрес</th>
-              <th>Поверитель</th>
+              {shared && <th>Поверитель</th>}
               <th>Действует до</th>
               <th>Результат</th>
               <th>Статус</th>
@@ -204,7 +281,7 @@ export default function Journal() {
           </thead>
           <tbody>
             {rows.map((row, index) => (
-              <tr key={row.id} className={row.suitable ? "" : "unfit"}>
+              <tr key={row.id} className={row.suitable ? "" : "unfit"} style={rowStyle(row)}>
                 <td className="rn num">{(page - 1) * PAGE_SIZE + index + 1}</td>
                 <td className="num">{formatDate(row.verified_at)}</td>
                 <td className="cell-mono nowrap">{row.protocol_number || <span className="muted">без номера</span>}</td>
@@ -213,7 +290,9 @@ export default function Journal() {
                 <td className="cell-mono nowrap">{row.serial_number}</td>
                 <td className="wide">{row.owner}</td>
                 <td className="wide">{row.address}</td>
-                <td className="nowrap">{row.verifier}</td>
+                {shared && (
+                  <td className="nowrap v-name"><VerifierDot color={colors.get(row.verifier_id)} />{row.verifier}</td>
+                )}
                 <td className={`num ${row.suitable && isOverdue(row.next_verification_date) ? "due over" : ""}`}>
                   {row.suitable ? formatDate(row.next_verification_date) : ""}
                 </td>
@@ -247,7 +326,11 @@ export default function Journal() {
         {loading && rows.length === 0 && <Spinner />}
         {!loading && rows.length === 0 && (
           <EmptyState icon="doc" title={filtered ? "Под эти фильтры ничего не попало" : "Протоколов пока нет"}>
-            {filtered ? "Измените или сбросьте фильтры." : "Протоколы появятся, когда поверители внесут измерения."}
+            {filtered
+              ? "Измените или сбросьте фильтры."
+              : current
+                ? `В журнале ${current.full_name} пока нет записей.`
+                : "Протоколы появятся, когда поверители внесут измерения."}
           </EmptyState>
         )}
       </div>}

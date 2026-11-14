@@ -21,6 +21,7 @@ export type JournalRow = {
   owner: string;
   address: string;
   verifier: string;
+  verifier_id: number;
   suitable: boolean;
   status: string;
   needs_review: boolean;
@@ -158,8 +159,15 @@ export type JournalFilters = {
   date_to?: string;
   suitable?: string;
   needs_review?: string;
+  /** Журнал одного поверителя; без него — общий. */
+  verifier?: number;
   page?: number;
 };
+
+/** Поверитель, у которого есть свой журнал (хоть одна поверка). */
+export type JournalVerifier = { id: number; full_name: string; count: number; is_me: boolean };
+
+export const fetchJournalVerifiers = () => json<JournalVerifier[]>("/api/journal/verifiers/");
 
 export function queryString(filters: Record<string, string | number | undefined | null>): string {
   const params = new URLSearchParams();
@@ -184,7 +192,7 @@ export const applyNumbering = (scopeId: number) =>
   );
 
 /** Выгрузка журнала: файл отдаётся потоком, поэтому качаем через blob. */
-export async function downloadJournal(filters: JournalFilters): Promise<void> {
+export async function downloadJournal(filters: JournalFilters, verifierName = ""): Promise<void> {
   const response = await call(`/api/journal/export/?${queryString(filters)}`);
   if (!response.ok) throw new ApiError(`Не удалось выгрузить журнал (${response.status})`);
 
@@ -192,7 +200,7 @@ export async function downloadJournal(filters: JournalFilters): Promise<void> {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "Журнал учёта поверочных работ.xlsx";
+  link.download = `Журнал учёта поверочных работ${verifierName ? ` — ${verifierName}` : ""}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();
