@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchFamilies, type Family } from "../api";
 import PublicRequestForm from "../components/PublicRequestForm";
 import AsciiField from "./AsciiField";
@@ -29,6 +29,27 @@ const STEPS = [
 
 export default function Landing() {
   const [families, setFamilies] = useState<Family[]>([]);
+  // Нижняя панель на телефоне: видна, когда первый экран пролистан и форма
+  // не на экране — чтобы позвонить или вернуться к заявке из любого места.
+  const formRef = useRef<HTMLElement | null>(null);
+  const [formVisible, setFormVisible] = useState(true);
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setFormVisible(entry.isIntersecting), {
+      rootMargin: "-25% 0px -25% 0px",
+    });
+    observer.observe(form);
+    const onScroll = () => setScrolled(window.scrollY > 240);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, []);
 
   useEffect(() => {
     document.title = "Поверка средств измерений в Кирове — Единица Измерения";
@@ -70,13 +91,13 @@ export default function Landing() {
               <dt>Телефон</dt>
               <dd><a href={`tel:${tel}`}>{PHONE}</a></dd>
               <dt>Офис</dt>
-              <dd>{ADDRESS} · {HOURS}</dd>
+              <dd>{ADDRESS} · <span className="nowrap">{HOURS}</span></dd>
               <dt>Выезды</dt>
               <dd>{VISITS}</dd>
             </dl>
           </section>
 
-          <section className="l-form" id="zayavka">
+          <section className="l-form" id="zayavka" ref={formRef}>
             <PublicRequestForm embedded />
           </section>
         </div>
@@ -128,12 +149,18 @@ export default function Landing() {
       </main>
 
       <footer className="l-foot">
-        <span>ООО «Единица Измерения» · {ADDRESS}</span>
+        <span>ООО «Единица Измерения»</span>
+        <span>{ADDRESS}</span>
         <span>офис {HOURS} · выезды {VISITS}</span>
         {PHONE && <a href={`tel:${tel}`}>{PHONE}</a>}
         {EMAIL && <a href={`mailto:${EMAIL}`}>{EMAIL}</a>}
         <a href="/">Вход для сотрудников</a>
       </footer>
+
+      <nav className={`l-bar ${scrolled && !formVisible ? "show" : ""}`} aria-label="Быстрые действия">
+        {PHONE && <a className="call" href={`tel:${tel}`}>Позвонить</a>}
+        <a className="go" href="#zayavka">Оставить заявку</a>
+      </nav>
     </div>
   );
 }

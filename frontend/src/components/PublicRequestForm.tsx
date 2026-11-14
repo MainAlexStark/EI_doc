@@ -101,7 +101,6 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
   // --- приборы: справочник + выбранные позиции ---
   const [families, setFamilies] = useState<Family[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
-  const [addFamilyId, setAddFamilyId] = useState("");
   const [items, setItems] = useState<RequestItemPayload[]>([]);
 
   // --- дата/время выезда: слоты из графика сотрудников по району ---
@@ -218,14 +217,13 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
     return map;
   }, [slotsByDate]);
 
-  const addItem = () => {
-    if (!addFamilyId) return;
-    const familyId = Number(addFamilyId);
+  const addItem = (value: string) => {
+    const familyId = Number(value);
+    if (!familyId) return;
     setItems((current) => {
       if (current.some((item) => item.family_id === familyId)) return current;
       return [...current, { family_id: familyId, quantity: 1 }];
     });
-    setAddFamilyId("");
   };
 
   const setQuantity = (familyId: number, quantity: number) => {
@@ -449,22 +447,25 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
 
         <div className="field">
           <label htmlFor="rf-add-item">Что нужно поверить<span className="req">*</span></label>
-          <div className="item-picker">
-            <select id="rf-add-item" value={addFamilyId} onChange={(event) => setAddFamilyId(event.target.value)}>
-              <option value="">выберите тип прибора…</option>
-              {families
-                .filter((family) => !items.some((item) => item.family_id === family.id))
-                .map((family) => (
-                  <option key={family.id} value={family.id}>
-                    {family.name}
-                    {Number(family.price) > 0 ? ` — от ${money(Number(family.price))} ₽` : ""}
-                  </option>
-                ))}
-            </select>
-            <button type="button" className={addFamilyId ? "tinted" : ""} onClick={addItem} disabled={!addFamilyId}>
-              <Icon name="plus" size={16} /> Добавить
-            </button>
-          </div>
+          {/* выбор сразу добавляет позицию: на телефоне лишняя кнопка «Добавить»
+              после нативного списка — шаг, который часто пропускают */}
+          <select
+            id="rf-add-item"
+            className="item-picker"
+            value=""
+            onChange={(event) => addItem(event.target.value)}
+            disabled={families.length > 0 && families.every((family) => items.some((item) => item.family_id === family.id))}
+          >
+            <option value="">{items.length > 0 ? "+ добавить ещё прибор…" : "выберите тип прибора…"}</option>
+            {families
+              .filter((family) => !items.some((item) => item.family_id === family.id))
+              .map((family) => (
+                <option key={family.id} value={family.id}>
+                  {family.name}
+                  {Number(family.price) > 0 ? ` — от ${money(Number(family.price))} ₽` : ""}
+                </option>
+              ))}
+          </select>
 
           {items.length > 0 && (
             <ul className="item-list">
@@ -578,17 +579,22 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
           />
         </div>
 
-        <label className="consent">
-          <input
-            type="checkbox"
-            checked={consentGiven}
-            onChange={(event) => setConsentGiven(event.target.checked)}
-          />
-          <span>
-            {CONSENT_TEXT}
-            <span className="req"> *</span>
-          </span>
-        </label>
+        <div className="consent">
+          <label>
+            <input
+              type="checkbox"
+              checked={consentGiven}
+              onChange={(event) => setConsentGiven(event.target.checked)}
+            />
+            <span>
+              Согласен на обработку персональных данных по 152-ФЗ<span className="req"> *</span>
+            </span>
+          </label>
+          <details>
+            <summary>Текст согласия</summary>
+            <p>{CONSENT_TEXT}</p>
+          </details>
+        </div>
 
         <div className="field captcha-field" style={{ display: captchaConfigured ? "block" : "none" }}>
           <div ref={captchaContainerRef} className="captcha-widget" />
