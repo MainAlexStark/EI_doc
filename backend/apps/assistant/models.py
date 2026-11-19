@@ -372,3 +372,45 @@ class TemplateJob(models.Model):
     @property
     def is_open(self) -> bool:
         return self.status in (self.Status.QUEUED, self.Status.RUNNING)
+
+
+class TemplateWorkspace(models.Model):
+    """«Создать шаблон протокола поверки»: отдельный чат с агентом на один тип СИ + живой черновик.
+
+    Человек выбирает тип из Госреестра — агент получает методику поверки и все документы типа из
+    ФИФ и собирает шаблон; рядом с чатом — протокол по черновику, он обновляется после каждого
+    сохранения агента (``revision``). Пока не нажата «Продолжить» (``publish``), черновик выключен
+    (``is_active=False``) и поверки по нему не идут. После — черновик становится действующим
+    шаблоном типа; дальнейшие правки в том же чате идут в новый черновик, действующий шаблон
+    меняется только следующей «Продолжить». Подробности — ``apps.assistant.template_workspace``.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "черновик"
+        PUBLISHED = "published", "действует"
+
+    si_type = models.ForeignKey("catalog.SiType", on_delete=models.CASCADE, related_name="template_workspaces",
+                                verbose_name="тип СИ")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="+",
+                             verbose_name="сотрудник")
+    conversation = models.OneToOneField(Conversation, on_delete=models.CASCADE, related_name="template_workspace",
+                                        verbose_name="чат")
+    title = models.CharField("название шаблона", max_length=250, blank=True)
+    draft = models.ForeignKey("verification.VerificationTemplate", on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name="+", verbose_name="черновик")
+    published = models.ForeignKey("verification.VerificationTemplate", on_delete=models.SET_NULL, null=True,
+                                  blank=True, related_name="+", verbose_name="действующий шаблон")
+    status = models.CharField("статус", max_length=10, choices=Status.choices, default=Status.DRAFT)
+    revision = models.PositiveIntegerField("редакция черновика", default=0)
+    published_at = models.DateTimeField("опубликован", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "шаблон протокола в работе"
+        verbose_name_plural = "шаблоны протоколов в работе"
+        ordering = ["-updated_at"]
+        constraints = [models.UniqueConstraint(fields=["si_type", "user"], name="template_workspace_one_per_type")]
+
+    def __str__(self) -> str:
+        return f"{self.si_type} — {self.get_status_display()}"

@@ -15,6 +15,8 @@ import { PageActionsContext, Spinner } from "./ui/controls";
 
 // Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
 const Assistant = lazy(() => import("./assistant/Assistant"));
+// «Шаблоны протоколов» — тот же чат ассистента рядом с протоколом по черновику.
+const TemplateStudio = lazy(() => import("./assistant/TemplateStudio"));
 
 /* Навигация (решение 17.10.2026, холст «EI_doc — новый интерфейс», вариант 2):
  * - «Журнал» и «Нормоконтроль» — одна вкладка «Журнал»: у поверителя просто
@@ -24,7 +26,9 @@ const Assistant = lazy(() => import("./assistant/Assistant"));
  *   заказы от заказчиков, которые привезли приборы сами. Менеджер видит все,
  *   поверитель — только свои.
  * Раздел хранится в адресе (#/journal) — переживает перезагрузку, работает «Назад». */
-type Tab = "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types" | "attestations";
+type Tab =
+  | "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types"
+  | "protocol-templates" | "attestations";
 
 type NavItem = { key: Tab; label: string; icon: IconName; managerOnly?: boolean; /** Короче — для таб-бара телефона. */ short?: string };
 
@@ -40,13 +44,14 @@ const WORK: NavItem[] = [
 
 const REFERENCE: NavItem[] = [
   { key: "si-types", label: "Типы СИ", icon: "gauge" },
+  { key: "protocol-templates", label: "Шаблоны протоколов", icon: "layers", short: "Шаблоны" },
   { key: "attestations", label: "Аттестация ИО", icon: "shield", managerOnly: true },
 ];
 
 const ALL_TABS = new Set<Tab>([...WORK, ...REFERENCE].map((item) => item.key));
 
 /** Разделы во всю высоту окна — без отступов main: календарь, заявки, ассистент. */
-const FLUSH: Tab[] = ["availability", "requests", "assistant"];
+const FLUSH: Tab[] = ["availability", "requests", "assistant", "protocol-templates"];
 
 /** На телефоне в таб-баре — четыре главных, остальное под «Ещё». */
 const PHONE_TABS: Tab[] = ["trips", "field-work", "journal", "availability"];
@@ -76,7 +81,8 @@ const todayLine = () => {
 };
 
 const tabFromHash = (): Tab => {
-  const key = window.location.hash.replace(/^#\/?/, "") as Tab;
+  // #/protocol-templates/12 — раздел и что в нём открыть: раздел — первая часть.
+  const key = window.location.hash.replace(/^#\/?/, "").split("/")[0] as Tab;
   return ALL_TABS.has(key) ? key : "field-work";
 };
 
@@ -177,6 +183,7 @@ export default function App() {
     tasks: { title: "Задачи" },
     assistant: { title: "Ассистент", subtitle: "Метролог-помощник: ФГИС «Аршин», методики, файлы компании" },
     "si-types": { title: "Типы СИ", subtitle: "Справочник средств измерений и шаблоны поверки" },
+    "protocol-templates": { title: "Шаблоны протоколов", subtitle: "Шаблон протокола поверки по методике — для каждого типа СИ" },
     attestations: { title: "Аттестация ИО", subtitle: "Испытательное оборудование" },
   };
   const head = heads[tab];
@@ -268,6 +275,11 @@ export default function App() {
             {tab === "tasks" && <Tasks me={me} />}
             {tab === "si-types" && <SiTypes me={me} onChanged={refreshCounts} />}
             {tab === "attestations" && <Attestations me={me} />}
+            {tab === "protocol-templates" && (
+              <Suspense fallback={<Spinner label="Загружаю…" />}>
+                <TemplateStudio />
+              </Suspense>
+            )}
             {tab === "assistant" && (
               <Suspense fallback={<Spinner label="Загружаю ассистента…" />}>
                 <Assistant />

@@ -467,3 +467,52 @@ button.send.stop:hover:not(:disabled) { background: #000; }
   .ctx-row .mode-seg { margin-left: 46px; width: auto; }
   .ctx-row-detail { padding-left: 16px; }
 }
+
+/* ── «Шаблоны протоколов»: чат типа СИ + протокол по черновику ── */
+.tpl-item { min-height: 46px; align-items: center; }
+.tpl-item .conv-title { display: flex; flex-direction: column; line-height: 1.25; }
+.tpl-item .conv-title small { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+.tpl-bar { flex-wrap: wrap; }
+.tpl-bar-title { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.2; }
+.tpl-bar-title .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-family { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.tpl-family select { font-size: 13px; padding: 4px 8px; min-height: 30px; max-width: 220px; }
+.tpl-next { gap: 6px; }
+.tpl-welcome { max-width: 640px; }
+.tpl-search { text-align: left; padding: 16px; margin-top: 8px; }
+
+.tpl-split { flex: 1; display: grid; grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.15fr); min-height: 0; }
+.tpl-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.tpl-chat .chat-inner { padding-left: 18px; padding-right: 18px; }
+.tpl-single { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.tpl-switch { padding: 8px 12px 0; display: flex; justify-content: center; }
+
+.tpl-protocol {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1;
+  border-left: 0.5px solid var(--hair); background: var(--surface-2);
+}
+.tpl-single .tpl-protocol { border-left: 0; }
+.tpl-protocol-bar {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 0.5px solid var(--hair);
+  background: var(--surface);
+}
+.tpl-protocol-bar .sub { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.tpl-protocol-bar .grow { flex: 1; min-width: 0; }
+.tpl-pdf { flex: 1; width: 100%; border: 0; background: #fff; min-height: 0; }
+.tpl-parts { flex: 1; overflow-y: auto; padding: 14px 18px 24px; }
+.tpl-protocol.empty { display: grid; place-items: center; padding: 24px; }
+.tpl-wait { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; max-width: 360px; }
+.tpl-wait .tpl-docs { text-align: left; align-self: stretch; margin-top: 8px; }
+
+.tpl-dl { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.tpl-dl > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 10px; font-size: 13px; }
+.tpl-dl dt { color: var(--muted); }
+.tpl-dl dd { margin: 0; }
+.tpl-dl ul { margin: 0; padding-left: 16px; }
+.tpl-docs { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; font-size: 13px; }
+.tpl-docs .link { text-align: left; display: inline-flex; gap: 6px; align-items: center; }
+
+@media (max-width: 760px) {
+  .tpl-dl > div { grid-template-columns: 1fr; gap: 2px; }
+  .tpl-family select { max-width: 140px; }
+}

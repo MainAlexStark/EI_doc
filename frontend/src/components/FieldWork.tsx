@@ -1081,11 +1081,14 @@ function VerificationEntry({
     if (!info.template) {
       return (
         <div className="card">
-          <b>Для этого типа нет шаблона поверки</b>
+          <b>Для этого типа нет шаблона протокола поверки</b>
           <p className="hint">
-            Попросите ассистента: «сделай шаблон протокола поверки для {verification.si_type_name}» — он соберёт
-            его по методике из ФГИС, метролог проверит.
+            Протокол по {verification.si_type_name} делается по шаблону: ассистент соберёт его по методике поверки и
+            документам типа из Госреестра, вы проверите и нажмёте «Продолжить» — после этого здесь появится форма.
           </p>
+          <button type="button" className="primary sm" onClick={() => (window.location.hash = `#/protocol-templates/${verification.si_type_id}`)}>
+            <Icon name="layers" size={14} /> Создать шаблон протокола
+          </button>
         </div>
       );
     }

@@ -175,8 +175,15 @@ def _loop(run: Run, conversation: Conversation, user, *, extra_tools: list | Non
     tools, mcp_errors = all_tools()
     # Фоновая работа (шаблон для нового типа СИ) добавляет свои инструменты, которых нет в чате.
     tools.update({tool.name: tool for tool in extra_tools or []})
+    # Чат режима «Создать шаблон протокола поверки» — свои инструменты черновика и раздел промта о типе СИ.
+    from apps.assistant import template_workspace
+
+    tools.update({tool.name: tool for tool in template_workspace.tools_for(conversation)})
     schemas = [tool.schema() for tool in tools.values()]
     system = build_system_prompt(user, tool_names=list(tools), mcp_errors=mcp_errors)
+    workspace_section = template_workspace.prompt_for(conversation)
+    if workspace_section:
+        system += "\n\n" + workspace_section
     vision = bool(llm.model_info(run.model).get("vision"))
     ctx = ToolContext(user=user, conversation=conversation, run=run)
 

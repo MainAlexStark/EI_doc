@@ -155,7 +155,8 @@ class FamilyOptionsView(APIView):
     @extend_schema(responses={200: FamilyOptionSerializer(many=True)})
     def get(self, request):
         # Счётчики (те, что требуют времени визита) — первыми: с ними приходят чаще всего.
-        families = MeasurementFamily.objects.order_by("-requires_time_slot", "name")
+        # «Прочие СИ» — служебное семейство для неугаданных типов, заявителю его не показываем.
+        families = MeasurementFamily.objects.exclude(code="other").order_by("-requires_time_slot", "name")
         settings_obj = PricingSettings.current()
         return Response({
             "families": FamilyOptionSerializer(families, many=True).data,

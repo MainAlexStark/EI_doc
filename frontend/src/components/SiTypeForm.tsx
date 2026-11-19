@@ -207,7 +207,7 @@ export default function SiTypeForm({
   }, []);
 
   const calculatorKey = useMemo(
-    () => info?.families.find((f) => f.id === family)?.calculator_key ?? "water_meter",
+    () => info?.families.find((f) => f.id === family)?.calculator_key ?? "",
     [info, family],
   );
   const needsLimits = calculatorKey === "water_meter";

@@ -125,7 +125,8 @@ def _conversation(request, pk) -> Conversation:
 # ---------------------------------------------------------------------------
 class ConversationListView(APIView):
     def get(self, request):
-        qs = Conversation.objects.filter(user=request.user, external_id="")
+        # Чаты режима «Создать шаблон протокола» живут на своём экране, в общем списке их нет.
+        qs = Conversation.objects.filter(user=request.user, external_id="", template_workspace__isnull=True)
         query = (request.query_params.get("q") or "").strip()
         if query:
             qs = qs.filter(Q(title__icontains=query) | Q(messages__content__icontains=query)).distinct()

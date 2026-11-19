@@ -282,3 +282,69 @@ export type AgentLink =
   | { enabled: true; url: string; origin: string; token: string; ttl: number };
 
 export const fetchAgentLink = () => json<AgentLink>("/api/assistant/agent/");
+
+// --- «Создать шаблон протокола поверки» (apps/assistant/api_workspaces.py) ---
+export type TemplateDigest = {
+  id: number;
+  title: string;
+  is_active: boolean;
+  needs_review: boolean;
+  updated_at: string;
+  method: string;
+  si_kind: string;
+  unit: string;
+  params: { label: string; unit: string; from_type: boolean }[];
+  operations: string[];
+  modes: string[];
+  points: string[];
+  repeats: number | null;
+  characteristics: string[];
+  kits: string[];
+  sources: string[];
+  check: { ok: boolean } | null;
+};
+
+export type TemplateWorkspace = {
+  id: number;
+  conversation: number;
+  title: string;
+  status: "draft" | "published";
+  status_display: string;
+  revision: number;
+  published_at: string | null;
+  updated_at: string;
+  has_draft: boolean;
+  si_type: {
+    id: number;
+    name: string;
+    registry_number: string;
+    manufacturer: string;
+    type_title: string;
+    family: number;
+    family_name: string;
+    is_water: boolean;
+    needs_review: boolean;
+  };
+  agent_busy: boolean;
+  agent_activity: string;
+  draft?: TemplateDigest | null;
+  published?: TemplateDigest | null;
+  documents?: { id: number; kind: string; kind_display: string; title: string; downloaded: boolean; file_url: string }[];
+};
+
+const WS = "/api/assistant/template-workspaces/";
+export const listWorkspaces = () => json<TemplateWorkspace[]>(WS);
+export const openWorkspace = (body: { si_type?: number; fif_uuid?: string; name?: string }) =>
+  json<TemplateWorkspace>(WS, { method: "POST", body: JSON.stringify(body) });
+export const getWorkspace = (id: number) => json<TemplateWorkspace>(`${WS}${id}/`);
+export const setWorkspaceFamily = (id: number, family: number) =>
+  json<TemplateWorkspace>(`${WS}${id}/`, { method: "PATCH", body: JSON.stringify({ family }) });
+export const publishWorkspace = (id: number) => json<TemplateWorkspace>(`${WS}${id}/publish/`, { method: "POST" });
+export const workspacePreviewPath = (id: number, fmt: "pdf" | "docx", revision: number, inline = true) =>
+  `${WS}${id}/preview.${fmt}?rev=${revision}${inline ? "&inline=1" : ""}`;
+
+/** Протокол по черновику — blob: (у URL нет токена, во фрейм напрямую не отдать). */
+export async function workspacePreview(id: number, revision: number): Promise<string> {
+  const blob = await blobOf(workspacePreviewPath(id, "pdf", revision));
+  return URL.createObjectURL(blob);
+}

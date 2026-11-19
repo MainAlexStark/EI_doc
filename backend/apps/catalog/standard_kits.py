@@ -63,7 +63,7 @@ def guess_families(text: str) -> list[MeasurementFamily]:
     """
     hay = _key(text)
     found = []
-    for family in MeasurementFamily.objects.all():
+    for family in MeasurementFamily.objects.exclude(code="other"):  # «Прочие СИ» — не угадываются
         words = [w for w in re.findall(r"[а-яёa-z]+", family.name.lower().replace("ё", "е")) if len(w) >= 4]
         if words and all(w[:5] in hay for w in words):
             found.append(family)

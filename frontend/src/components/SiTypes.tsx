@@ -160,6 +160,12 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
                     </div>
                   </div>
                   <div className="row">
+                    {item.calculator_key !== "water_meter" && (
+                      <button type="button" className="sm" title="Чат с ассистентом и протокол по шаблону рядом"
+                        onClick={() => (window.location.hash = `#/protocol-templates/${item.id}`)}>
+                        <Icon name="layers" size={14} /> Шаблон протокола
+                      </button>
+                    )}
                     {canReview && item.needs_review && (
                       <button type="button" className="primary sm" disabled={busy === item.id} onClick={() => void confirm(item)}>
                         <Icon name="check" size={14} /> Всё верно

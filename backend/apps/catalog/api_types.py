@@ -127,11 +127,21 @@ def clean_water_limits(raw: dict) -> dict:
     return {key: float(values[key]) for key in LIMIT_FIELDS}
 
 
-def default_family() -> MeasurementFamily | None:
-    return (
-        MeasurementFamily.objects.filter(calculator_key=WATER_CALCULATOR).order_by("pk").first()
-        or MeasurementFamily.objects.order_by("pk").first()
+OTHER_FAMILY_CODE = "other"
+
+
+def default_family() -> MeasurementFamily:
+    """Семейство для типа, вид которого не угадался по названию, — «Прочие СИ».
+
+    Раньше сюда попадали «Счётчики воды» (первое семейство с калькулятором), и любой тип, который
+    не угадался, — манометр, термометр, гигрометр — становился счётчиком воды: поверялся
+    калькулятором воды и требовал расходы. «Прочие СИ» поверяются по шаблону, как все не-водяные.
+    """
+    family, _ = MeasurementFamily.objects.get_or_create(
+        code=OTHER_FAMILY_CODE,
+        defaults={"name": "Прочие СИ", "calculator_key": "", "requires_time_slot": False},
     )
+    return family
 
 
 # ---------------------------------------------------------------------------
@@ -230,8 +240,6 @@ class SiTypeWriteSerializer(serializers.Serializer):
 
             family = guess_family(f"{attrs['type_title']} {attrs.get('name', '')}")
         family = family or default_family()
-        if family is None:
-            raise serializers.ValidationError("В справочнике нет ни одного семейства СИ")
         attrs["family"] = family
         if family.calculator_key == WATER_CALCULATOR:
             if "limits" in attrs or self.instance is None:
@@ -464,8 +472,10 @@ class SiTypePresetsView(APIView):
 
     @extend_schema(responses={200: dict})
     def get(self, request):
-        families = MeasurementFamily.objects.exclude(calculator_key="").order_by("name")
+        # Все семейства, а не только с калькулятором: иначе в выборе «Вид СИ» был один вариант —
+        # «Счётчики воды», и любой новый тип заводился как счётчик.
         family = default_family()
+        families = MeasurementFamily.objects.order_by("name")
         return Response({
             "fields": [{"key": key, "label": label} for key, label in LIMIT_FIELDS.items()],
             "presets": build_presets(),

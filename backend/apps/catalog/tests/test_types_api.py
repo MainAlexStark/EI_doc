@@ -34,7 +34,7 @@ class SiTypeApiTestCase(TestCase):
 
     def create(self, user, **overrides):
         body = {"registry_number": "55555-20", "name": "ТЕСТ-15", "manufacturer": "Завод", "limits": LIMITS,
-                "fif_uuid": "fif-55555"}
+                "fif_uuid": "fif-55555", "family": self.family.pk}
         body.update(overrides)
         return self.as_user(user).post(reverse("si_type_list"), body, format="json")
 
@@ -113,3 +113,28 @@ class SiTypeApiTestCase(TestCase):
         assert presets[1]["label"] == "Ду20"
         assert data["can_review"] is False
         assert [f["key"] for f in data["fields"]][0] == "q_min"
+
+
+class DefaultFamilyTestCase(TestCase):
+    """Вид СИ не угадался — тип не должен становиться счётчиком воды (так было до 19.11.2026)."""
+
+    def setUp(self) -> None:
+        MeasurementFamily.objects.create(code="water-meter", name="Счётчики воды", calculator_key="water_meter")
+        self.client = APIClient()
+        self.client.force_authenticate(User.objects.create_user("v@ei.test", "pw", role=Role.VERIFIER))
+
+    def test_unguessed_type_goes_to_other_family_without_limits(self):
+        response = self.client.post(reverse("si_type_list"), {
+            "registry_number": "77777-21", "name": "ТГ-1", "type_title": "Гигрометры психрометрические",
+            "fif_uuid": "fif-77777", "make_templates": False}, format="json")
+        assert response.status_code == 201, response.data
+        si_type = SiType.objects.get(registry_number="77777-21")
+        assert si_type.family.code == "other"
+        assert si_type.family.calculator_key == ""
+
+    def test_presets_list_every_family(self):
+        MeasurementFamily.objects.create(code="manometers", name="Манометры")
+        data = self.client.get(reverse("si_type_presets")).data
+        names = {f["name"] for f in data["families"]}
+        assert {"Счётчики воды", "Манометры", "Прочие СИ"} <= names
+

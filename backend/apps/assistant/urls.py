@@ -1,6 +1,6 @@
 from django.urls import path
 
-from apps.assistant import agent_link, api, host
+from apps.assistant import agent_link, api, api_workspaces, host
 
 urlpatterns = [
     path("conversations/", api.ConversationListView.as_view(), name="assistant_conversations"),
@@ -31,6 +31,13 @@ urlpatterns = [
     path("mcp/<int:pk>/", api.McpDetailView.as_view(), name="assistant_mcp_detail"),
     path("mcp/<int:pk>/tools/", api.McpToolsView.as_view(), name="assistant_mcp_tools"),
     path("settings/", api.SettingsView.as_view(), name="assistant_settings"),
+    # «Создать шаблон протокола поверки»: чат на тип СИ + живой черновик (template_workspace.py).
+    path("template-workspaces/", api_workspaces.WorkspaceListView.as_view(), name="assistant_workspaces"),
+    path("template-workspaces/<int:pk>/", api_workspaces.WorkspaceDetailView.as_view(), name="assistant_workspace"),
+    path("template-workspaces/<int:pk>/preview.<str:fmt>", api_workspaces.WorkspacePreviewView.as_view(),
+         name="assistant_workspace_preview"),
+    path("template-workspaces/<int:pk>/publish/", api_workspaces.WorkspacePublishView.as_view(),
+         name="assistant_workspace_publish"),
     path("usage/", api.UsageView.as_view(), name="assistant_usage"),
     # Агент на agentkit: вход во фрейм чата и MCP-сервер EI_doc для него (см. host.py).
     path("agent/", agent_link.AgentLinkView.as_view(), name="assistant_agent"),

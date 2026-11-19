@@ -814,7 +814,7 @@ export const fetchTemplateForVerification = (verificationId: number, params?: Re
     : json<TemplateForVerification>(`/api/verifications/${verificationId}/template/`);
 
 /** Скачать файл с защищённого эндпоинта (токен — в заголовке, поэтому не голая ссылка). */
-async function downloadFile(path: string, fallbackName: string): Promise<void> {
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
   const response = await call(path);
   if (!response.ok) {
     let detail = `Ошибка ${response.status}`;
