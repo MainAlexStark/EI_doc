@@ -18,6 +18,7 @@ urlpatterns = [
         name="assistant_attachment_download",
     ),
     path("models/", api.ModelsView.as_view(), name="assistant_models"),
+    path("status/", api.StatusView.as_view(), name="assistant_status"),
     path("knowledge/", api.KnowledgeListView.as_view(), name="assistant_knowledge"),
     path("knowledge/search/", api.KnowledgeSearchView.as_view(), name="assistant_knowledge_search"),
     path("knowledge/<int:pk>/", api.KnowledgeDetailView.as_view(), name="assistant_knowledge_detail"),

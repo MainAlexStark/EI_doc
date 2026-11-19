@@ -9,6 +9,7 @@ import { PHONE, useMediaQuery } from "../ui/hooks";
 import {
   createConversation,
   deleteConversation,
+  fetchAssistantStatus,
   fetchModels,
   listConversations,
   updateConversation,
@@ -53,6 +54,37 @@ const SUGGESTIONS: { title: string; text: string; icon: IconName }[] = [
   },
 ];
 
+const RECHECK_DOWN_MS = 15_000;
+const RECHECK_OK_MS = 120_000;
+
+/** Работает ли ассистент: спрашиваем сразу при открытии и дальше по таймеру —
+ * чтобы «не работает» человек видел до того, как напишет сообщение, а не «Ошибку 500» после. */
+function useAssistantHealth() {
+  const [problems, setProblems] = useState<string[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const check = useCallback(async (fresh = false) => {
+    setChecking(true);
+    try {
+      const s = await fetchAssistantStatus(fresh);
+      setProblems(s.problems);
+    } catch (e) {
+      setProblems([`Сервер EI_doc не ответил на проверку ассистента: ${(e as Error).message}`]);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+  useEffect(() => {
+    void check();
+  }, [check]);
+  const down = !!problems?.length;
+  useEffect(() => {
+    const t = window.setInterval(() => void check(), down ? RECHECK_DOWN_MS : RECHECK_OK_MS);
+    return () => window.clearInterval(t);
+  }, [check, down]);
+  const recheck = useCallback(() => void check(true), [check]);
+  return { problems: problems ?? [], down, checking, recheck };
+}
+
 /** Ассистент на agentkit, если он развёрнут (AGENT_URL в .env EI_doc), иначе — встроенный чат. */
 export default function Assistant() {
   const [link, setLink] = useState<AgentLink | null>(null);
@@ -79,6 +111,8 @@ function BuiltinAssistant() {
   const [initialPrompt, setInitialPrompt] = useState<string | undefined>();
   const [draftPrompt, setDraftPrompt] = useState("");
   const [error, setError] = useState("");
+  const health = useAssistantHealth();
+  const unavailable = health.down ? health.problems.join(" ") : "";
 
   const loadList = useCallback(() => {
     listConversations(query).then(setConversations).catch((e) => setError((e as Error).message));
@@ -193,7 +227,20 @@ function BuiltinAssistant() {
           <b className="assistant-title">{currentTitle ?? "Новый чат"}</b>
         </div>
         {error && <div className="assistant-alert"><Alert onClose={() => setError("")}>{error}</Alert></div>}
-        {modelsNotice && <div className="assistant-alert"><Alert tone="warn">{modelsNotice}</Alert></div>}
+        {health.down && (
+          <div className="assistant-alert">
+            <Alert>
+              <b>Ассистент сейчас не работает</b> — сообщения не отправятся.
+              <ul className="assistant-problems">
+                {health.problems.map((p) => <li key={p}>{p}</li>)}
+              </ul>
+              <button type="button" className="link" disabled={health.checking} onClick={health.recheck}>
+                {health.checking ? "Проверяю…" : "Проверить снова"}
+              </button>
+            </Alert>
+          </div>
+        )}
+        {modelsNotice && !health.down && <div className="assistant-alert"><Alert tone="warn">{modelsNotice}</Alert></div>}
         {current ? (
           <ChatView
             key={current}
@@ -206,6 +253,8 @@ function BuiltinAssistant() {
               setContextOpen(true);
             }}
             initialPrompt={initialPrompt}
+            unavailable={unavailable}
+            onSendFailed={health.recheck}
           />
         ) : (
           <div className="welcome">
@@ -220,7 +269,7 @@ function BuiltinAssistant() {
                 className="welcome-input"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  if (draftPrompt.trim()) void startChat(draftPrompt.trim());
+                  if (draftPrompt.trim() && !unavailable) void startChat(draftPrompt.trim());
                 }}
               >
                 <textarea
@@ -232,13 +281,13 @@ function BuiltinAssistant() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      if (draftPrompt.trim()) void startChat(draftPrompt.trim());
+                      if (draftPrompt.trim() && !unavailable) void startChat(draftPrompt.trim());
                     }
                   }}
                 />
                 <div className="welcome-input-bar">
                   <span className="hint kbd-hint">Enter — начать, Shift+Enter — новая строка</span>
-                  <button className="primary send" disabled={!draftPrompt.trim()} aria-label="Начать" title="Начать">
+                  <button className="primary send" disabled={!draftPrompt.trim() || !!unavailable} aria-label="Начать" title={unavailable ? "Ассистент сейчас не работает" : "Начать"}>
                     <Icon name="send" size={17} strokeWidth={2.2} />
                   </button>
                 </div>

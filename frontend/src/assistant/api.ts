@@ -1,6 +1,6 @@
 /** API ассистента-метролога (/api/assistant/…). */
 
-import { ApiError, call, json } from "../api";
+import { ApiError, call, json, statusText } from "../api";
 
 export type Source = { kind: string; title: string; url?: string; ref?: string };
 export type FileRef = { id: number; name: string; size: number; mime: string };
@@ -129,7 +129,7 @@ export async function uploadAttachment(file: File, conversation?: number): Promi
 async function blobOf(path: string): Promise<Blob> {
   const response = await call(path);
   if (!response.ok) {
-    let detail = `Ошибка ${response.status}`;
+    let detail = statusText(response.status);
     try {
       detail = (await response.json()).detail ?? detail;
     } catch {
@@ -167,6 +167,11 @@ export async function openFile(path: string, name: string, download = false): Pr
 }
 
 export const attachmentPath = (id: number) => `/api/assistant/attachments/${id}/download/`;
+
+export type AssistantStatus = { ok: boolean; problems: string[] };
+/** Может ли ассистент сейчас отвечать (Redis, воркер очереди, модель). fresh — без кэша сервера. */
+export const fetchAssistantStatus = (fresh = false) =>
+  json<AssistantStatus>(`/api/assistant/status/${fresh ? "?fresh=1" : ""}`);
 
 export const fetchModels = () =>
   json<{ default: string; providers: Record<string, boolean>; models: ModelInfo[]; notice?: string }>("/api/assistant/models/");

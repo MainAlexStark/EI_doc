@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ApiError } from "../api";
 import {
   attachmentPath,
   authedUrl,
@@ -33,6 +34,10 @@ type Props = {
   onChanged: () => void;
   onOpenContextFile: (id: number) => void;
   initialPrompt?: string;
+  /** Непусто — ассистент сейчас не работает (причина); отправка выключена. */
+  unavailable?: string;
+  /** Отправка упала ошибкой сервера — пусть экран перепроверит статус ассистента. */
+  onSendFailed?: () => void;
 };
 
 type Turn =
@@ -56,7 +61,9 @@ function groupTurns(messages: ChatMessage[]): Turn[] {
 
 const POLL_MS = 600;
 
-export default function ChatView({ conversationId, models, defaultModel, onChanged, onOpenContextFile, initialPrompt }: Props) {
+export default function ChatView({
+  conversationId, models, defaultModel, onChanged, onOpenContextFile, initialPrompt, unavailable = "", onSendFailed,
+}: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [run, setRun] = useState<RunState | null>(null);
   const [lastRun, setLastRun] = useState<RunState | null>(null);
@@ -161,14 +168,21 @@ export default function ChatView({ conversationId, models, defaultModel, onChang
         const res = await sendMessage(conversationId, text, attachments.map((a) => a.id), model);
         setMessages((prev) => [...prev, { ...res.message, attachments }]);
         lastId.current = res.message.id;
-        setRun(res.run);
+        if (res.run.active) setRun(res.run);
+        else {
+          // Прогон не встал в очередь (сервер сразу пометил его ошибкой) — показываем причину, не «думает…».
+          setRun(null);
+          setLastRun(res.run);
+          if (res.run.status === "error") onSendFailed?.();
+        }
         onChanged();
       } catch (e) {
         setError((e as Error).message);
+        if (e instanceof ApiError && e.status >= 500) onSendFailed?.();
         throw e;
       }
     },
-    [conversationId, model, run?.active, onChanged],
+    [conversationId, model, run?.active, onChanged, onSendFailed],
   );
 
   // Подсказка с экрана приветствия
@@ -186,9 +200,11 @@ export default function ChatView({ conversationId, models, defaultModel, onChang
       const keepUntil = [...messages].reverse().find((m) => m.role === "user")?.id ?? 0;
       setMessages((prev) => prev.filter((m) => m.id <= keepUntil));
       lastId.current = keepUntil;
-      setRun(res.run);
+      if (res.run.active) setRun(res.run);
+      else setLastRun(res.run);
     } catch (e) {
       setError((e as Error).message);
+      if (e instanceof ApiError && e.status >= 500) onSendFailed?.();
     }
   };
 
@@ -276,6 +292,7 @@ export default function ChatView({ conversationId, models, defaultModel, onChang
       <Composer
         conversationId={conversationId}
         running={!!run?.active}
+        unavailable={unavailable}
         onSend={send}
         onStop={() => run && void cancelRun(run.id).then(setRun)}
         modelSlot={<ModelPicker models={models} value={model} onChange={setModel} compact />}
@@ -592,10 +609,11 @@ function Markdown({ text }: { text: string }) {
 type Pending = { key: string; file: File; attachment?: Attachment; error?: string };
 
 function Composer({
-  conversationId, running, onSend, onStop, modelSlot, vision,
+  conversationId, running, unavailable, onSend, onStop, modelSlot, vision,
 }: {
   conversationId: number;
   running: boolean;
+  unavailable: string;
   onSend: (text: string, attachments: Attachment[]) => Promise<void>;
   onStop: () => void;
   modelSlot: JSX.Element;
@@ -644,7 +662,7 @@ function Composer({
 
   const uploading = pending.some((p) => !p.attachment && !p.error);
   const ready = pending.filter((p) => p.attachment).map((p) => p.attachment!);
-  const canSend = !running && !sending && !uploading && (text.trim() !== "" || ready.length > 0);
+  const canSend = !unavailable && !running && !sending && !uploading && (text.trim() !== "" || ready.length > 0);
 
   const submit = async () => {
     if (!canSend) return;
@@ -695,7 +713,7 @@ function Composer({
       <textarea
         ref={area}
         rows={1}
-        placeholder="Спросите про прибор, методику, поверку… Можно приложить PDF, Word, Excel, фото шильдика"
+        placeholder={unavailable ? "Ассистент сейчас не работает — текст можно набрать и отправить, когда заработает" : "Спросите про прибор, методику, поверку… Можно приложить PDF, Word, Excel, фото шильдика"}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -731,7 +749,7 @@ function Composer({
         {running ? (
           <button className="send stop" onClick={onStop} title="Остановить" aria-label="Остановить"><Icon name="stop" size={14} /></button>
         ) : (
-          <button className="primary send" disabled={!canSend} onClick={() => void submit()} title="Отправить" aria-label="Отправить">
+          <button className="primary send" disabled={!canSend} onClick={() => void submit()} title={unavailable ? "Ассистент сейчас не работает" : "Отправить"} aria-label="Отправить">
             {sending ? <i className="spinner sm" /> : <Icon name="send" size={17} strokeWidth={2.2} />}
           </button>
         )}

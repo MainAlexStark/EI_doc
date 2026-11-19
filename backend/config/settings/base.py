@@ -118,6 +118,7 @@ AUTH_USER_MODEL = "core.User"
 # API
 # --------------------------------------------------------------------------
 REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "apps.core.exceptions.exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),

@@ -127,15 +127,27 @@ function humanError(body: unknown): string {
   return String(body);
 }
 
+/** Что сказать человеку, если сервер не объяснил ошибку сам (тело пустое или HTML). */
+export function statusText(status: number): string {
+  if (status === 502 || status === 504) return `Сервер EI_doc не отвечает (${status}) — он перезапускается или упал. Попробуйте через минуту.`;
+  if (status === 503) return "Сервис временно недоступен (503). Попробуйте через минуту.";
+  if (status >= 500)
+    return `Сервер не смог обработать запрос (${status}). Если повторяется — backend не запущен или упал, подробности в его журнале.`;
+  if (status === 403) return "Нет прав на это действие (403).";
+  if (status === 404) return "Не найдено (404) — возможно, запись уже удалена.";
+  if (status === 413) return "Файл слишком большой (413).";
+  return `Ошибка ${status}`;
+}
+
 export async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await call(path, init);
   if (!response.ok) {
-    let detail = `Ошибка ${response.status}`;
+    let detail = statusText(response.status);
     try {
       const body = await response.json();
       detail = humanError(body) || detail;
     } catch {
-      /* тело не разобралось — оставим код */
+      /* тело не разобралось (HTML-страница 500, пустой ответ прокси) — оставим понятный текст по коду */
     }
     throw new ApiError(detail, response.status);
   }
@@ -1625,7 +1637,7 @@ export async function downloadProcurementDocument(doc: ProcurementDocument): Pro
 }
 
 // ---------------------------------------------------------------------------
-// Заказы — вкладка «Поверки» (apps/verification/api_orders.py)
+// Заказы — вкладка «Приёмки» (apps/verification/api_orders.py)
 // ---------------------------------------------------------------------------
 export type PartyLookup =
   | { found: false; valid: boolean }

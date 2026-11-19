@@ -285,8 +285,28 @@ def start_run(conversation: Conversation, model: str) -> Run:
     else:
         from apps.assistant.tasks import run_agent
 
-        transaction.on_commit(lambda: run_agent.delay(run.pk))
+        transaction.on_commit(lambda: _enqueue(run, run_agent))
     return run
+
+
+def _enqueue(run: Run, task) -> None:
+    """Поставить прогон в очередь; не вышло (Redis лежит) — прогон сразу ошибочный, с причиной.
+
+    Без этого исключение брокера уходило из запроса голой «Ошибкой 500», а сообщение человека
+    уже было сохранено — и чат выглядел так, будто ассистент просто молчит.
+    """
+    try:
+        task.delay(run.pk)
+    except Exception as exc:  # noqa: BLE001 — kombu/redis кидают разное, итог один
+        logger.exception("Не удалось поставить прогон %s в очередь", run.pk)
+        from apps.assistant import health
+
+        health.forget()
+        run.status = Run.Status.ERROR
+        run.error = (f"Ассистент не работает: не удалось поставить задачу в очередь ({type(exc).__name__}). "
+                     "Скорее всего, не запущен Redis — сообщите администратору.")
+        run.finished_at = timezone.now()
+        Run.objects.filter(pk=run.pk).update(status=run.status, error=run.error, finished_at=run.finished_at)
 
 
 def title_from(text: str) -> str:

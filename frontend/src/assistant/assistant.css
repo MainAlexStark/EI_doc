@@ -516,3 +516,6 @@ button.send.stop:hover:not(:disabled) { background: #000; }
   .tpl-dl > div { grid-template-columns: 1fr; gap: 2px; }
   .tpl-family select { max-width: 140px; }
 }
+
+.assistant-problems { margin: 4px 0 2px; padding-left: 18px; }
+.assistant-problems li + li { margin-top: 2px; }

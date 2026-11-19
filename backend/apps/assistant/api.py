@@ -13,12 +13,12 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django_sendfile import sendfile
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.assistant import actions, knowledge, llm, mcp_client, web
+from apps.assistant import actions, health, knowledge, llm, mcp_client, web
 from apps.assistant.agent import partial_key, start_run, title_from, tool_call_args
 from apps.assistant.extract import ExtractError, extract_text, guess_mime
 from apps.assistant.models import (
@@ -40,6 +40,29 @@ from apps.core.models import Role
 MAX_UPLOAD = 40 * 1024 * 1024
 EDITOR_ROLES = {Role.OWNER, Role.HEAD, Role.METROLOGIST}
 STALE_AFTER = dt.timedelta(minutes=30)
+
+
+class AssistantUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = "Ассистент сейчас не работает"
+    default_code = "assistant_unavailable"
+
+
+def _ensure_available() -> None:
+    try:
+        health.ensure_available()
+    except health.Unavailable as exc:
+        raise AssistantUnavailable(f"Ассистент сейчас не работает. {exc}") from exc
+
+
+def _partial(run) -> str | None:
+    """Недописанный ответ из кэша; кэш (Redis) недоступен — просто без него, а не 500 на весь чат."""
+    if run is None or not run.is_active:
+        return None
+    try:
+        return cache.get(partial_key(run.pk))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def is_editor(user) -> bool:
@@ -151,7 +174,7 @@ class ConversationDetailView(APIView):
             "messages": messages_json(conversation.messages.all()),
             "active_run": run_json(active),
             "last_run": run_json(last),
-            "partial": cache.get(partial_key(active.pk)) if active else None,
+            "partial": _partial(active),
         })
 
     def patch(self, request, pk):
@@ -184,6 +207,7 @@ class SendMessageView(APIView):
         model = (request.data.get("model") or conversation.model or llm.default_model()).strip()
         if not model:
             raise ValidationError("Не настроена ни одна модель: задайте OPENROUTER_API_KEY или ключи Yandex")
+        _ensure_available()
 
         attachments = list(Attachment.objects.filter(pk__in=attachment_ids, user=request.user))
         message = Message.objects.create(conversation=conversation, role=Message.Role.USER, content=content)
@@ -211,6 +235,7 @@ class RegenerateView(APIView):
         last_user = conversation.messages.filter(role=Message.Role.USER).order_by("-pk").first()
         if last_user is None:
             raise ValidationError("Нечего перегенерировать")
+        _ensure_available()
         conversation.messages.filter(pk__gt=last_user.pk).delete()
         model = (request.data.get("model") or conversation.model or llm.default_model()).strip()
         conversation.model = model
@@ -229,7 +254,7 @@ class RunStateView(APIView):
         return Response({
             "run": run_json(run),
             "messages": messages_json(messages),
-            "partial": cache.get(partial_key(run.pk)) if run.is_active else None,
+            "partial": _partial(run),
         })
 
 
@@ -295,6 +320,14 @@ class AttachmentDownloadView(APIView):
 # ---------------------------------------------------------------------------
 # Модели
 # ---------------------------------------------------------------------------
+class StatusView(APIView):
+    """GET → {ok, problems}: может ли ассистент сейчас отвечать. Экран чата показывает причину заранее."""
+
+    def get(self, request):
+        found = health.problems(fresh=request.query_params.get("fresh") == "1")
+        return Response({"ok": not found, "problems": found})
+
+
 class ModelsView(APIView):
     def get(self, request):
         models = llm.available_models()
