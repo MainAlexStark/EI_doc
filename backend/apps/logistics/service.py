@@ -197,7 +197,7 @@ def attach_to_city_day(order: WorkOrder) -> TripStop | None:
 
     Заявка с сайта подтверждается диспетчером, и адрес сразу встаёт в день
     исполнителя: там его увидят на карте и уложат в маршрут вместе с остальными.
-    Наряды без даты, заказы (вкладка «Поверки») и уже привязанные не трогает.
+    Наряды без даты, заказы (вкладка «Приёмки») и уже привязанные не трогает.
     """
     if order.kind != WorkOrderKind.FIELD or order.scheduled_date is None or order.is_closed:
         return None
@@ -241,7 +241,7 @@ def parse_lines(text: str) -> list[StopInput]:
 
 
 def set_stop_status(stop: TripStop, status: str) -> TripStop:
-    """Отметка по адресу. Пустой наряд несостоявшегося визита не висит в «Поверках» открытым."""
+    """Отметка по адресу. Пустой наряд несостоявшегося визита не висит в «Приёмках» открытым."""
     if status not in StopStatus.values:
         raise TripError("Неизвестная отметка")
     stop.status = status

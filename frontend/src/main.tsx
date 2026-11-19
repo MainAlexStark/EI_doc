@@ -4,6 +4,7 @@ import App from "./App";
 import PublicRequestForm from "./components/PublicRequestForm";
 import Landing from "./landing/Landing";
 import "./styles.css";
+import "./control.css";
 
 // Публичная форма заявки живёт на отдельном пути того же бандла — своего
 // клиентского роутера в проекте нет (см. App.tsx), поэтому выбор экрана

@@ -31,6 +31,8 @@ import { confirmDialog } from "../ui/Modal";
 import { EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
 import ScanReview from "./ScanReview";
 import { OrderHeader, OrderLine, OrderModal, orderStage, orderTitle } from "./Orders";
+import LabBoard from "./control/LabBoard";
+import { isControlRole } from "../dispatchApi";
 import SiTypeDocuments from "./FifDocuments";
 import InstrumentHistory from "./InstrumentHistory";
 import type { SiTypeDraft } from "./SiTypeForm";
@@ -1163,7 +1165,7 @@ const OPEN_STATUSES = ["planned", "in_progress"];
 
 type Period = "active" | "closed";
 
-/** «Поверки» — заказы: группы по тому, где заказ сейчас, а не по дате выезда. */
+/** «Приёмки» — заказы: группы по тому, где заказ сейчас, а не по дате выезда. */
 function groupLab(list: WorkOrder[], period: Period): { title: string; orders: WorkOrder[]; withDate: boolean }[] {
   const recent = [...list].sort((a, b) => (b.received_at ?? b.created_at).localeCompare(a.received_at ?? a.created_at));
   const labOnly = recent.filter((o) => o.kind === "lab");
@@ -1381,8 +1383,10 @@ export default function FieldWork({
   if (selectedOrder == null) {
     const shown = orders.filter((o) => isOpenOrder(o) === (period === "active"));
     const sections = groupLab(shown, period);
+    // Руководство видит все приёмки фирмы таблицей: ответственный — прямо в строке.
+    const control = isControlRole(me.role);
     return (
-      <div className="narrow">
+      <div className={control ? "" : "narrow"}>
         {syncBar}
         <PageActions>
           <button type="button" className="primary" onClick={() => setCreatingOrder(true)}>
@@ -1412,7 +1416,17 @@ export default function FieldWork({
         </div>
         {error && <div className="error">{error}</div>}
         {loading && <Spinner />}
-        {!loading && shown.length === 0 && (
+        {control && !loading && (
+          <LabBoard
+            orders={shown}
+            onOpen={setSelectedOrder}
+            onChanged={(fresh) => {
+              if (fresh) setOrders((current) => current.map((o) => (o.id === fresh.id ? { ...o, ...fresh } : o)));
+              else void fetchWorkOrders({ trip: "none" }).then(setOrders).catch(() => undefined);
+            }}
+          />
+        )}
+        {!control && !loading && shown.length === 0 && (
           <EmptyState
             icon={period === "closed" ? "checkCircle" : "inbox"}
             title={period === "closed" ? "Выданных заказов пока нет" : "Заказов в работе нет"}
@@ -1425,7 +1439,7 @@ export default function FieldWork({
             {period === "active" && "Привезли приборы — заведите заказ по ИНН заказчика, внесите приборы и распечатайте акт приёма. Выезды по адресам — во вкладке «Выезды»."}
           </EmptyState>
         )}
-        {sections.map((section) => (
+        {!control && sections.map((section) => (
           <div key={section.title}>
             <div className={`list-section ${section.title === "Просрочены" ? "crit" : ""}`}>
               {section.title} <span className="count">{section.orders.length}</span>
@@ -1506,7 +1520,7 @@ export default function FieldWork({
           else setSelectedOrder(null);
         }}
       >
-        <Icon name="chevronLeft" size={20} /> {embedded ? backLabel || "Назад" : "Поверки"}
+        <Icon name="chevronLeft" size={20} /> {embedded ? backLabel || "Назад" : "Приёмки"}
       </button>
       {order?.kind === "lab" ? (
         <OrderHeader

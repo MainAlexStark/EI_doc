@@ -237,7 +237,7 @@ function RequestDetail({
         note: note || undefined,
       });
       const who = employees.find((e) => String(e.id) === employee)?.full_name ?? "исполнителя";
-      await onChanged(`Заявка №${request.id} подтверждена, создан наряд №${result.work_order_id}. Исполнитель — ${who}: выезд уже в его «Поверках» и графике.`);
+      await onChanged(`Заявка №${request.id} подтверждена, создан наряд №${result.work_order_id}. Исполнитель — ${who}: выезд уже в его «Выездах» и графике.`);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось подтвердить заявку");
     } finally {

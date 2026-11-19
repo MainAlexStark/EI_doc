@@ -530,7 +530,7 @@ class WorkOrder(models.Model):
     )
     note = models.TextField("примечание", blank=True)
 
-    # Заказ (вкладка «Поверки»): заказчик привёз приборы сам — адресов и карты нет,
+    # Заказ (вкладка «Приёмки»): заказчик привёз приборы сам — адресов и карты нет,
     # главное юрлицо, ИНН, что приняли и когда отдали (акты приёма и выдачи).
     kind = models.CharField(
         "вид", max_length=8, choices=WorkOrderKind.choices, default=WorkOrderKind.FIELD, db_index=True,

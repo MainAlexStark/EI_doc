@@ -32,7 +32,7 @@ class WorkOrderSerializer(serializers.Serializer):
     verifications_accepted = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     closed_at = serializers.DateTimeField(allow_null=True)
-    # Адрес командировки — тот же наряд; экран «Поверки» по этим полям убирает
+    # Адрес командировки — тот же наряд; экран «Приёмки» по этим полям убирает
     # его из общего списка (десятки адресов одной поездки там только мешают).
     kind = serializers.CharField()
     client_id = serializers.IntegerField()

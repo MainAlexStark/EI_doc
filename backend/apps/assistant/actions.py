@@ -157,7 +157,7 @@ DONE_TEXT = {
     ),
     "verification_template_save": lambda r: (
         f"Шаблон поверки {'обновлён' if r.get('updated') else 'заведён'} (id {r['id']}): «{r['title']}». Поверитель "
-        "проводит по нему поверку на экране «Поверки»: параметры прибора, отметки по операциям, показания — "
+        "проводит по нему поверку на экране «Приёмки»: параметры прибора, отметки по операциям, показания — "
         "расчёт и протокол делает EI_doc" + ("; шаблон ждёт проверки метролога." if r.get("needs_review") else ".")
     ),
     "si_type_create": lambda r: (
@@ -171,10 +171,13 @@ DONE_TEXT = {
 
 
 def _registry() -> tuple[dict, dict]:
-    """Свои исполнители + личный кабинет (график, наряды, задачи, заявки) — cabinet импортирует этот модуль."""
-    from apps.assistant import cabinet
+    """Свои исполнители + личный кабинет + администрирование — cabinet и admin_tools импортируют этот модуль."""
+    from apps.assistant import admin_tools, cabinet
 
-    return {**EXECUTORS, **cabinet.EXECUTORS}, {**DONE_TEXT, **cabinet.DONE_TEXT}
+    return (
+        {**EXECUTORS, **cabinet.EXECUTORS, **admin_tools.EXECUTORS},
+        {**DONE_TEXT, **cabinet.DONE_TEXT, **admin_tools.DONE_TEXT},
+    )
 
 
 def decide(action: PendingAction, user, *, confirm: bool) -> PendingAction:

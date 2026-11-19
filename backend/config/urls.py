@@ -29,6 +29,7 @@ from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
 from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, frontend_root_file, healthz
 from apps.logistics.tiles import TileView
+from apps.logistics import api_dispatch
 from apps.hub.api import (
     AddressSuggestView,
     CaptchaConfigView,
@@ -133,6 +134,15 @@ urlpatterns = [
     path("api/catalog/families/", FamilyOptionsView.as_view(), name="family_options"),
     path("api/core/employees/", EmployeeListView.as_view(), name="employee_list"),
     path("api/core/employees/me/", MeView.as_view(), name="me"),
+    # Сотрудники и учётные записи — без Django-админки (apps/core/staff.py)
+    path("api/core/staff/", api_dispatch.StaffListView.as_view(), name="staff_list"),
+    path("api/core/staff/<int:pk>/", api_dispatch.StaffDetailView.as_view(), name="staff_detail"),
+    path("api/core/staff/<int:pk>/password/", api_dispatch.StaffPasswordView.as_view(), name="staff_password"),
+    # Диспетчерская руководства: панель, карта, командный график, назначение (apps/logistics/dispatch.py)
+    path("api/dispatch/overview/", api_dispatch.OverviewView.as_view(), name="dispatch_overview"),
+    path("api/dispatch/map/", api_dispatch.MapView.as_view(), name="dispatch_map"),
+    path("api/dispatch/schedule/", api_dispatch.ScheduleView.as_view(), name="dispatch_schedule"),
+    path("api/dispatch/assign/", api_dispatch.AssignView.as_view(), name="dispatch_assign"),
     path(
         "api/core/employees/me/telegram-link-code/",
         TelegramLinkCodeView.as_view(), name="telegram_link_code",
@@ -225,7 +235,7 @@ urlpatterns = [
         "api/work-orders/<int:pk>/verifications/",
         WorkOrderVerificationsView.as_view(), name="work_order_verifications",
     ),
-    # Заказы — вкладка «Поверки» (приборы привезли сами)
+    # Заказы — вкладка «Приёмки» (приборы привезли сами)
     path("api/clients/suggest/", ClientSuggestView.as_view(), name="client_suggest"),
     path("api/clients/lookup/", ClientLookupView.as_view(), name="client_lookup"),
     path("api/orders/", OrderCreateView.as_view(), name="order_create"),

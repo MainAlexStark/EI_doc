@@ -158,7 +158,7 @@ class ClassicTripTests(Base):
         assert self.api.patch(f"/api/trip-stops/{a['id']}/", {"status": "done"}, format="json").status_code == 200
         marked = self.api.patch(f"/api/trip-stops/{b['id']}/", {"status": "no_answer"}, format="json")
         assert marked.data["status"] == "no_answer" and marked.data["visited_at"]
-        # Пустой наряд несостоявшегося визита закрывается, чтобы не висел в «Поверках».
+        # Пустой наряд несостоявшегося визита закрывается, чтобы не висел в «Приёмках».
         assert WorkOrder.objects.get(pk=b["work_order_id"]).status == WorkOrderStatus.CANCELLED
 
         data = self.api.get(f"/api/trips/{trip['id']}/").data

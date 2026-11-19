@@ -6,7 +6,7 @@
 Документация: [архитектура](docs/architecture.md) · [нумерация протоколов](docs/numbering.md) ·
 [условия поверки](docs/conditions.md) · [измерения](docs/measurements.md) ·
 [журнал и нормоконтроль](docs/journal.md) ·
-[аттестация ИО](docs/attestation.md) · [командировки и закупки](docs/trips.md).
+[аттестация ИО](docs/attestation.md) · [командировки и закупки](docs/trips.md) · [панель руководства](docs/control.md).
 
 ## Состояние
 

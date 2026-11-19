@@ -21,7 +21,7 @@ from apps.catalog.models import District
 from apps.core.models import Role
 from apps.hub.models import AvailabilityKind, DistrictAssignment, EmployeeAvailability
 
-MANAGE_ANY_ROLES = {Role.OWNER, Role.HEAD, Role.MANAGER}
+MANAGE_ANY_ROLES = {Role.OWNER, Role.HEAD, Role.MANAGER, Role.METROLOGIST}  # метролог ведёт командный график наравне с менеджером
 
 
 def _time_str(value: dt.time | None) -> str | None:

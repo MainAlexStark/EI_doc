@@ -11,7 +11,12 @@ import Tasks from "./components/Tasks";
 import Trips from "./components/Trips";
 import Icon, { type IconName } from "./ui/Icon";
 import { DialogHost } from "./ui/Modal";
-import { PageActionsContext, Spinner } from "./ui/controls";
+import ControlPanel from "./components/control/ControlPanel";
+import Staff from "./components/control/Staff";
+import TeamSchedule from "./components/control/TeamSchedule";
+import { isControlRole } from "./dispatchApi";
+import { usePersistent } from "./ui/hooks";
+import { PageActions, PageActionsContext, Segmented, Spinner } from "./ui/controls";
 
 // Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
 const Assistant = lazy(() => import("./assistant/Assistant"));
@@ -22,19 +27,24 @@ const TemplateStudio = lazy(() => import("./assistant/TemplateStudio"));
  * - «Журнал» и «Нормоконтроль» — одна вкладка «Журнал»: у поверителя просто
  *   журнал своих протоколов, у менеджера ещё нумерация и работа с Аршин;
  * - «Наряды» убраны (14.11.2026 разделено заново): всё с адресами и картой —
- *   «Выезды» (день поверителя в городе, командировки, закупки); «Поверки» —
+ *   «Выезды» (день поверителя в городе, командировки, закупки); «Приёмки» —
  *   заказы от заказчиков, которые привезли приборы сами. Менеджер видит все,
  *   поверитель — только свои.
  * Раздел хранится в адресе (#/journal) — переживает перезагрузку, работает «Назад». */
 type Tab =
-  | "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types"
+  | "control" | "staff" | "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types"
   | "protocol-templates" | "attestations";
 
-type NavItem = { key: Tab; label: string; icon: IconName; managerOnly?: boolean; /** Короче — для таб-бара телефона. */ short?: string };
+type NavItem = {
+  key: Tab; label: string; icon: IconName; managerOnly?: boolean;
+  /** Только руководству: владелец, руководитель, метролог, менеджер. */ controlOnly?: boolean;
+  /** Короче — для таб-бара телефона. */ short?: string;
+};
 
 const WORK: NavItem[] = [
+  { key: "control", label: "Панель", icon: "chart", controlOnly: true },
   { key: "trips", label: "Выезды", icon: "car" },
-  { key: "field-work", label: "Поверки", icon: "checkCircle" },
+  { key: "field-work", label: "Приёмки", icon: "checkCircle" },
   { key: "journal", label: "Журнал", icon: "doc" },
   { key: "requests", label: "Заявки", icon: "inbox", managerOnly: true },
   { key: "availability", label: "График", icon: "calendar" },
@@ -46,6 +56,7 @@ const REFERENCE: NavItem[] = [
   { key: "si-types", label: "Типы СИ", icon: "gauge" },
   { key: "protocol-templates", label: "Шаблоны протоколов", icon: "layers", short: "Шаблоны" },
   { key: "attestations", label: "Аттестация ИО", icon: "shield", managerOnly: true },
+  { key: "staff", label: "Сотрудники", icon: "users", controlOnly: true },
 ];
 
 const ALL_TABS = new Set<Tab>([...WORK, ...REFERENCE].map((item) => item.key));
@@ -55,6 +66,7 @@ const FLUSH: Tab[] = ["availability", "requests", "assistant", "protocol-templat
 
 /** На телефоне в таб-баре — четыре главных, остальное под «Ещё». */
 const PHONE_TABS: Tab[] = ["trips", "field-work", "journal", "availability"];
+const PHONE_TABS_CONTROL: Tab[] = ["control", "trips", "field-work", "journal"];
 
 /** Кто видит фирму целиком. Поверитель — только своё. */
 const isManagerRole = (role: string | undefined) => !!role && role !== "verifier";
@@ -80,15 +92,16 @@ const todayLine = () => {
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
-const tabFromHash = (): Tab => {
+const tabFromHash = (): Tab | null => {
   // #/protocol-templates/12 — раздел и что в нём открыть: раздел — первая часть.
   const key = window.location.hash.replace(/^#\/?/, "").split("/")[0] as Tab;
-  return ALL_TABS.has(key) ? key : "field-work";
+  return ALL_TABS.has(key) ? key : null;
 };
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(isAuthenticated());
-  const [tab, setTab] = useState<Tab>(tabFromHash);
+  const [tab, setTab] = useState<Tab>(() => tabFromHash() ?? "field-work");
+  const [graphMode, setGraphMode] = usePersistent<"team" | "mine">("ei_doc_graph_mode", "team", ["team", "mine"]);
   const [me, setMe] = useState<Me | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -108,12 +121,21 @@ export default function App() {
   }, [authenticated]);
 
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash());
+    const onHash = () => setTab(tabFromHash() ?? "field-work");
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   const isManager = isManagerRole(me?.role);
+  const isControl = isControlRole(me?.role);
+
+  // Руководство без раздела в адресе начинает с «Панели»; поверителю она не видна.
+  useEffect(() => {
+    if (!me) return;
+    if (isControlRole(me.role) && !tabFromHash()) setTab("control");
+    if (!isControlRole(me.role) && (tab === "control" || tab === "staff")) setTab("field-work");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me]);
 
   // Счётчики в боковой панели: новые заявки и типы СИ на проверке.
   const refreshCounts = useCallback(() => {
@@ -149,13 +171,26 @@ export default function App() {
 
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
 
-  const visible = (items: NavItem[]) => items.filter((item) => isManager || !item.managerOnly);
+  const visible = (items: NavItem[]) =>
+    items.filter((item) => (isManager || !item.managerOnly) && (isControl || !item.controlOnly));
   const work = visible(WORK);
   const reference = visible(REFERENCE);
   const all = [...work, ...reference];
 
   const displayName = me?.employee?.full_name ?? me?.email ?? "";
   const roleName = me?.role_display ?? "";
+
+  /** Открыть раздел; trip — сразу командировку во «Выездах» (Trips помнит её в sessionStorage). */
+  const goTo = (next: string, trip?: number) => {
+    if (trip) {
+      try {
+        sessionStorage.setItem("ei_doc_trips_view", JSON.stringify({ kind: "trip", id: trip }));
+      } catch {
+        /* не страшно */
+      }
+    }
+    go(next as Tab);
+  };
 
   const go = (next: Tab) => {
     setMoreOpen(false);
@@ -175,11 +210,15 @@ export default function App() {
   };
 
   const heads: Record<Tab, { title: string; subtitle?: string }> = {
-    "field-work": { title: "Поверки", subtitle: "Заказы: приборы, которые заказчики привезли сами" },
+    control: { title: "Панель", subtitle: `${todayLine()} · работа всех сотрудников` },
+    staff: { title: "Сотрудники", subtitle: "Учётные записи, роли, аттестация" },
+    "field-work": { title: "Приёмки", subtitle: "Заказы: приборы, которые заказчики привезли сами" },
     trips: { title: "Выезды", subtitle: `${todayLine()} · город, командировки, закупки` },
     journal: { title: "Журнал", subtitle: isManager ? "Протоколы всех поверителей" : "Мои протоколы" },
     requests: { title: "Заявки", subtitle: "С сайта и по телефону" },
-    availability: { title: "График", subtitle: "Когда я могу выезжать — заявители на сайте видят эти дни" },
+    availability: isControl && graphMode === "team"
+      ? { title: "График", subtitle: "Команда: кто когда может выезжать и чем занят" }
+      : { title: "График", subtitle: "Когда я могу выезжать — заявители на сайте видят эти дни" },
     tasks: { title: "Задачи" },
     assistant: { title: "Ассистент", subtitle: "Метролог-помощник: ФГИС «Аршин», методики, файлы компании" },
     "si-types": { title: "Типы СИ", subtitle: "Справочник средств измерений и шаблоны поверки" },
@@ -187,7 +226,7 @@ export default function App() {
     attestations: { title: "Аттестация ИО", subtitle: "Испытательное оборудование" },
   };
   const head = heads[tab];
-  const flush = FLUSH.includes(tab);
+  const flush = FLUSH.includes(tab) && !(tab === "availability" && isControl && graphMode === "team");
 
   const sideItem = (item: NavItem) => {
     const count = counts[item.key];
@@ -233,8 +272,9 @@ export default function App() {
     </div>
   );
 
-  const phoneTabs = all.filter((item) => PHONE_TABS.includes(item.key));
-  const phoneMore = all.filter((item) => !PHONE_TABS.includes(item.key));
+  const phoneKeys = isControl ? PHONE_TABS_CONTROL : PHONE_TABS;
+  const phoneTabs = all.filter((item) => phoneKeys.includes(item.key));
+  const phoneMore = all.filter((item) => !phoneKeys.includes(item.key));
   const moreActive = phoneMore.some((item) => item.key === tab);
   const moreCount = phoneMore.reduce((sum, item) => sum + (item.key === "requests" ? counts.requests ?? 0 : 0), 0);
 
@@ -267,11 +307,26 @@ export default function App() {
           </header>
 
           <main className={flush ? "flush" : ""}>
+            {tab === "control" && isControl && <ControlPanel onGo={goTo} />}
+            {tab === "staff" && isControl && <Staff meId={me?.employee?.id} />}
             {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
             {tab === "trips" && <Trips me={me} isManager={isManager} />}
             {tab === "journal" && <JournalTab isManager={isManager} onOpenTypes={() => go("si-types")} />}
             {tab === "requests" && <RequestsInbox onChanged={refreshCounts} />}
-            {tab === "availability" && <Availability me={me} />}
+            {tab === "availability" && isControl && (
+              <>
+                <PageActions>
+                  <Segmented
+                    size="sm"
+                    value={graphMode}
+                    onChange={setGraphMode}
+                    options={[{ value: "team", label: "Команда", icon: "users" }, { value: "mine", label: "Мой", icon: "user" }]}
+                  />
+                </PageActions>
+                {graphMode === "team" ? <TeamSchedule /> : <Availability me={me} />}
+              </>
+            )}
+            {tab === "availability" && !isControl && <Availability me={me} />}
             {tab === "tasks" && <Tasks me={me} />}
             {tab === "si-types" && <SiTypes me={me} onChanged={refreshCounts} />}
             {tab === "attestations" && <Attestations me={me} />}

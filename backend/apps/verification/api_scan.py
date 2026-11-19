@@ -206,7 +206,7 @@ class ScanImageView(APIView):
 # ---------------------------------------------------------------------------
 class ScanApplySerializer(serializers.Serializer):
     """То, что человек подтвердил на экране сверки — форма та же, что и на
-    экране «Поверки», плюс данные СИ (их на бланке не было, см. models.
+    экране «Приёмки», плюс данные СИ (их на бланке не было, см. models.
     ScanUpload)."""
 
     si_type_id = serializers.IntegerField()

@@ -791,7 +791,7 @@ def ei_verification_template_propose(ctx: ToolContext, args: dict) -> ToolResult
         files.append({"id": attachment.pk, "name": attachment.name, "size": attachment.size, "mime": attachment.mime})
     note = (
         "Карточка шаблона показана человеку с кнопкой «Подтвердить», рядом — пустой протокол по шаблону (так он "
-        "будет выглядеть). После подтверждения поверитель на экране «Поверки» выбирает прибор этого семейства/типа, "
+        "будет выглядеть). После подтверждения поверитель на экране «Приёмки» выбирает прибор этого семейства/типа, "
         "вносит параметры прибора (если их нет в типе), отметки по операциям и показания; расчёт, годность и "
         "протокол (Word/PDF) делает EI_doc, протокол виден в журнале. Шаблон от поверителя ждёт проверки "
         "метролога — протокол по нему не подпишется до проверки."
@@ -1291,10 +1291,11 @@ def mcp_tools(servers=None) -> tuple[list[Tool], list[str]]:
 
 
 def builtin_tools() -> list[Tool]:
-    """Встроенные инструменты + личный кабинет (apps.assistant.cabinet импортирует этот модуль, поэтому лениво)."""
+    """Встроенные инструменты + личный кабинет + администрирование (cabinet/admin_tools импортируют этот модуль, поэтому лениво)."""
+    from apps.assistant.admin_tools import TOOLS as admin_tools
     from apps.assistant.cabinet import TOOLS as cabinet_tools
 
-    return [*BUILTIN, *cabinet_tools]
+    return [*BUILTIN, *cabinet_tools, *admin_tools]
 
 
 def all_tools(*, with_mcp: bool = True) -> tuple[dict[str, Tool], list[str]]:

@@ -432,6 +432,12 @@ function ActionCard({ action, onAction }: { action: Action; onAction: (a: Action
           <ul className="small">{action.sources.map((s, i) => <li key={i}>{s}</li>)}</ul>
         </details>
       )}
+      {action.status === "done" && typeof action.result?.password === "string" && (
+        <div className="action-secret">
+          <span>Временный пароль{action.result.email ? ` для ${String(action.result.email)}` : ""} — передайте сотруднику:</span>
+          <code>{String(action.result.password)}</code>
+        </div>
+      )}
       {action.error && <div className="chat-error">{action.error}</div>}
       {error && <div className="chat-error">{error}</div>}
       {action.status === "pending" && (

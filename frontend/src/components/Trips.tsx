@@ -14,6 +14,9 @@ import { Modal } from "../ui/Modal";
 import { Alert, EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
 import ProcurementView, { ProcurementForm } from "./Procurements";
 import TripDetail from "./TripDetail";
+import DispatchMap from "./control/DispatchMap";
+import { isControlRole } from "../dispatchApi";
+import { usePersistent } from "../ui/hooks";
 import VisitModal from "./Visit";
 import { DeadlinePill } from "./TripBits";
 import { TRIP_TONE, dateRange, errorText, instruments, isoDay, ruDate } from "./tripUtil";
@@ -31,7 +34,7 @@ import { TRIP_TONE, dateRange, errorText, instruments, isoDay, ruDate } from "./
  * в общий список было бы мучением. */
 
 type View = { kind: "list" } | { kind: "trip"; id: number } | { kind: "procurement"; id: number };
-type Section = "trips" | "procurements";
+type Section = "map" | "trips" | "procurements";
 type Period = "open" | "closed";
 
 const VIEW_KEY = "ei_doc_trips_view";
@@ -68,7 +71,20 @@ function sortOpen(list: TripBrief[]): TripBrief[] {
 
 export default function Trips({ me, isManager }: { me: Me | null; isManager: boolean }) {
   const [view, setViewState] = useState<View>(loadView);
-  const [section, setSection] = useState<Section>("trips");
+  // Руководство по умолчанию попадает на карту всех выездов фирмы; выбор запоминается.
+  const control = isControlRole(me?.role);
+  const [savedSection, setSavedSection] = usePersistent<Section>("ei_doc_trips_section", control ? "map" : "trips", ["map", "trips", "procurements"]);
+  const section: Section = !control && savedSection === "map" ? "trips" : savedSection;
+  const setSection = setSavedSection;
+  useEffect(() => {
+    // Профиль пришёл позже первого рендера — руководству без сохранённого выбора открываем карту.
+    try {
+      if (control && localStorage.getItem("ei_doc_trips_section") == null) setSavedSection("map");
+    } catch {
+      /* приватный режим */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [control]);
   const [period, setPeriod] = useState<Period>("open");
   const [trips, setTrips] = useState<TripBrief[] | null>(null);
   const [procurements, setProcurements] = useState<ProcurementRow[] | null>(null);
@@ -85,6 +101,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
 
   const reload = useCallback(() => {
     setError("");
+    if (section === "map") return;
     if (section === "trips") {
       fetchTrips({ state: period })
         .then(setTrips)
@@ -180,6 +197,32 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
   }
 
   const list = section === "trips" ? trips : procurements;
+  const sectionOptions = [
+    ...(control ? [{ value: "map" as Section, label: "Карта", icon: "mapPin" as const }] : []),
+    { value: "trips" as Section, label: "Выезды", icon: "car" as const },
+    { value: "procurements" as Section, label: "Закупки", icon: "briefcase" as const },
+  ];
+
+  if (section === "map") {
+    return (
+      <div>
+        <PageActions>
+          <button type="button" className="primary" onClick={() => setCreating("visit")}>
+            <Icon name="plus" size={16} /> Запись
+          </button>
+          <button type="button" onClick={() => { setForProcurement(null); setCreating("trip"); }}>
+            <Icon name="plus" size={16} /> Выезд
+          </button>
+        </PageActions>
+        <div className="toolbar">
+          <Segmented value={section} options={sectionOptions} onChange={setSection} />
+        </div>
+        {booked && <Alert tone="ok" onClose={() => setBooked("")}>{booked}</Alert>}
+        <DispatchMap onOpenTrip={(id) => setView({ kind: "trip", id })} />
+        {modals}
+      </div>
+    );
+  }
 
   return (
     <div className="narrow">
@@ -202,14 +245,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
       </PageActions>
 
       <div className="toolbar">
-        <Segmented
-          value={section}
-          options={[
-            { value: "trips", label: "Выезды", icon: "car" },
-            { value: "procurements", label: "Закупки", icon: "briefcase" },
-          ]}
-          onChange={setSection}
-        />
+        <Segmented value={section} options={sectionOptions} onChange={setSection} />
         <span className="spacer" />
         <Segmented
           size="sm"
