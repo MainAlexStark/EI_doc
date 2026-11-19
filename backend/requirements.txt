@@ -8,6 +8,8 @@ rules==3.5
 drf-spectacular==0.28.0
 psycopg[binary]==3.2.4
 celery==5.4.0
+# kombu 5.7 требует redis-py ≥ 6.1 — без пина новая сборка образа ломала очередь ассистента
+kombu==5.6.2
 redis==5.2.1
 openpyxl==3.1.5
 requests[socks]==2.32.3
