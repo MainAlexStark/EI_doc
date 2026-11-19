@@ -406,10 +406,29 @@ def apply(verification: Verification, payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Протокол
 # ---------------------------------------------------------------------------
-def _equipment(instrument) -> dict:
+def _subject(si_kind: str, name: str) -> str:
+    """«счетчик воды СГВ-15» в строке под заголовком: вид СИ со строчной + тип."""
+    kind = (si_kind or "").strip()
+    if len(kind) > 1 and kind[0].isupper() and kind[1].islower():
+        kind = kind[0].lower() + kind[1:]
+    return " ".join(x for x in (kind, name) if x)
+
+
+def _device_params(template_plan: dict | None, values: dict) -> list[dict]:
+    """Параметры прибора для «Основных метрологических характеристик»: подпись, единица, значение."""
+    out = []
+    for p in (template_plan or {}).get("params") or []:
+        raw = values.get(p["key"])
+        value = calc.fmt(Decimal(str(raw)), max(calc.places(Decimal(str(raw))), 0)) if raw not in (None, "") else ""
+        out.append({"label": p["label"], "unit": p.get("unit", ""), "value": value})
+    return out
+
+
+def _equipment(instrument, si_kind: str = "") -> dict:
     si_type = instrument.si_type
     attrs = instrument.attributes or {}
     return {
+        "subject": _subject(si_kind, si_type.name),
         "name": si_type.name, "registry_number": si_type.registry_number,
         "modification": str(attrs.get("modification") or ""), "serial_number": instrument.serial_number,
         "year": str(instrument.manufacture_year or ""), "manufacturer": si_type.manufacturer,
@@ -460,14 +479,17 @@ def protocol_spec(verification: Verification, *, draft: bool | None = None) -> d
     # В «Причины» заключения — непрошедшие операции и характеристики (их видит каркас) + ручная причина.
     manual = [m["manual_unsuitability_reason"]] if m.get("manual_unsuitable") and m.get("manual_unsuitability_reason") else []
     results = {"modes": [], **(verification.results or {}), "suitable": verification.suitable, "extra_reasons": manual}
+    source = VerificationTemplate.objects.filter(pk=(m.get("template") or {}).get("id")).first()
+    si_kind = (source.plan.get("si_kind") if source else "") or m["plan"].get("equipment_kind", "")
     ctx = layout.Context(
-        plan=m["plan"], equipment=_equipment(verification.instrument), commission=[],
+        plan=m["plan"], equipment=_equipment(verification.instrument, si_kind), commission=[],
         instruments=_standards(verification), texts={},
         conditions={k: str(v) for k, v in conditions.items() if v not in (None, "")},
         measurements=m.get("readings") or {}, results=results,
         kind=m.get("kind") or "periodic", number=number, protocol_date=on, performed_on=on,
         operations=m.get("operations"),
         values={"verifier": verifier.short_name or verifier.full_name, "method": m["plan"]["program"]},
+        device_params=_device_params(source.plan if source else None, m.get("params") or {}),
     )
     return layout.build(ctx, draft=draft)
 
@@ -477,11 +499,13 @@ def preview_spec(template: dict, *, title: str = "") -> dict:
     plan = resolve(template, {p["key"]: Decimal(p["sample"]) for p in template["params"]})
     blank = layout.BLANK
     ctx = layout.Context(
-        plan=plan, equipment={"name": blank, "serial_number": blank, "registry_number": blank},
+        plan=plan, equipment={"name": blank, "serial_number": blank, "registry_number": blank,
+                              "subject": _subject(template.get("si_kind", ""), blank), "year": blank},
         commission=[], instruments=[], texts={}, conditions={}, measurements={}, results=None,
         kind="periodic", number=None, protocol_date=None, performed_on=None,
         operations=[{**op, "passed": None} for op in template["operations"]],
         values={"verifier": blank, "method": plan["program"]},
+        device_params=_device_params(template, {}),
     )
     spec = layout.build(ctx, draft=True)
     spec["footer"] = "Шаблон протокола" + (f" «{title}»" if title else "") + \
@@ -597,6 +621,9 @@ def template_help() -> str:
         "(подстановки {{who}}, {{failed}}, {{kind}}), layout? (блоки как у аттестации + operations — операции с "
         "отметками, grid{points?, characteristics?, tolerance?, verdict?, titles?} — таблица «точка × величины»; "
         "простые подстановки {{verifier}}, {{method}}, equipment.name|registry_number|modification|serial_number|"
-        "year|manufacturer|owner|location)}. Без layout — стандартный протокол поверки EI_doc. "
+        "year|manufacturer|owner|location|subject)}. Без layout — фирменный протокол поверки EI_doc (как у счётчиков "
+        "воды: шапка фирмы, разделы прописными, таблица условий с нормами, эталоны, методика, операции, таблица "
+        "результатов, заключение, подпись) — вид задаёт EI_doc, НЕ задавай layout/document ради оформления; layout — "
+        "только если методика требует другой состав таблиц. Нормы условий по методике — conditions[].norm. "
         "Подробности формул: " + calc.plan_help()
     )

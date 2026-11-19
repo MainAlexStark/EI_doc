@@ -84,7 +84,11 @@ class TemplateCleanTests(TestCase):
         from apps.assistant import documents
 
         spec = templates.preview_spec(templates.clean_template(copy.deepcopy(MANOMETER)), title="Манометры")
-        assert spec["title"] == "Протокол периодической поверки"
+        # Фирменный вид, как у протокола счётчика воды (19.11.2026).
+        assert spec["style"] == "protocol" and spec["title"] == "ПРОТОКОЛ №б/н"
+        assert spec["subtitle"].startswith("периодической поверки СИ - ") and "ЕДИНИЦА ИЗМЕРЕНИЯ" in spec["header"][1]
+        assert "Основные метрологические характеристики поверяемого СИ" in str(spec["blocks"])
+        assert "±0,024" in str(spec["blocks"])  # допуск в точке числом, а не выражением «cls / 100 * upper»
         text = str(spec["blocks"])
         assert "Внешний осмотр: ________" in text and "Основная погрешность" in text
         assert documents.render_docx(spec)[:2] == b"PK"
@@ -272,3 +276,14 @@ class AssistantVerificationTemplateTests(TestCase):
                                      "expected": {"err_up": "0,010", "variation": "0,010"}}}}
         result = ei_verification_template_check(self.ctx, {"plan": copy.deepcopy(MANOMETER), "example": example})
         assert "Все формулы сходятся" in result.content, result.content
+
+
+class LegacyDocumentTests(TestCase):
+    def test_template_saved_with_old_default_document_gets_house_style(self):
+        from apps.equipment import layout
+
+        plan = templates.clean_template(copy.deepcopy(MANOMETER))
+        plan["document"] = dict(layout.LEGACY_VERIFICATION_DOCUMENTS[0])
+        spec = templates.preview_spec(plan)
+        assert spec["title"] == "ПРОТОКОЛ №б/н" and len(spec["header"]) == 4
+

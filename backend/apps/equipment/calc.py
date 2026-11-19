@@ -329,6 +329,8 @@ def clean_plan(raw) -> dict:
             "key": key, "label": _text(cond.get("label"), f"conditions[{i}].label", limit=120),
             "unit": _text(cond.get("unit"), "единица", required=False, limit=20),
             "decimals": decimals if isinstance(decimals, int) and 0 <= decimals <= 4 else 1,
+            # Норма по методике («от 15 до 25 °С») — справа от таблицы условий в протоколе поверки.
+            **({"norm": _text(cond.get("norm"), "норма", required=False, limit=120)} if cond.get("norm") else {}),
         })
 
     plan = {
@@ -657,7 +659,7 @@ def plan_help() -> str:
         "characteristics[{key (латиница — на него ссылаются формулы ниже), label, expr, text (как формула "
         "напечатана в протоколе), per?: mode|point (point — значение по каждой точке группы group, отсчёты точки — x), "
         "decimals, tolerance{kind: range{min,max} | abs{limit} | none} — границы числом или выражением от "
-        "setpoint и params, source}], conditions?[{key, label, unit, decimals}] (по умолчанию температура, "
+        "setpoint и params, source}], conditions?[{key, label, unit, decimals, norm? — норма по методике, «от 15 до 25 °С»}] (по умолчанию температура, "
         "влажность, давление), procedure[абзацы], purpose, periodicity, document?{header[], title, subtitle}, "
         "conclusion?{ok, fail} (подстановки {{who}}, {{failed}}, {{purpose_tail}}, {{kind}}), layout?[блоки]}. "
         "Формула expr — выражение: числа, + - * / ^, скобки; имена: группы точек (all, volume, control, свои), "

@@ -42,6 +42,8 @@ DOC_BLOCKS = ("heading", "paragraph", "fields", "table", "list", "signatures", "
 DATA_BLOCKS = (
     "commission", "equipment_info", "checked", "conditions", "documents", "instruments",
     "procedure", "readings", "results", "conclusion", "operations", "grid",
+    # Протокол поверки в фирменном виде (как у счётчиков воды):
+    "device_head", "device_params", "conditions_table", "instruments_lines", "documents_lines",
 )
 ALL_BLOCKS = (*DOC_BLOCKS, *DATA_BLOCKS, "per_mode")
 RESULT_COLUMNS = {
@@ -125,12 +127,31 @@ VERIFICATION_EQUIPMENT_FIELDS = (
     ("name", "Наименование, тип СИ"), ("registry_number", "Регистрационный номер в ФИФ ОЕИ"),
     ("modification", "Модификация"), ("serial_number", "Заводской номер"), ("year", "Год выпуска"),
     ("manufacturer", "Изготовитель"), ("owner", "Владелец"), ("location", "Место установки"),
+    ("subject", "Вид и тип СИ (для заголовка)"),
 )
+# Протокол поверки по шаблону выглядит так же, как протокол счётчика воды (verification/typst/water_meter_v1.typ):
+# шапка фирмы, «ПРОТОКОЛ №…», строка «периодической поверки СИ - …», разделы прописными по центру, таблица
+# условий с нормами справа, эталоны и методика строками, операции «1. …: соответствует.», таблица результатов,
+# заключение, «Поверитель ____ (подпись)  Дата поверки». Вид — в коде, а не у агента: агент задаёт содержание.
+PROTOCOL_STYLE = "protocol"
+ORG_HEADER = [
+    "Общество с ограниченной ответственностью",
+    '"ЕДИНИЦА ИЗМЕРЕНИЯ"',
+    "610008, г. Киров, ул. Гагарина, д. 20, кв.62",
+    "610027, Россия, Кировская область, город Киров, улица Красноармейская, дом 43А, помещение 1,21.",
+]
 VERIFICATION_DOCUMENT = {
+    "header": ORG_HEADER,
+    "title": "ПРОТОКОЛ №{{number}}",
+    "subtitle": "{{kind}} поверки СИ - {{equipment.subject}}, год изготовления {{equipment.year}}, "
+                "заводской № {{equipment.serial_number}}",
+}
+# Так выглядел документ по умолчанию до 19.11.2026 — он сохранён в планах уже заведённых шаблонов.
+LEGACY_VERIFICATION_DOCUMENTS = [{
     "header": DEFAULT_DOCUMENT["header"],
     "title": "Протокол {{kind}} поверки",
     "subtitle": "№ {{number}} от {{protocol_date}}",
-}
+}]
 VERIFICATION_CONCLUSION = {
     "ok": "На основании результатов {{kind}} поверки {{who}} соответствует установленным метрологическим и "
           "техническим требованиям и признано пригодным к применению.",
@@ -138,21 +159,22 @@ VERIFICATION_CONCLUSION = {
             "техническим требованиям и признано непригодным к применению. Причины: {{failed}}.",
 }
 VERIFICATION_LAYOUT = [
-    {"type": "heading", "text": "Сведения о средстве измерений"},
-    {"type": "equipment_info"},
-    {"type": "heading", "text": "Методика поверки и нормативные документы"},
-    {"type": "documents"},
-    {"type": "heading", "text": "Средства поверки"},
-    {"type": "instruments"},
-    {"type": "heading", "text": "Условия поверки"},
-    {"type": "conditions"},
+    {"type": "device_head"},
+    {"type": "heading", "text": "Основные метрологические характеристики поверяемого СИ"},
+    {"type": "device_params"},
+    {"type": "spacer"},
+    {"type": "conditions_table"},
+    {"type": "heading", "text": "Эталоны, применяемые при поверке"},
+    {"type": "instruments_lines"},
+    {"type": "heading", "text": "Методика поверки"},
+    {"type": "documents_lines"},
     {"type": "heading", "text": "Результаты поверки"},
     {"type": "operations"},
-    {"type": "paragraph", "text": "Определение метрологических характеристик", "bold": True},
+    {"type": "spacer"},
     {"type": "grid"},
     {"type": "heading", "text": "Заключение"},
     {"type": "conclusion"},
-    {"type": "signatures", "rows": [{"role": "Поверитель", "name": "{{verifier}}"}]},
+    {"type": "signatures", "rows": [{"role": "Поверитель", "name": "{{verifier}}", "date": "{{protocol_date}}"}]},
 ]
 
 FLAVORS = {
@@ -366,13 +388,17 @@ class Context:
     """Всё, что нужно для подстановок одного протокола."""
 
     def __init__(self, *, plan, equipment, commission, instruments, texts, conditions, measurements,
-                 results, kind, number, protocol_date, performed_on, operations=None, values=None):
+                 results, kind, number, protocol_date, performed_on, operations=None, values=None,
+                 device_params=None):
         self.plan, self.equipment, self.commission, self.instruments = plan, equipment, commission, instruments
         self.flavor = flavor_of(plan)
         # operations — [{key, label, passed: True|False|None}] (поверка: внешний осмотр, опробование…);
         # values — простые подстановки вида протокола (поверка: verifier, method).
         self.operations = list(operations or [])
         self.values = dict(values or {})
+        # device_params — [{label, unit, value}]: параметры прибора из шаблона поверки (верхний предел, класс…)
+        # для раздела «Основные метрологические характеристики поверяемого СИ».
+        self.device_params = list(device_params or [])
         self.texts = {**DEFAULT_TEXTS, **(texts or {})}
         self.conditions, self.measurements, self.results = conditions or {}, measurements or {}, results
         self.kind, self.number, self.protocol_date, self.performed_on = kind, number, protocol_date, performed_on
@@ -572,7 +598,7 @@ def _grid_table(ctx: Context, block: dict) -> dict:
             r = next((x for x in (res or {}).get("characteristics", []) if x["key"] == c["key"]), None)
             row.append(r["shown"] if r else "")
             if block["tolerance"] and c["tolerance"]["kind"] != "none":
-                row.append(r["tolerance"] if r else calc.plan_tolerance_text(c["tolerance"]))
+                row.append(r["tolerance"] if r else _mode_tolerance(c, mode))
         if block["verdict"]:
             row.append("" if res is None else ("соответствует" if res["passed"] else "НЕ соответствует"))
         rows.append(row)
@@ -584,7 +610,17 @@ def _grid_table(ctx: Context, block: dict) -> dict:
     if block["verdict"]:
         weights.append(14)
     return {"type": "table", "size": 8 if len(columns) > 6 else 9, "columns": columns, "rows": rows,
-            "widths": weights}
+            "widths": weights, "center_all": True}
+
+
+def _mode_tolerance(c: dict, mode: dict) -> str:
+    """Допуск числом в поверяемой точке ещё до измерений (пустой протокол, превью шаблона):
+    границы — выражения от setpoint и параметров прибора, они уже известны."""
+    try:
+        env = {"setpoint": Decimal(mode["setpoint"]), **{k: Decimal(v) for k, v in mode["params"].items()}}
+        return calc.tolerance_text(calc.tolerance_values(c["tolerance"], env))
+    except Exception:  # noqa: BLE001 — выражение от отсчётов: до измерений не посчитать
+        return calc.plan_tolerance_text(c["tolerance"])
 
 
 def _render(blocks: list[dict], ctx: Context, out: list[dict]) -> None:
@@ -604,6 +640,8 @@ def _render(blocks: list[dict], ctx: Context, out: list[dict]) -> None:
                 out.append(_p(BLANK))
         elif kind == "equipment_info":
             for key, label in ctx.flavor["equipment_fields"]:
+                if key == "subject":
+                    continue
                 if ctx.equipment.get(key):
                     out.append(_p(f"{label}: {ctx.equipment[key]};"))
         elif kind == "checked":
@@ -641,12 +679,48 @@ def _render(blocks: list[dict], ctx: Context, out: list[dict]) -> None:
                 out.append(_p(f"{i}. {op['label']}: {verdict}."))
         elif kind == "grid":
             out.append(_grid_table(ctx, block))
+        elif kind == "device_head":
+            eq = ctx.equipment
+            for label, key in (("Регистрационный номер средства измерений в ФИФ ОЕИ", "registry_number"),
+                               ("Модификация", "modification"), ("Принадлежащего", "owner"),
+                               ("Место поверки", "location")):
+                if eq.get(key) or key in ("registry_number", "owner"):
+                    out.append({"type": "paragraph", "text": f"{label}: {eq.get(key) or BLANK}", "tight": True})
+        elif kind == "device_params":
+            for p in ctx.device_params:
+                unit = f", {p['unit']}" if p.get("unit") else ""
+                out.append({"type": "paragraph", "text": f"{p['label']}{unit}: {p.get('value') or BLANK}",
+                            "tight": True})
+            if not ctx.device_params:
+                out.append({"type": "paragraph", "text": ctx.plan.get("equipment_kind") or BLANK, "tight": True})
+        elif kind == "conditions_table":
+            rows = []
+            for c in ctx.plan["conditions"]:
+                unit = f", {c['unit']}" if c["unit"] else ""
+                rows.append([f"{c['label']}{unit}", ctx.value(f"conditions.{c['key']}"), c.get("norm", "")])
+            out.append({"type": "table", "columns": ["условия поверки", "значение", ""], "rows": rows,
+                        "widths": [52, 16, 32], "free_last": True, "size": 11})
+        elif kind == "instruments_lines":
+            for r in ctx.instruments:
+                until = f"действительно до {_date(r['valid_until'])}" if r.get("valid_until") else ""
+                parts = [r["name"], f"зав. № {r['serial_number']}" if r["serial_number"] else "",
+                         r["characteristics"], r["verification"], until]
+                out.append({"type": "paragraph", "text": ", ".join(x for x in parts if x), "tight": True})
+            if not ctx.instruments:
+                out.append({"type": "paragraph", "text": BLANK, "tight": True})
+        elif kind == "documents_lines":
+            docs = list(ctx.plan.get("documents", []))
+            program = ctx.plan["program"]
+            if not any(program in d or d in program for d in docs):
+                docs.insert(0, program)
+            out.extend({"type": "paragraph", "text": d, "tight": True} for d in docs)
         elif kind == "signatures":
             rows = block.get("rows") or [
                 {"role": COMMISSION_ROLES[r["role"]], "name": r["name"]} for r in ctx.commission
             ] or ([{"role": "Поверитель", "name": "{{verifier}}"}] if "verifier" in ctx.flavor["simple"] else [])
             out.append({"type": "signatures", "rows": [
-                {"role": ctx.fill(r.get("role", "")), "name": ctx.fill(r.get("name", ""))} for r in rows
+                {"role": ctx.fill(r.get("role", "")), "name": ctx.fill(r.get("name", "")),
+                 **({"date": ctx.fill(r["date"])} if r.get("date") else {})} for r in rows
             ]})
         else:
             filled = dict(block)
@@ -677,18 +751,27 @@ def build(ctx: Context, *, draft: bool) -> dict:
     blocks: list[dict] = []
     _render(ctx.plan.get("layout") or clean_default_layout(ctx.plan.get("flavor") or ATTESTATION), ctx, blocks)
     doc = ctx.plan.get("document") or ctx.flavor["document"]
+    verification = ctx.flavor is FLAVORS[VERIFICATION]
+    if verification and doc in LEGACY_VERIFICATION_DOCUMENTS:
+        doc = VERIFICATION_DOCUMENT  # шаблон заведён до фирменного вида — шапка и заголовок как у счётчиков
     number_blank = ctx.number is None
     subtitle = doc["subtitle"]
-    if number_blank and subtitle == ctx.flavor["document"]["subtitle"]:
+    if number_blank and subtitle == DEFAULT_DOCUMENT["subtitle"]:
         subtitle = f"№ {BLANK} от {BLANK}"
-    return {
+    title = doc["title"]
+    if verification and number_blank and title == VERIFICATION_DOCUMENT["title"]:
+        title = "ПРОТОКОЛ №б/н"
+    spec = {
         "header": [ctx.fill(x) for x in doc["header"]],
-        "title": ctx.fill(doc["title"]),
+        "title": ctx.fill(title),
         "subtitle": ctx.fill(subtitle),
         "draft": draft,
         "footer": "Черновик — расчёт по текущим данным, не для выдачи" if draft else "",
         "blocks": blocks,
     }
+    if verification:
+        spec["style"] = PROTOCOL_STYLE
+    return spec
 
 
 def clean_default_layout(flavor: str = ATTESTATION) -> list[dict]:

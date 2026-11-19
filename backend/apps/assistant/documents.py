@@ -70,7 +70,7 @@ def clean_blocks(blocks) -> list[dict]:
             block["items"] = [str(x) for x in (block.get("items") or [])]
         elif kind == "signatures":
             block["rows"] = [
-                {"role": str(r.get("role", "")), "name": str(r.get("name", ""))}
+                {"role": str(r.get("role", "")), "name": str(r.get("name", "")), "date": str(r.get("date", ""))}
                 for r in (block.get("rows") or []) if isinstance(r, dict)
             ]
         result.append(block)
@@ -88,6 +88,8 @@ def document_context(spec: dict) -> dict:
     else:
         header = None
     return {
+        # "protocol" — фирменный вид протокола поверки (как у счётчиков воды), иначе — документ ассистента.
+        "style": "protocol" if spec.get("style") == "protocol" else "",
         "title": str(spec.get("title") or ""),
         "subtitle": str(spec.get("subtitle") or ""),
         "header": header,
@@ -116,11 +118,16 @@ def render_docx(spec: dict) -> bytes:
     from docx.shared import Cm, Pt, RGBColor
 
     ctx = document_context(spec)
+    protocol = ctx["style"] == "protocol"
     document = docx.Document()
     section = document.sections[0]
     section.page_height, section.page_width = Cm(29.7), Cm(21)
-    section.left_margin, section.right_margin = Cm(2), Cm(1.5)
-    section.top_margin, section.bottom_margin = Cm(1.5), Cm(1.8)
+    if protocol:
+        section.left_margin, section.right_margin = Cm(1.8), Cm(1.6)
+        section.top_margin, section.bottom_margin = Cm(1.6), Cm(1.8)
+    else:
+        section.left_margin, section.right_margin = Cm(2), Cm(1.5)
+        section.top_margin, section.bottom_margin = Cm(1.5), Cm(1.8)
 
     style = document.styles["Normal"]
     style.font.name = "Times New Roman"
@@ -146,13 +153,19 @@ def render_docx(spec: dict) -> bytes:
         para("ЧЕРНОВИК — проверить перед подписанием", bold=True, size=9, align="right", color=(180, 0, 0))
     if ctx["header"]:
         for i, line in enumerate(ctx["header"]["lines"]):
-            para(line, bold=True, size=10.5 if i == 0 else 9.5, align=ctx["header"]["align"])
+            size = ([11, 12] + [9.5] * 10)[i] if protocol else (10.5 if i == 0 else 9.5)
+            para(line, bold=True, size=size, align=ctx["header"]["align"])
     if ctx["title"]:
-        para(ctx["title"], bold=True, size=14, align="center")
+        if protocol:
+            document.add_paragraph()
+        para(ctx["title"], bold=True, size=16 if protocol else 14, align="center")
     if ctx["subtitle"]:
-        para(ctx["subtitle"], bold=True, size=11.5, align="center")
+        para(ctx["subtitle"], bold=not protocol, size=10.5 if protocol else 11.5, align="center")
+        if protocol:
+            document.add_paragraph()
 
-    def table(rows: list[list[str]], *, header: list[str] | None = None, borders=True, widths=None, size=9.5):
+    def table(rows: list[list[str]], *, header: list[str] | None = None, borders=True, widths=None, size=9.5,
+              center_all=False):
         cols = len(header or rows[0])
         t = document.add_table(rows=0, cols=cols)
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -164,7 +177,9 @@ def render_docx(spec: dict) -> bytes:
                 cells[c_index].text = ""
                 run = cells[c_index].paragraphs[0].add_run(value)
                 run.font.size = Pt(size)
-                run.bold = bool(header) and r_index == 0
+                run.bold = bool(header) and r_index == 0 and not protocol
+                if protocol and borders and (r_index == 0 or c_index > 0 or center_all):
+                    cells[c_index].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
         if widths:
             total = sum(widths)
             for row in t.rows:
@@ -174,12 +189,17 @@ def render_docx(spec: dict) -> bytes:
 
     for block in ctx["blocks"]:
         kind = block["type"]
-        if kind == "heading":
+        if kind == "heading" and protocol:
+            document.add_paragraph()
+            para(block["text"].upper(), size=11, align="center")
+        elif kind == "heading":
             level = block.get("level", 2)
             para(block["text"], bold=True, size=13 if level == 1 else 11.5 if level == 2 else 11)
         elif kind == "paragraph":
-            para(block["text"], bold=block.get("bold", False), italic=block.get("italic", False),
-                 size=block.get("size", 11), align=block.get("align", "left"))
+            p = para(block["text"], bold=block.get("bold", False), italic=block.get("italic", False),
+                     size=block.get("size", 11), align=block.get("align", "left"))
+            if block.get("tight"):
+                p.paragraph_format.space_after = Pt(0)
         elif kind == "fields":
             for row in block["rows"]:
                 t = table([[row["label"], row["value"]]], borders=False, widths=[38, 62], size=11)
@@ -192,12 +212,32 @@ def render_docx(spec: dict) -> bytes:
                     run.font.size = Pt(7)
                     run.font.color.rgb = RGBColor(70, 70, 70)
         elif kind == "table":
-            table(block["rows"] or [[""] * len(block["columns"])], header=block["columns"],
-                  widths=block.get("widths"), size=block.get("size", 9.5))
+            t = table(block["rows"] or [[""] * len(block["columns"])], header=block["columns"],
+                      widths=block.get("widths"), size=block.get("size", 9.5), center_all=block.get("center_all", False))
+            if block.get("free_last"):
+                # Последняя колонка — примечания справа без рамки (нормы условий), как у счётчиков воды.
+                for row in t.rows:
+                    _clear_borders(row.cells[-1])
+                    for p in row.cells[-1].paragraphs:
+                        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        for run in p.runs:
+                            run.font.size = Pt(8.5)
             document.add_paragraph()
         elif kind == "list":
             for item in block["items"]:
                 document.add_paragraph(item, style="List Number" if block.get("ordered") else "List Bullet")
+        elif kind == "signatures" and protocol:
+            document.add_paragraph()
+            for row in block["rows"]:
+                cells = [row["role"], "", row["name"]] + (["Дата поверки", row["date"]] if row["date"] else [])
+                widths = [20, 22, 18] + ([22, 18] if row["date"] else [])
+                t = table([cells], borders=False, widths=widths, size=11)
+                _underline_cell(t.rows[0].cells[1])
+                note = t.rows[0].cells[1].add_paragraph()
+                note.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = note.add_run("(подпись)")
+                run.font.size = Pt(7)
+                document.add_paragraph()
         elif kind == "signatures":
             document.add_paragraph()
             for row in block["rows"]:
@@ -212,6 +252,19 @@ def render_docx(spec: dict) -> bytes:
     buffer = io.BytesIO()
     document.save(buffer)
     return buffer.getvalue()
+
+
+def _clear_borders(cell) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = OxmlElement("w:tcBorders")
+    for side in ("top", "right", "bottom"):
+        edge = OxmlElement(f"w:{side}")
+        edge.set(qn("w:val"), "nil")
+        borders.append(edge)
+    tc_pr.append(borders)
 
 
 def _underline_cell(cell) -> None:
