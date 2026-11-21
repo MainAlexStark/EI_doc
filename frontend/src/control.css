@@ -86,7 +86,7 @@ button.assign-person.muted .who { color: var(--muted); }
 }
 .disp-legend .legend-item {
   pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; min-height: 28px; font-size: 12.5px;
-  background: rgba(255, 255, 255, 0.92); box-shadow: var(--shadow-sm); border-radius: 999px; font-weight: 500;
+  background: var(--glass-strong); box-shadow: var(--shadow-sm); border-radius: 999px; font-weight: 500;
 }
 .disp-legend .legend-item i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
 .disp-legend .legend-item.queue i { background: transparent; border: 2px dashed #ff9500; width: 12px; height: 12px; }
@@ -100,8 +100,8 @@ button.assign-person.muted .who { color: var(--muted); }
   box-shadow: 0 0 0 2.5px #fff, 0 2px 6px rgba(0, 0, 0, 0.28); cursor: pointer;
 }
 .disp-pin.done { opacity: 0.55; }
-.disp-pin.no_answer, .disp-pin.postponed, .disp-pin.refused { background: #fff; color: var(--c); box-shadow: inset 0 0 0 3px var(--c), 0 2px 6px rgba(0, 0, 0, 0.2); }
-.disp-pin.queue { background: #fff; color: var(--warn); border: 2.5px dashed var(--c); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
+.disp-pin.no_answer, .disp-pin.postponed, .disp-pin.refused { background: var(--surface); color: var(--c); box-shadow: inset 0 0 0 3px var(--c), 0 2px 6px rgba(0, 0, 0, 0.2); }
+.disp-pin.queue { background: var(--surface); color: var(--warn); border: 2.5px dashed var(--c); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
 .disp-pin.selected { box-shadow: 0 0 0 2.5px #fff, 0 0 0 5.5px var(--ink), 0 2px 8px rgba(0, 0, 0, 0.3); transform: scale(1.12); }
 .disp-pin.sm { width: 24px; height: 24px; font-size: 11px; box-shadow: none; flex: 0 0 auto; cursor: inherit; }
 .disp-pin.queue.sm { box-shadow: none; }

@@ -162,7 +162,7 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
                   <div className="row">
                     {item.calculator_key !== "water_meter" && (
                       <button type="button" className="sm" title="Чат с ассистентом и протокол по шаблону рядом"
-                        onClick={() => (window.location.hash = `#/protocol-templates/${item.id}`)}>
+                        onClick={() => (window.location.hash = `#/si-templates/${item.id}`)}>
                         <Icon name="layers" size={14} /> Шаблон протокола
                       </button>
                     )}

@@ -17,6 +17,7 @@ import TripDetail from "./TripDetail";
 import DispatchMap from "./control/DispatchMap";
 import { isControlRole } from "../dispatchApi";
 import { usePersistent } from "../ui/hooks";
+import { useModeAction } from "../ui/modeActions";
 import VisitModal from "./Visit";
 import { DeadlinePill } from "./TripBits";
 import { TRIP_TONE, dateRange, errorText, instruments, isoDay, ruDate } from "./tripUtil";
@@ -39,9 +40,9 @@ type Period = "open" | "closed";
 
 const VIEW_KEY = "ei_doc_trips_view";
 
-const loadView = (): View => {
+const loadView = (key: string = VIEW_KEY): View => {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(VIEW_KEY) ?? "null") as View | null;
+    const saved = JSON.parse(sessionStorage.getItem(key) ?? "null") as View | null;
     if (saved && (saved.kind === "trip" || saved.kind === "procurement") && Number.isInteger(saved.id)) return saved;
   } catch {
     /* хранилище недоступно — начинаем со списка */
@@ -49,9 +50,9 @@ const loadView = (): View => {
   return { kind: "list" };
 };
 
-const saveView = (view: View) => {
+const saveView = (view: View, key: string = VIEW_KEY) => {
   try {
-    sessionStorage.setItem(VIEW_KEY, JSON.stringify(view));
+    sessionStorage.setItem(key, JSON.stringify(view));
   } catch {
     /* не страшно */
   }
@@ -69,12 +70,23 @@ function sortOpen(list: TripBrief[]): TripBrief[] {
   );
 }
 
-export default function Trips({ me, isManager }: { me: Me | null; isManager: boolean }) {
-  const [view, setViewState] = useState<View>(loadView);
+export default function Trips({
+  me, isManager, mode = "trips", only,
+}: {
+  me: Me | null;
+  isManager: boolean;
+  /** Ключ режима (оболочка, modes/registry.ts) — для действий из палитры команд и клавиши N. */
+  mode?: string;
+  /** Показать только один раздел — без переключателя «Карта / Выезды / Закупки». */
+  only?: "trips" | "procurements";
+}) {
+  // Каждый режим помнит своё открытое: «Командировки» — ei_doc_trips_view (сюда же пишет Панель).
+  const viewKey = mode === "trips" ? VIEW_KEY : `${VIEW_KEY}_${mode}`;
+  const [view, setViewState] = useState<View>(() => loadView(viewKey));
   // Руководство по умолчанию попадает на карту всех выездов фирмы; выбор запоминается.
   const control = isControlRole(me?.role);
   const [savedSection, setSavedSection] = usePersistent<Section>("ei_doc_trips_section", control ? "map" : "trips", ["map", "trips", "procurements"]);
-  const section: Section = !control && savedSection === "map" ? "trips" : savedSection;
+  const section: Section = only ?? (!control && savedSection === "map" ? "trips" : savedSection);
   const setSection = setSavedSection;
   useEffect(() => {
     // Профиль пришёл позже первого рендера — руководству без сохранённого выбора открываем карту.
@@ -94,10 +106,23 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
   const [forProcurement, setForProcurement] = useState<number | null>(null);
 
   const setView = useCallback((next: View) => {
-    saveView(next);
+    saveView(next, viewKey);
     setViewState(next);
     window.scrollTo({ top: 0 });
-  }, []);
+  }, [viewKey]);
+
+  useModeAction(mode, {
+    "new-trip": () => { setForProcurement(null); setCreating("trip"); },
+    "new-visit": () => setCreating("visit"),
+    new: () => {
+      setForProcurement(null);
+      setCreating(only === "procurements" ? (isManager ? "procurement" : null) : mode === "city" ? "visit" : "trip");
+    },
+    "new-procurement": isManager ? () => setCreating("procurement") : undefined,
+    "open-trip": (id) => typeof id === "number" && setView({ kind: "trip", id }),
+    "open-procurement": (id) => typeof id === "number" && setView({ kind: "procurement", id }),
+    list: () => setView({ kind: "list" }),
+  });
 
   const reload = useCallback(() => {
     setError("");
@@ -182,7 +207,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
         key={view.id}
         procurementId={view.id}
         onBack={() => {
-          setSection("procurements");
+          if (!only) setSection("procurements");
           setView({ kind: "list" });
         }}
         onOpenTrip={(id) => setView({ kind: "trip", id })}
@@ -197,7 +222,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
   }
 
   const list = section === "trips" ? trips : procurements;
-  const sectionOptions = [
+  const sectionOptions = only ? [] : [
     ...(control ? [{ value: "map" as Section, label: "Карта", icon: "mapPin" as const }] : []),
     { value: "trips" as Section, label: "Выезды", icon: "car" as const },
     { value: "procurements" as Section, label: "Закупки", icon: "briefcase" as const },
@@ -215,7 +240,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
           </button>
         </PageActions>
         <div className="toolbar">
-          <Segmented value={section} options={sectionOptions} onChange={setSection} />
+          {sectionOptions.length > 0 && <Segmented value={section} options={sectionOptions} onChange={setSection} />}
         </div>
         {booked && <Alert tone="ok" onClose={() => setBooked("")}>{booked}</Alert>}
         <DispatchMap onOpenTrip={(id) => setView({ kind: "trip", id })} />
@@ -245,7 +270,7 @@ export default function Trips({ me, isManager }: { me: Me | null; isManager: boo
       </PageActions>
 
       <div className="toolbar">
-        <Segmented value={section} options={sectionOptions} onChange={setSection} />
+        {sectionOptions.length > 0 && <Segmented value={section} options={sectionOptions} onChange={setSection} />}
         <span className="spacer" />
         <Segmented
           size="sm"

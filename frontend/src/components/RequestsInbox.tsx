@@ -11,6 +11,7 @@ import Icon from "../ui/Icon";
 import { confirmDialog, promptDialog } from "../ui/Modal";
 import { Alert, EmptyState, SearchField, Segmented, Spinner } from "../ui/controls";
 import { PHONE, useMediaQuery } from "../ui/hooks";
+import { useModeAction } from "../ui/modeActions";
 
 const money = (value: string | number) =>
   new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 }).format(Number(value));
@@ -65,6 +66,10 @@ export default function RequestsInbox({ onChanged }: { onChanged?: () => void })
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
   const [loading, setLoading] = useState(true);
+  useModeAction("requests", {
+    open: (id) => { if (typeof id === "number") { setBox("inbox"); setOpenId(id); } },
+    search: (q) => typeof q === "string" && setQuery(q),
+  });
 
   const load = useCallback(async () => {
     setError("");

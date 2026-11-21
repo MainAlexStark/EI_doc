@@ -526,7 +526,7 @@ function EventCard({
             {item.order.note && <div className="ev-card-row"><Icon name="doc" size={16} /><span>{item.order.note}</span></div>}
             {item.order.request_id != null && <div className="ev-card-row"><Icon name="inbox" size={16} /><span>По заявке №{item.order.request_id}</span></div>}
             <div className="actions" style={{ marginTop: 4 }}>
-              <button type="button" className="tinted" onClick={() => (window.location.hash = "#/field-work")}>
+              <button type="button" className="tinted" onClick={() => (window.location.hash = "#/intake")}>
                 Открыть в «Приёмках» <Icon name="arrowRight" size={14} />
               </button>
             </div>

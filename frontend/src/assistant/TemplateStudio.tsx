@@ -33,11 +33,11 @@ import {
 } from "./api";
 import ChatView from "./ChatView";
 
-const HASH = "#/protocol-templates";
+const HASH = "#/si-templates";
 
 /** `#/protocol-templates/<id типа СИ>` — пришли с экрана поверки или из справочника: сразу открыть этот тип. */
 function siTypeFromHash(): number | null {
-  const match = window.location.hash.match(/^#\/protocol-templates\/(\d+)/);
+  const match = window.location.hash.match(/^#\/(?:si-templates|protocol-templates)\/(\d+)/);
   return match ? Number(match[1]) : null;
 }
 
@@ -375,7 +375,7 @@ function Workspace({
         <div className="assistant-alert">
           <Alert tone="ok" onClose={() => setNotice("")}>
             {notice}{" "}
-            <a href="#/field-work" className="link">Перейти к поверкам</a>
+            <a href="#/intake" className="link">Перейти к поверкам</a>
           </Alert>
         </div>
       )}

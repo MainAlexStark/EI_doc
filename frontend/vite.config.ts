@@ -27,6 +27,9 @@ export default defineConfig(({ command }) => ({
       // реально раздаётся только по нему (whitenoise, STATICFILES_DIRS).
       base: command === "build" ? "/static/frontend/" : "/",
       workbox: {
+        // Шрифты дизайн-системы v2 (Golos Text, JetBrains Mono) — в precache, чтобы
+        // интерфейс в поле без связи выглядел так же; только кириллица и латиница.
+        globPatterns: ["**/*.{js,css,html}", "assets/*-{cyrillic,latin}-*.woff2"],
         // Единственный маршрут SPA — "/" (см. apps.core.views.frontend_index).
         // /zayavka — отдельная точка входа того же бандла, но её должен
         // отдавать сервер честно (публичная форма без офлайна не нуждается

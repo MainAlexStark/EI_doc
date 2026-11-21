@@ -1,146 +1,130 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fetchMe, fetchRequests, fetchSiTypes, isAuthenticated, logout, type Me } from "./api";
-import Attestations from "./components/Attestations";
-import Availability from "./components/Availability";
-import FieldWork from "./components/FieldWork";
-import JournalTab from "./components/JournalTab";
 import Login from "./components/Login";
-import RequestsInbox from "./components/RequestsInbox";
-import SiTypes from "./components/SiTypes";
-import Tasks from "./components/Tasks";
-import Trips from "./components/Trips";
-import Icon, { type IconName } from "./ui/Icon";
-import { DialogHost } from "./ui/Modal";
-import ControlPanel from "./components/control/ControlPanel";
-import Staff from "./components/control/Staff";
-import TeamSchedule from "./components/control/TeamSchedule";
 import { isControlRole } from "./dispatchApi";
+import { registerDefaultSources } from "./modes/commandSources";
+import { HASH_ALIASES, SECTIONS, SECTION_BY_KEY, SITE_URL, homeFor, isVisible, phoneTabs } from "./modes/registry";
+import type { Access, GoOptions, ModeProps, SectionDef, SectionKey } from "./modes/types";
+import { CommandPalette, openCommandPalette, useCommands, type CommandItem } from "./ui/CommandPalette";
+import { EmptyState } from "./ui/EmptyState";
+import { HotkeyHelp, useHotkey } from "./ui/Hotkeys";
+import Icon from "./ui/Icon";
+import Kbd from "./ui/Kbd";
+import { DialogHost } from "./ui/Modal";
+import { Sheet } from "./ui/Sheet";
+import { SkeletonList } from "./ui/Skeleton";
+import { Toaster } from "./ui/Toast";
+import { PageActionsContext } from "./ui/controls";
 import { usePersistent } from "./ui/hooks";
-import { PageActions, PageActionsContext, Segmented, Spinner } from "./ui/controls";
+import { emitModeAction } from "./ui/modeActions";
+import { withViewTransition } from "./ui/transition";
 
-// Ассистент — отдельный чанк: поверителю в поле на телефоне он не нужен при каждой загрузке.
-const Assistant = lazy(() => import("./assistant/Assistant"));
-// «Шаблоны протоколов» — тот же чат ассистента рядом с протоколом по черновику.
-const TemplateStudio = lazy(() => import("./assistant/TemplateStudio"));
+/* Оболочка v2 (docs/rebuild.md, 21.11.2026): навигация по РЕЖИМАМ работы.
+ * Режимы, их права, иконки, клавиши и главные действия — в modes/registry.ts;
+ * здесь только каркас: боковая панель, шапка, таб-бар телефона, палитра, клавиши.
+ * Раздел хранится в адресе (#/intake, #/si-templates/12) — переживает перезагрузку,
+ * работает «Назад». Старые адреса (#/field-work…) перенаправляются. */
 
-/* Навигация (решение 17.10.2026, холст «EI_doc — новый интерфейс», вариант 2):
- * - «Журнал» и «Нормоконтроль» — одна вкладка «Журнал»: у поверителя просто
- *   журнал своих протоколов, у менеджера ещё нумерация и работа с Аршин;
- * - «Наряды» убраны (14.11.2026 разделено заново): всё с адресами и картой —
- *   «Выезды» (день поверителя в городе, командировки, закупки); «Приёмки» —
- *   заказы от заказчиков, которые привезли приборы сами. Менеджер видит все,
- *   поверитель — только свои.
- * Раздел хранится в адресе (#/journal) — переживает перезагрузку, работает «Назад». */
-type Tab =
-  | "control" | "staff" | "field-work" | "trips" | "journal" | "requests" | "availability" | "tasks" | "assistant" | "si-types"
-  | "protocol-templates" | "attestations";
-
-type NavItem = {
-  key: Tab; label: string; icon: IconName; managerOnly?: boolean;
-  /** Только руководству: владелец, руководитель, метролог, менеджер. */ controlOnly?: boolean;
-  /** Короче — для таб-бара телефона. */ short?: string;
-};
-
-const WORK: NavItem[] = [
-  { key: "control", label: "Панель", icon: "chart", controlOnly: true },
-  { key: "trips", label: "Выезды", icon: "car" },
-  { key: "field-work", label: "Приёмки", icon: "checkCircle" },
-  { key: "journal", label: "Журнал", icon: "doc" },
-  { key: "requests", label: "Заявки", icon: "inbox", managerOnly: true },
-  { key: "availability", label: "График", icon: "calendar" },
-  { key: "tasks", label: "Задачи", icon: "tasks" },
-  { key: "assistant", label: "Ассистент", icon: "sparkle" },
-];
-
-const REFERENCE: NavItem[] = [
-  { key: "si-types", label: "Типы СИ", icon: "gauge" },
-  { key: "protocol-templates", label: "Шаблоны протоколов", icon: "layers", short: "Шаблоны" },
-  { key: "attestations", label: "Аттестация ИО", icon: "shield", managerOnly: true },
-  { key: "staff", label: "Сотрудники", icon: "users", controlOnly: true },
-];
-
-const ALL_TABS = new Set<Tab>([...WORK, ...REFERENCE].map((item) => item.key));
-
-/** Разделы во всю высоту окна — без отступов main: календарь, заявки, ассистент. */
-const FLUSH: Tab[] = ["availability", "requests", "assistant", "protocol-templates"];
-
-/** На телефоне в таб-баре — четыре главных, остальное под «Ещё». */
-const PHONE_TABS: Tab[] = ["trips", "field-work", "journal", "availability"];
-const PHONE_TABS_CONTROL: Tab[] = ["control", "trips", "field-work", "journal"];
-
-/** Кто видит фирму целиком. Поверитель — только своё. */
-const isManagerRole = (role: string | undefined) => !!role && role !== "verifier";
 const REVIEWER_ROLES = new Set(["owner", "head", "metrologist"]);
+const isManagerRole = (role: string | undefined) => !!role && role !== "verifier";
 
 const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("") || "?";
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
 
-/** «Стариков Сергей Владимирович» → «Стариков С. В.» — в боковой панели полное ФИО не помещается. */
+/** «Стариков Сергей Владимирович» → «Стариков С. В.» */
 const shortName = (name: string) => {
   const [last, ...rest] = name.split(/\s+/).filter(Boolean);
   if (!last || rest.length === 0) return name;
   return `${last} ${rest.map((part) => `${part[0]}.`).join(" ")}`;
 };
 
-const todayLine = () => {
+export const todayLine = () => {
   const text = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
-const tabFromHash = (): Tab | null => {
-  // #/protocol-templates/12 — раздел и что в нём открыть: раздел — первая часть.
-  const key = window.location.hash.replace(/^#\/?/, "").split("/")[0] as Tab;
-  return ALL_TABS.has(key) ? key : null;
-};
+type Route = { key: SectionKey | null; sub: string };
+
+function readHash(): Route {
+  const [raw = "", ...rest] = window.location.hash.replace(/^#\/?/, "").split("/");
+  const aliased = HASH_ALIASES[raw];
+  if (aliased) {
+    // старый адрес — тихо переписываем, хвост (#/protocol-templates/12) сохраняем
+    window.history.replaceState(null, "", `#/${[aliased, ...rest].join("/")}`);
+    return { key: aliased, sub: rest.join("/") };
+  }
+  const section = SECTION_BY_KEY.get(raw as SectionKey);
+  return section && section.key !== "site" ? { key: section.key as SectionKey, sub: rest.join("/") } : { key: null, sub: "" };
+}
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(isAuthenticated());
-  const [tab, setTab] = useState<Tab>(() => tabFromHash() ?? "field-work");
-  const [graphMode, setGraphMode] = usePersistent<"team" | "mine">("ei_doc_graph_mode", "team", ["team", "mine"]);
+  const [route, setRoute] = useState<Route>(readHash);
   const [me, setMe] = useState<Me | null>(null);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [counts, setCounts] = useState<Partial<Record<SectionKey, number>>>({});
   const [menuOpen, setMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
-  const [counts, setCounts] = useState<Partial<Record<Tab, number>>>({});
+  const [sidebar, setSidebar] = usePersistent<"full" | "mini">("ei_doc_sidebar", "full", ["full", "mini"]);
+  const [theme, setTheme] = usePersistent<"auto" | "light" | "dark">("ei_doc_theme", "auto", ["auto", "light", "dark"]);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const headRef = useRef<HTMLElement>(null);
+
+  // Тема — только кабинет; публичные страницы не трогаем (см. styles.css).
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.app = "cabinet";
+    if (theme === "auto") delete root.dataset.theme;
+    else root.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     if (!authenticated) {
       setMe(null);
       return;
     }
-    void fetchMe()
-      .then(setMe)
-      .catch(() => setMe(null));
+    void fetchMe().then(setMe).catch(() => setMe(null));
   }, [authenticated]);
 
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash() ?? "field-work");
+    const onHash = () => withViewTransition(() => setRoute(readHash()));
     window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    window.addEventListener("popstate", onHash);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("popstate", onHash);
+    };
   }, []);
 
-  const isManager = isManagerRole(me?.role);
-  const isControl = isControlRole(me?.role);
+  const access: Access = useMemo(
+    () => ({
+      role: me?.role,
+      isManager: isManagerRole(me?.role),
+      isControl: isControlRole(me?.role),
+      isReviewer: !!me && REVIEWER_ROLES.has(me.role),
+    }),
+    [me],
+  );
+  const home = homeFor(access);
+  const visibleSections = useMemo(() => SECTIONS.filter((section) => isVisible(section, access)), [access]);
+  const current: SectionKey = route.key ?? home;
+  const currentDef = SECTION_BY_KEY.get(current)!;
 
-  // Руководство без раздела в адресе начинает с «Панели»; поверителю она не видна.
+  // Пока профиль не пришёл, права неизвестны — ничего не перенаправляем.
+  // Пришёл: нет раздела в адресе — домой; раздел не по роли — тоже домой.
   useEffect(() => {
     if (!me) return;
-    if (isControlRole(me.role) && !tabFromHash()) setTab("control");
-    if (!isControlRole(me.role) && (tab === "control" || tab === "staff")) setTab("field-work");
+    if (!isVisible(currentDef, access)) {
+      window.history.replaceState(null, "", `#/${home}`);
+      setRoute({ key: home, sub: "" });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
 
-  // Счётчики в боковой панели: новые заявки и типы СИ на проверке.
   const refreshCounts = useCallback(() => {
     if (!me) return;
-    const next: Partial<Record<Tab, number>> = {};
+    const next: Partial<Record<SectionKey, number>> = {};
     const jobs: Promise<unknown>[] = [];
     if (isManagerRole(me.role)) {
       jobs.push(fetchRequests({ status: "new" }).then((list) => (next.requests = list.length)).catch(() => undefined));
@@ -155,7 +139,7 @@ export default function App() {
     refreshCounts();
     const timer = window.setInterval(refreshCounts, 120_000);
     return () => window.clearInterval(timer);
-  }, [refreshCounts, tab]);
+  }, [refreshCounts, current]);
 
   // Высота шапки — для разделов во всю высоту окна (календарь, заявки, ассистент).
   useLayoutEffect(() => {
@@ -167,209 +151,296 @@ export default function App() {
     const observer = new ResizeObserver(apply);
     observer.observe(head);
     return () => observer.disconnect();
-  }, [authenticated, tab]);
+  }, [authenticated, current]);
 
-  if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
-
-  const visible = (items: NavItem[]) =>
-    items.filter((item) => (isManager || !item.managerOnly) && (isControl || !item.controlOnly));
-  const work = visible(WORK);
-  const reference = visible(REFERENCE);
-  const all = [...work, ...reference];
-
-  const displayName = me?.employee?.full_name ?? me?.email ?? "";
-  const roleName = me?.role_display ?? "";
-
-  /** Открыть раздел; trip — сразу командировку во «Выездах» (Trips помнит её в sessionStorage). */
-  const goTo = (next: string, trip?: number) => {
-    if (trip) {
-      try {
-        sessionStorage.setItem("ei_doc_trips_view", JSON.stringify({ kind: "trip", id: trip }));
-      } catch {
-        /* не страшно */
+  /** Перейти в режим/раздел. trip — сразу открыть командировку; action — попросить режим что-то сделать. */
+  const go = useCallback(
+    (target: string, options: GoOptions = {}) => {
+      const key = (HASH_ALIASES[target] ?? target) as SectionKey | "site";
+      if (key === "site") {
+        window.open(SITE_URL, "_blank", "noopener");
+        return;
       }
-    }
-    go(next as Tab);
-  };
+      const def = SECTION_BY_KEY.get(key);
+      if (!def) return;
+      if (options.trip) {
+        try {
+          sessionStorage.setItem("ei_doc_trips_view", JSON.stringify({ kind: "trip", id: options.trip }));
+        } catch {
+          /* не страшно */
+        }
+      }
+      setMoreOpen(false);
+      setMenuOpen(false);
+      const sub = options.sub ?? "";
+      const hash = `#/${[key, sub].filter(Boolean).join("/")}`;
+      const changed = key !== route.key || sub !== route.sub || !!options.trip;
+      if (changed) {
+        if (window.location.hash !== hash) window.history.pushState(null, "", hash);
+        withViewTransition(() => setRoute({ key, sub }));
+        window.scrollTo({ top: 0 });
+      }
+      if (options.action) emitModeAction(key, options.action, options.payload);
+    },
+    [route],
+  );
 
-  const go = (next: Tab) => {
-    setMoreOpen(false);
-    setMenuOpen(false);
-    if (next !== tab) {
-      window.history.pushState(null, "", `#/${next}`);
-      setTab(next);
-    }
-    window.scrollTo({ top: 0 });
-  };
-
-  const signOut = () => {
+  const signOut = useCallback(() => {
     logout();
     setMenuOpen(false);
     setMoreOpen(false);
     setAuthenticated(false);
-  };
+  }, []);
 
-  const heads: Record<Tab, { title: string; subtitle?: string }> = {
-    control: { title: "Панель", subtitle: `${todayLine()} · работа всех сотрудников` },
-    staff: { title: "Сотрудники", subtitle: "Учётные записи, роли, аттестация" },
-    "field-work": { title: "Приёмки", subtitle: "Заказы: приборы, которые заказчики привезли сами" },
-    trips: { title: "Выезды", subtitle: `${todayLine()} · город, командировки, закупки` },
-    journal: { title: "Журнал", subtitle: isManager ? "Протоколы всех поверителей" : "Мои протоколы" },
-    requests: { title: "Заявки", subtitle: "С сайта и по телефону" },
-    availability: isControl && graphMode === "team"
-      ? { title: "График", subtitle: "Команда: кто когда может выезжать и чем занят" }
-      : { title: "График", subtitle: "Когда я могу выезжать — заявители на сайте видят эти дни" },
-    tasks: { title: "Задачи" },
-    assistant: { title: "Ассистент", subtitle: "Метролог-помощник: ФГИС «Аршин», методики, файлы компании" },
-    "si-types": { title: "Типы СИ", subtitle: "Справочник средств измерений и шаблоны поверки" },
-    "protocol-templates": { title: "Шаблоны протоколов", subtitle: "Шаблон протокола поверки по методике — для каждого типа СИ" },
-    attestations: { title: "Аттестация ИО", subtitle: "Испытательное оборудование" },
-  };
-  const head = heads[tab];
-  const flush = FLUSH.includes(tab) && !(tab === "availability" && isControl && graphMode === "team");
+  const primary = currentDef.primary && (currentDef.primary.visible ?? (() => true))(access) ? currentDef.primary : null;
+  const runPrimary = () => primary && emitModeAction(current, primary.action);
 
-  const sideItem = (item: NavItem) => {
-    const count = counts[item.key];
+  // --- клавиши ------------------------------------------------------------
+  const digitModes = visibleSections.filter((section) => section.digit);
+  useHotkey(
+    digitModes.map((section) => String(section.digit)),
+    (event) => {
+      const digit = Number(event.code.startsWith("Digit") ? event.code.slice(5) : event.key);
+      const section = digitModes.find((item) => item.digit === digit);
+      if (section) go(section.key);
+    },
+    { enabled: authenticated, description: "Режимы 1…8", group: "Переходы" },
+  );
+  useHotkey("n", runPrimary, {
+    enabled: authenticated && !!primary,
+    description: primary ? `${primary.label} — новое в текущем режиме` : undefined,
+    group: "Действия",
+  });
+  useHotkey("?", () => setHelpOpen((open) => !open), { enabled: authenticated, description: "Подсказка по клавишам", group: "Общее" });
+  useHotkey("escape", () => setHelpOpen(false), { enabled: helpOpen, description: "Закрыть окно", group: "Общее", global: true, preventDefault: false });
+
+  // --- палитра команд -----------------------------------------------------
+  const commands: CommandItem[] = useMemo(() => {
+    if (!authenticated) return [];
+    const nav = visibleSections.map((section) => ({
+      id: `go:${section.key}`,
+      title: section.key === "site" ? "Открыть сайт фирмы" : section.title,
+      subtitle: section.description,
+      icon: section.icon,
+      group: "Перейти",
+      keywords: section.keywords,
+      hint: section.digit ? String(section.digit) : undefined,
+      run: () => go(section.key),
+    }));
+    const action = (id: string, title: string, mode: SectionKey, act: string, icon: CommandItem["icon"], keywords = ""): CommandItem => ({
+      id, title, icon, group: "Действия", keywords, run: () => go(mode, { action: act }),
+    });
+    const actions: CommandItem[] = [
+      action("act:intake", "Новая приёмка", "intake", "new", "box", "приём принесли приборы коробка акт"),
+      action("act:visit", "Новая запись клиента на выезд", "city", "new-visit", "phone", "заявка звонок запись адрес"),
+      action("act:trip", "Новая командировка", "trips", "new-trip", "car", "поездка выезд район"),
+      ...(access.isManager ? [action("act:procurement", "Новая закупка", "procurements", "new-procurement", "contract", "контракт 44 223")] : []),
+      { id: "act:keys", title: "Клавиши", subtitle: "Все сочетания", icon: "keyboard", group: "Действия", hint: "?", run: () => setHelpOpen(true) },
+      {
+        id: "act:theme", title: theme === "dark" ? "Светлая тема" : "Тёмная тема", icon: theme === "dark" ? "sun" : "moon", group: "Действия",
+        keywords: "тема оформление ночь", run: () => setTheme(theme === "dark" ? "light" : "dark"),
+      },
+      { id: "act:logout", title: "Выйти", icon: "logout", group: "Действия", keywords: "выход сменить пользователя", run: signOut },
+    ];
+    return [...nav, ...actions];
+  }, [authenticated, visibleSections, access.isManager, go, theme, setTheme, signOut]);
+  useCommands("shell", commands, [commands]);
+
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    if (!me) return;
+    return registerDefaultSources((key, options) => goRef.current(key, options), access);
+  }, [me, access]);
+
+  if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
+
+  const displayName = me?.employee?.full_name ?? me?.email ?? "";
+  const roleName = me?.role_display ?? "";
+  const mini = sidebar === "mini";
+
+  const subtitles: Partial<Record<SectionKey, string>> = {
+    control: `${todayLine()} · работа всех сотрудников`,
+    city: `${todayLine()} · ${currentDef.description}`,
+    journal: access.isManager ? "Протоколы всех поверителей" : "Мои протоколы",
+  };
+  const subtitle = subtitles[current] ?? currentDef.description;
+  const flush = !!currentDef.flush;
+  const ModeComponent = currentDef.component;
+  const modeProps: ModeProps = { me, isManager: access.isManager, isControl: access.isControl, isReviewer: access.isReviewer, go, refreshCounts };
+
+  const sideItem = (section: SectionDef, variant: "side" | "sheet" = "side") => {
+    const count = counts[section.key as SectionKey];
+    const active = section.key === current;
+    const label = <span className="label">{section.title}</span>;
+    const badge = count ? <span className={`count ${section.key === "requests" ? "badge" : ""}`}>{count}</span> : null;
+    const digit = section.digit && variant === "side" ? <Kbd className="side-digit kbd-hint">{section.digit}</Kbd> : null;
+    if (section.href) {
+      return (
+        <a key={section.key} className="side-item" href={section.href} target="_blank" rel="noopener" title={mini ? `${section.title} — в новой вкладке` : undefined}>
+          <Icon name={section.icon} />
+          {label}
+          <Icon name="arrowUpRight" size={14} className="side-ext" />
+          {digit}
+        </a>
+      );
+    }
     return (
       <button
         type="button"
-        key={item.key}
-        className={`side-item ${tab === item.key ? "active" : ""}`}
-        aria-current={tab === item.key ? "page" : undefined}
-        onClick={() => go(item.key)}
+        key={section.key}
+        className={`side-item ${active ? "active" : ""}`}
+        aria-current={active ? "page" : undefined}
+        title={mini ? section.title : undefined}
+        onClick={() => go(section.key)}
       >
-        <Icon name={item.icon} />
-        <span className="label">{item.label}</span>
-        {count ? <span className={`count ${item.key === "requests" ? "badge" : ""}`}>{count}</span> : null}
+        <Icon name={section.icon} />
+        {label}
+        {badge}
+        {!badge && digit}
       </button>
     );
   };
 
-  const meButton = displayName && (
-    <div className="side-me">
-      <button
-        type="button"
-        className="side-me-btn"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen((open) => !open)}
-      >
-        <span className="avatar">{initials(displayName)}</span>
-        <span className="who">
-          <b title={displayName}>{shortName(displayName)}</b>
-          <span>{roleName}</span>
-        </span>
-        <Icon name="chevronDown" size={14} />
-      </button>
-      {menuOpen && (
-        <AccountMenu
-          name={displayName}
-          email={me?.email ?? ""}
-          onClose={() => setMenuOpen(false)}
-          onSignOut={signOut}
-        />
-      )}
-    </div>
-  );
+  const group = (name: SectionDef["group"]) => visibleSections.filter((section) => section.group === name);
 
-  const phoneKeys = isControl ? PHONE_TABS_CONTROL : PHONE_TABS;
-  const phoneTabs = all.filter((item) => phoneKeys.includes(item.key));
-  const phoneMore = all.filter((item) => !phoneKeys.includes(item.key));
-  const moreActive = phoneMore.some((item) => item.key === tab);
-  const moreCount = phoneMore.reduce((sum, item) => sum + (item.key === "requests" ? counts.requests ?? 0 : 0), 0);
+  const phoneKeys = phoneTabs(access).filter((key) => visibleSections.some((section) => section.key === key));
+  const phoneMain = phoneKeys.map((key) => SECTION_BY_KEY.get(key)!);
+  const phoneMore = visibleSections.filter((section) => !phoneKeys.includes(section.key as SectionKey));
+  const moreActive = phoneMore.some((section) => section.key === current);
+  const moreCount = phoneMore.reduce((sum, section) => sum + (counts[section.key as SectionKey] ?? 0), 0);
 
   return (
     <PageActionsContext.Provider value={actionsSlot}>
-      <div className="app">
-        <nav className="sidebar" aria-label="Разделы">
+      <div className={`app ${mini ? "side-mini" : ""}`} data-section={current}>
+        <a className="skip-link" href="#main">К содержимому</a>
+        <nav className="sidebar" aria-label="Режимы и разделы">
           <div className="brand">
-            <div className="brand-mark">ЕИ</div>
+            <div className="brand-mark" aria-hidden="true">ЕИ</div>
             <div className="brand-name">
               EI_doc
               <small>Единица Измерения</small>
             </div>
+            <button
+              type="button"
+              className="icon-btn sm side-toggle"
+              onClick={() => setSidebar(mini ? "full" : "mini")}
+              aria-label={mini ? "Развернуть панель" : "Свернуть панель до иконок"}
+              title={mini ? "Развернуть панель" : "Свернуть панель"}
+            >
+              <Icon name={mini ? "expand" : "collapse"} size={16} />
+            </button>
           </div>
+
+          <button type="button" className="side-search" onClick={() => openCommandPalette()} title="Найти или сделать — ⌘K">
+            <Icon name="search" size={16} />
+            <span className="label">Найти или сделать</span>
+            <Kbd keys="mod+k" className="kbd-hint" />
+          </button>
+
+          {group("home").map((section) => sideItem(section))}
+          <div className="side-group">Режимы</div>
+          {group("modes").map((section) => sideItem(section))}
           <div className="side-group">Работа</div>
-          {work.map(sideItem)}
-          <div className="side-group">Справочники</div>
-          {reference.map(sideItem)}
+          {group("work").map((section) => sideItem(section))}
+          {group("reference").length > 0 && <div className="side-group">Справочники</div>}
+          {group("reference").map((section) => sideItem(section))}
           <div className="spacer" />
-          {meButton}
+          {displayName && (
+            <div className="side-me">
+              <button
+                type="button"
+                className="side-me-btn"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                title={mini ? displayName : undefined}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <span className="avatar">{initials(displayName)}</span>
+                <span className="who">
+                  <b title={displayName}>{shortName(displayName)}</b>
+                  <span>{roleName}</span>
+                </span>
+                <Icon name="chevronDown" size={14} />
+              </button>
+              {menuOpen && (
+                <AccountMenu
+                  name={displayName}
+                  email={me?.email ?? ""}
+                  theme={theme}
+                  onTheme={setTheme}
+                  onHelp={() => {
+                    setMenuOpen(false);
+                    setHelpOpen(true);
+                  }}
+                  onClose={() => setMenuOpen(false)}
+                  onSignOut={signOut}
+                />
+              )}
+            </div>
+          )}
         </nav>
 
         <div className="workspace" ref={workspaceRef}>
-          <header className={`page-head ${flush ? "compact" : ""}`} ref={headRef}>
+          <header className={`page-head ${flush ? "compact" : ""} ${current === "today" ? "is-today" : ""}`} ref={headRef}>
             <div className="titles">
-              <h1>{head.title}</h1>
-              {head.subtitle && <div className="subtitle">{head.subtitle}</div>}
+              <h1>{currentDef.title}</h1>
+              {subtitle && <div className="subtitle">{subtitle}</div>}
             </div>
             <div className="page-actions" ref={setActionsSlot} />
+            <button type="button" className="icon-btn phone-only head-search" onClick={() => openCommandPalette()} aria-label="Поиск и команды">
+              <Icon name="search" size={20} />
+            </button>
           </header>
 
-          <main className={flush ? "flush" : ""}>
-            {tab === "control" && isControl && <ControlPanel onGo={goTo} />}
-            {tab === "staff" && isControl && <Staff meId={me?.employee?.id} />}
-            {tab === "field-work" && <FieldWork me={me} isManager={isManager} />}
-            {tab === "trips" && <Trips me={me} isManager={isManager} />}
-            {tab === "journal" && <JournalTab isManager={isManager} onOpenTypes={() => go("si-types")} />}
-            {tab === "requests" && <RequestsInbox onChanged={refreshCounts} />}
-            {tab === "availability" && isControl && (
-              <>
-                <PageActions>
-                  <Segmented
-                    size="sm"
-                    value={graphMode}
-                    onChange={setGraphMode}
-                    options={[{ value: "team", label: "Команда", icon: "users" }, { value: "mine", label: "Мой", icon: "user" }]}
-                  />
-                </PageActions>
-                {graphMode === "team" ? <TeamSchedule /> : <Availability me={me} />}
-              </>
-            )}
-            {tab === "availability" && !isControl && <Availability me={me} />}
-            {tab === "tasks" && <Tasks me={me} />}
-            {tab === "si-types" && <SiTypes me={me} onChanged={refreshCounts} />}
-            {tab === "attestations" && <Attestations me={me} />}
-            {tab === "protocol-templates" && (
-              <Suspense fallback={<Spinner label="Загружаю…" />}>
-                <TemplateStudio />
+          <main id="main" className={flush ? "flush" : ""} tabIndex={-1}>
+            <ModeBoundary key={current} onHome={() => go(home)}>
+              <Suspense fallback={<div className="mode-loading"><SkeletonList rows={5} /></div>}>
+                {ModeComponent && <ModeComponent {...modeProps} />}
               </Suspense>
-            )}
-            {tab === "assistant" && (
-              <Suspense fallback={<Spinner label="Загружаю ассистента…" />}>
-                <Assistant />
-              </Suspense>
-            )}
+            </ModeBoundary>
           </main>
         </div>
 
-        {moreOpen && (
-          <>
-            <div className="more-backdrop" onClick={() => setMoreOpen(false)} />
-            <div className="more-sheet glass" role="menu">
-              {phoneMore.map(sideItem)}
-              <div className="menu-sep" />
-              {displayName && (
-                <button type="button" className="side-item" onClick={signOut}>
-                  <Icon name="logout" />
-                  <span className="label">Выйти · {shortName(displayName)}</span>
-                </button>
-              )}
-            </div>
-          </>
+        {primary && (
+          <button type="button" className="mode-fab phone-only" onClick={runPrimary}>
+            <Icon name={primary.icon} size={20} />
+            {primary.label}
+          </button>
         )}
 
-        <div className="tabbar">
+        <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} side="bottom" size="sm" className="more-panel" title="Ещё">
+          <div className="more-list">
+            {phoneMore.map((section) => sideItem(section, "sheet"))}
+            <div className="menu-sep" />
+            <button type="button" className="side-item" onClick={() => { setMoreOpen(false); openCommandPalette(); }}>
+              <Icon name="search" />
+              <span className="label">Найти или сделать</span>
+            </button>
+            {displayName && (
+              <button type="button" className="side-item" onClick={signOut}>
+                <Icon name="logout" />
+                <span className="label">Выйти · {shortName(displayName)}</span>
+              </button>
+            )}
+          </div>
+        </Sheet>
+
+        <nav className="tabbar" aria-label="Главные режимы">
           <div className="tabs glass">
-            {phoneTabs.map((item) => (
+            {phoneMain.map((section) => (
               <button
                 type="button"
-                key={item.key}
-                className={`tab ${tab === item.key && !moreOpen ? "active" : ""}`}
-                onClick={() => go(item.key)}
+                key={section.key}
+                className={`tab ${current === section.key && !moreOpen ? "active" : ""}`}
+                aria-current={current === section.key ? "page" : undefined}
+                onClick={() => go(section.key)}
               >
-                <Icon name={item.icon} size={22} />
-                {item.short ?? item.label}
+                <span className="tab-icon">
+                  <Icon name={section.icon} size={22} />
+                  {counts[section.key as SectionKey] ? <span className="tab-badge">{counts[section.key as SectionKey]}</span> : null}
+                </span>
+                {section.short}
               </button>
             ))}
             <button
@@ -385,18 +456,49 @@ export default function App() {
               Ещё
             </button>
           </div>
-        </div>
+        </nav>
+
+        <CommandPalette />
+        <HotkeyHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+        <Toaster />
         <DialogHost />
       </div>
     </PageActionsContext.Provider>
   );
 }
 
+/** Режим не загрузился (нет связи, обновили бандл) или упал — сказать, что делать, а не белый экран. */
+class ModeBoundary extends Component<{ children: ReactNode; onHome: () => void }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const chunk = /dynamically imported module|Failed to fetch|Loading chunk/i.test(this.state.error.message);
+    return (
+      <EmptyState
+        tone="error"
+        title={chunk ? "Раздел не загрузился" : "В разделе что-то сломалось"}
+        action={{ label: "Обновить страницу", icon: "refresh", onClick: () => window.location.reload() }}
+        secondary={{ label: "На главную", icon: "home", onClick: this.props.onHome }}
+      >
+        {chunk
+          ? "Похоже, пропала связь или вышла новая версия. Обновите страницу — несохранённые на телефоне поверки останутся в очереди."
+          : "Обновите страницу. Если повторится — сообщите, что нажимали перед этим."}
+      </EmptyState>
+    );
+  }
+}
+
 function AccountMenu({
-  name, email, onClose, onSignOut,
+  name, email, theme, onTheme, onHelp, onClose, onSignOut,
 }: {
   name: string;
   email: string;
+  theme: "auto" | "light" | "dark";
+  onTheme: (theme: "auto" | "light" | "dark") => void;
+  onHelp: () => void;
   onClose: () => void;
   onSignOut: () => void;
 }) {
@@ -413,13 +515,38 @@ function AccountMenu({
       document.removeEventListener("keydown", onKey);
     };
   }, [onClose]);
+  const themes = [
+    { value: "auto" as const, label: "Как в системе" },
+    { value: "light" as const, label: "Светлая" },
+    { value: "dark" as const, label: "Тёмная" },
+  ];
   return (
-    <div className="menu" ref={ref} role="menu" style={{ bottom: "calc(100% + 6px)", left: 0, right: 0 }}>
+    <div className="menu account-menu" ref={ref} role="menu">
       <div className="menu-head">
         <b>{name}</b>
         {email}
       </div>
       <div className="menu-sep" />
+      <div className="menu-label">Тема</div>
+      <div className="theme-pick" role="group" aria-label="Тема">
+        {themes.map((item) => (
+          <button
+            type="button"
+            key={item.value}
+            className={theme === item.value ? "active" : ""}
+            aria-pressed={theme === item.value}
+            onClick={() => onTheme(item.value)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="menu-sep" />
+      <button type="button" className="menu-item" role="menuitem" onClick={onHelp}>
+        <Icon name="keyboard" size={16} />
+        Клавиши
+        <Kbd className="menu-kbd">?</Kbd>
+      </button>
       <button type="button" className="menu-item" role="menuitem" onClick={onSignOut}>
         <Icon name="logout" size={16} />
         Выйти
@@ -427,4 +554,3 @@ function AccountMenu({
     </div>
   );
 }
-

@@ -91,23 +91,8 @@ export function SearchField({
   );
 }
 
-export function EmptyState({
-  icon = "inbox", title, children, action,
-}: {
-  icon?: IconName;
-  title: ReactNode;
-  children?: ReactNode;
-  action?: ReactNode;
-}) {
-  return (
-    <div className="empty-state">
-      <div className="empty-icon"><Icon name={icon} size={26} /></div>
-      <div className="empty-title">{title}</div>
-      {children && <div className="empty-text">{children}</div>}
-      {action && <div className="empty-action">{action}</div>}
-    </div>
-  );
-}
+// Пустое состояние переехало в ui/EmptyState.tsx (v2: action-объект, тон ошибки); здесь — для старых импортов.
+export { EmptyState } from "./EmptyState";
 
 export function Spinner({ label }: { label?: string }) {
   return (

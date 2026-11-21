@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 import Icon from "../ui/Icon";
 import { Alert, EmptyState, PageActions, SearchField, Spinner } from "../ui/controls";
 import { PHONE, useMediaQuery } from "../ui/hooks";
+import { useModeAction } from "../ui/modeActions";
 import {
   downloadJournal,
   downloadVerificationProtocol,
@@ -56,6 +57,8 @@ function VerifierDot({ color }: { color?: string }) {
 export default function Journal({ isManager = false }: { isManager?: boolean }) {
   const phone = useMediaQuery(PHONE);
   const [filters, setFilters] = useState<JournalFilters>({ page: 1 });
+  // Палитра команд: «найти заводской номер / протокол» — открыть журнал уже с запросом.
+  useModeAction("journal", { search: (q) => typeof q === "string" && setFilters({ page: 1, q }) });
   const [verifiers, setVerifiers] = useState<JournalVerifier[] | null>(null);
   const [rows, setRows] = useState<JournalRow[]>([]);
   const [total, setTotal] = useState(0);

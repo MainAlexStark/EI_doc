@@ -1,0 +1,107 @@
+/* «Сегодня» — рабочий стол: день слева, показания режимов справа, указатель внизу. */
+
+.today { max-width: 1180px; padding-top: 6px; }
+.today-hello { margin: 0 0 22px; }
+.today-hello h1 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 650; letter-spacing: -0.025em; }
+.today-hello p { margin: 6px 0 0; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; color: var(--graphite); font-size: 15px; }
+.today-date::first-letter { text-transform: uppercase; }
+.today-hello button.link { display: inline-flex; gap: 4px; font-size: 14px; }
+
+.today-grid {
+  display: grid; gap: 16px; align-items: start;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+}
+
+/* --- день ------------------------------------------------------------ */
+.today-day {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 18px 20px 16px;
+  display: flex; flex-direction: column; gap: 14px; min-height: 100%;
+  /* линейка — как на поверочном бланке */
+  background-image: linear-gradient(90deg, var(--accent) 0 3px, transparent 3px);
+}
+.day-head { display: flex; gap: 12px; align-items: center; }
+.day-head h3 { margin: 0; font-size: 17px; font-weight: 650; }
+.day-icon {
+  width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex: 0 0 auto;
+  background: var(--accent-soft); color: var(--accent);
+}
+.day-meter { display: grid; grid-template-columns: auto auto 1fr; align-items: baseline; gap: 4px 8px; }
+.day-meter .big { font-size: 40px; font-weight: 600; line-height: 1; color: var(--ink); letter-spacing: -0.04em; }
+.day-meter .of { font-size: 18px; color: var(--graphite); }
+.day-meter .meter-text { color: var(--graphite); font-size: 13.5px; padding-left: 6px; }
+.meter-bar { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin-top: 6px; }
+.meter-bar > span { display: block; height: 100%; background: var(--pass); border-radius: 3px; transition: width var(--dur-3) var(--ease-out); }
+.day-sub-title { font-size: 13px; font-weight: 550; color: var(--graphite); margin-bottom: -6px; }
+.day-stops { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.day-stops li { display: flex; gap: 14px; align-items: baseline; padding: 10px 0; border-top: 1px solid var(--rule); }
+.day-stops li:first-child { border-top: 0; }
+.day-stops li[aria-hidden], .day-stops[aria-hidden] li { align-items: center; }
+.day-stops .when { flex: 0 0 92px; font-size: 13px; color: var(--accent-ink); font-weight: 500; }
+.day-stops .where { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.day-stops .where b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; }
+.day-stops li.is-done .where b { color: var(--graphite); text-decoration: line-through; text-decoration-color: var(--faint); }
+.day-stops li.is-done .when { color: var(--pass-ink); }
+.day-more { margin-top: -6px; }
+.day-note { color: var(--graphite); margin: 0; font-size: 14px; line-height: 1.5; max-width: 460px; }
+.day-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 4px; }
+.day-actions button.primary { min-height: 38px; padding: 6px 16px; font-size: 14px; }
+
+/* --- показания ------------------------------------------------------- */
+.today-readings {
+  display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden;
+}
+.reading { display: flex; align-items: stretch; position: relative; }
+.reading + .reading { border-top: 1px solid var(--rule); }
+.reading-main {
+  flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(84px, auto) 1fr; grid-template-rows: auto auto; gap: 2px 14px;
+  align-items: baseline; justify-items: start; text-align: left; white-space: normal;
+  padding: 14px 12px 14px 18px; border-radius: 0; background: transparent; font-weight: 400; min-height: 0;
+}
+.reading-main:hover:not(:disabled) { background: var(--hover); }
+.reading-title { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 550; color: var(--graphite); }
+.reading-title .kbd { margin-left: 2px; }
+.reading-value { display: inline-flex; align-items: baseline; gap: 6px; }
+.reading-value .data { font-size: 30px; font-weight: 600; line-height: 1.05; letter-spacing: -0.04em; color: var(--ink); }
+.reading-unit { font-size: 13px; color: var(--graphite); }
+.reading-text { font-size: 13.5px; color: var(--ink-2); line-height: 1.4; align-self: center; }
+.reading-text .data { font-size: 13px; }
+.reading.tone-pass .reading-value .data { color: var(--pass-ink); }
+.reading.tone-signal .reading-value .data { color: var(--signal-ink); }
+.reading.tone-fail .reading-value .data { color: var(--fail-ink); }
+.reading.tone-signal::before, .reading.tone-pass::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--signal);
+}
+.reading.tone-pass::before { background: var(--pass); }
+.reading-action {
+  flex: 0 0 auto; align-self: center; margin: 0 14px 0 0; min-height: 32px; padding: 4px 12px;
+  background: var(--accent-soft); color: var(--accent-ink); font-size: 13px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+}
+.reading-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* --- указатель режимов ------------------------------------------------ */
+.mode-index { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0 24px; }
+.mode-index-row {
+  display: flex; align-items: center; gap: 12px; justify-content: flex-start; text-align: left; white-space: normal;
+  padding: 12px 6px; min-height: 56px; border-radius: 0; border-top: 1px solid var(--rule); background: transparent; color: var(--ink);
+  font-weight: 400; text-decoration: none;
+}
+a.mode-index-row:hover { color: var(--ink); }
+.mode-index-row:hover:not(:disabled) { background: var(--hover); }
+.mode-index-row > .icon:first-child { color: var(--accent); }
+.mode-index-row .grow { display: flex; flex-direction: column; }
+.mode-index-row b { font-weight: 550; }
+
+@media (max-width: 1100px) {
+  .today-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .today-hello { margin-bottom: 16px; }
+  .today-hello h1 { font-size: 26px; }
+  .today-day { padding: 16px; border-radius: 16px; }
+  .today-readings { border-radius: 16px; }
+  .reading { flex-direction: column; }
+  .reading-main { padding: 14px 16px 6px; }
+  .reading-action { align-self: flex-start; margin: 0 16px 14px; }
+  .mode-index { grid-template-columns: 1fr; }
+  .day-stops .when { flex-basis: 84px; }
+}

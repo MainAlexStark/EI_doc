@@ -3,8 +3,13 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import PublicRequestForm from "./components/PublicRequestForm";
 import Landing from "./landing/Landing";
+import "@fontsource-variable/golos-text";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
 import "./styles.css";
 import "./control.css";
+import "./ui/shell.css";
 
 // Публичная форма заявки живёт на отдельном пути того же бандла — своего
 // клиентского роутера в проекте нет (см. App.tsx), поэтому выбор экрана

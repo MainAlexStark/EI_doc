@@ -29,6 +29,7 @@ import {
 import Icon from "../ui/Icon";
 import { confirmDialog } from "../ui/Modal";
 import { EmptyState, PageActions, Segmented, Spinner } from "../ui/controls";
+import { useModeAction } from "../ui/modeActions";
 import ScanReview from "./ScanReview";
 import { OrderHeader, OrderLine, OrderModal, orderStage, orderTitle } from "./Orders";
 import LabBoard from "./control/LabBoard";
@@ -1088,7 +1089,7 @@ function VerificationEntry({
             Протокол по {verification.si_type_name} делается по шаблону: ассистент соберёт его по методике поверки и
             документам типа из Госреестра, вы проверите и нажмёте «Продолжить» — после этого здесь появится форма.
           </p>
-          <button type="button" className="primary sm" onClick={() => (window.location.hash = `#/protocol-templates/${verification.si_type_id}`)}>
+          <button type="button" className="primary sm" onClick={() => (window.location.hash = `#/si-templates/${verification.si_type_id}`)}>
             <Icon name="layers" size={14} /> Создать шаблон протокола
           </button>
         </div>
@@ -1214,6 +1215,11 @@ export default function FieldWork({
   const [queued, setQueued] = useState(0);
   const [outboxProblems, setOutboxProblems] = useState<OutboxItem[]>([]);
   const [creatingOrder, setCreatingOrder] = useState(false);
+  // Оболочка: «Новая приёмка» из палитры, клавиша N, большая кнопка на телефоне.
+  useModeAction("intake", {
+    new: () => { setSelectedOrder(null); setCreatingOrder(true); },
+    "open-order": (id) => typeof id === "number" && setSelectedOrder(id),
+  }, !embedded);
 
   // Бланк с QR и распознавание — второй срез офлайна (claude/scans.md).
   // В отличие от остального экрана это НЕ офлайн-функция: печать и
