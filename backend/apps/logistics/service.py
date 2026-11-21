@@ -18,6 +18,8 @@ from apps.logistics.models import (
     UNFINISHED,
     PassStatus,
     Procurement,
+    StopPurpose,
+    ProcurementItem,
     StopStatus,
     Trip,
     TripKind,
@@ -62,6 +64,7 @@ class StopInput:
     access_note: str = ""
     added_on_site: bool = False
     locate: bool = True  # искать координаты, если их не прислали
+    purpose: str = StopPurpose.VISIT
 
 
 def _coord(value: float | None) -> Decimal | None:
@@ -117,8 +120,13 @@ def _site_for(client: Client, data: StopInput, hint: str = "") -> Site:
 
 
 @transaction.atomic
-def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None) -> TripStop:
-    """Завести адрес и наряд под него. ``employee`` — кто будет поверять (по умолчанию старший)."""
+def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None,
+             client: Client | None = None) -> TripStop:
+    """Завести адрес и наряд под него. ``employee`` — кто будет поверять (по умолчанию старший).
+
+    ``client`` — заказчик, если он уже известен (забор приборов у юрлица); иначе — по закупке
+    командировки или по имени из адреса.
+    """
     if not trip.is_open:
         raise TripError("Командировка закрыта — адреса больше не добавляются")
     # Один адрес — одна строка командировки, как бы его ни набрали (регистр, пробелы).
@@ -128,16 +136,20 @@ def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None) -
     }
     if data.site_id in taken.values() or (data.address and _address_key(data.address) in taken):
         raise TripError(f"Адрес уже есть в командировке: {' '.join(data.address.split()) or 'этот объект'}")
-    client = _client_for(trip, data)
+    client = client or _client_for(trip, data)
     site = _site_for(client, data, trip.destination)
 
     planned_date = data.planned_date or (timezone.localdate() if data.added_on_site else trip.date_start)
+    purpose = data.purpose if data.purpose in StopPurpose.values else StopPurpose.VISIT
+    note = f"Командировка: {trip.title}"
+    if purpose != StopPurpose.VISIT:
+        note = f"{StopPurpose(purpose).label}: {trip.title}"
     work_order = WorkOrder.objects.create(
         client=client,
         site=site,
         assigned_employee=employee or trip.lead,
         scheduled_date=planned_date,
-        note=f"Командировка: {trip.title}",
+        note=note,
     )
     last = trip.stops.aggregate(last=Max("position"))["last"] or 0
     return TripStop.objects.create(
@@ -152,6 +164,7 @@ def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None) -
         contact_phone=data.contact_phone.strip(),
         note=data.note.strip()[:300],
         added_on_site=data.added_on_site,
+        purpose=purpose,
     )
 
 
@@ -217,6 +230,94 @@ def attach_to_city_day(order: WorkOrder) -> TripStop | None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Забрать коробку с предприятия (режим «Город»)
+# ---------------------------------------------------------------------------
+def _lab_site(client: Client) -> Site:
+    """Объект приёмки — юридический адрес заказчика, как у заказов во вкладке «Приёмки»."""
+    address = client.legal_address or client.name
+    site = Site.objects.filter(client=client, address=address).first()
+    return site or Site.objects.create(client=client, address=address)
+
+
+@transaction.atomic
+def add_pickup(employee: Employee, date: dt.date, client: Client, data: StopInput, *,
+               window: tuple[dt.time | None, dt.time | None] = (None, None)) -> TripStop:
+    """Адрес «забрать приборы» в дне поверителя: юрлицо, контакт, сколько приборов примерно."""
+    trip = city_day_for(employee, date)
+    data.purpose = StopPurpose.PICKUP
+    data.planned_date = date
+    if not data.address.strip() and not data.site_id:
+        data.address = client.legal_address
+    stop = add_stop(trip, data, employee=employee, client=client)
+    if window[0] or window[1]:
+        stop.window_start, stop.window_end = window
+        stop.save(update_fields=["window_start", "window_end"])
+    return stop
+
+
+@transaction.atomic
+def mark_picked_up(stop: TripStop, *, count: int | None = None, note: str = "") -> tuple[WorkOrder, bool]:
+    """«Забрал» одним действием: адрес выполнен, заведена приёмка (наряд ``lab``) с этим заказчиком.
+
+    Идемпотентно: повтор возвращает уже заведённую приёмку (второй элемент — заведена ли сейчас).
+    """
+    stop = TripStop.objects.select_for_update().select_related("trip", "site", "client", "work_order").get(pk=stop.pk)
+    if stop.purpose != StopPurpose.PICKUP:
+        raise TripError("Это не забор приборов — отметьте адрес обычной отметкой")
+    if stop.lab_order_id:
+        return stop.lab_order, False
+    if count is not None:
+        stop.planned_count = count
+    who = stop.work_order.assigned_employee if stop.work_order_id else stop.trip.lead
+    parts = [f"Привезено с выезда «{stop.trip.title}» (адрес №{stop.pk}): {stop.site.address}"]
+    if stop.planned_count:
+        parts.append(f"приборов ≈ {stop.planned_count}")
+    if note.strip():
+        parts.append(note.strip())
+    lab = WorkOrder.objects.create(
+        kind=WorkOrderKind.LAB, client=stop.client, site=_lab_site(stop.client), assigned_employee=who,
+        status=WorkOrderStatus.IN_PROGRESS, scheduled_date=timezone.localdate(),
+        contact=", ".join(filter(None, [stop.contact_name, stop.contact_phone]))[:200],
+        note="; ".join(parts), procurement=stop.trip.procurement, received_at=timezone.now(),
+    )
+    stop.lab_order = lab
+    stop.save(update_fields=["lab_order", "planned_count"])
+    set_stop_status(stop, StopStatus.DONE)
+    return lab, True
+
+
+@transaction.atomic
+def add_delivery(order: WorkOrder, employee: Employee, date: dt.date, *,
+                 window: tuple[dt.time | None, dt.time | None] = (None, None), note: str = "") -> tuple[TripStop, bool]:
+    """Обратный выезд «вернуть приборы» в дне поверителя. Повтор — тот же ждущий адрес."""
+    if order.kind != WorkOrderKind.LAB:
+        raise TripError("Вернуть можно только приборы приёмки")
+    if order.issued_at:
+        raise TripError("Приборы уже выданы заказчику")
+    existing = order.logistic_stops.filter(purpose=StopPurpose.DELIVERY, status=StopStatus.PLANNED).first()
+    if existing is not None:
+        return existing, False
+    pickup = order.logistic_stops.filter(purpose=StopPurpose.PICKUP).select_related("site").first()
+    trip = city_day_for(employee, date)
+    data = StopInput(
+        site_id=pickup.site_id if pickup else None,
+        address="" if pickup else (order.client.legal_address or order.site.address),
+        contact_name=pickup.contact_name if pickup else order.contact[:160],
+        contact_phone=pickup.contact_phone if pickup else order.client.phone,
+        planned_count=order.verifications.count() or (pickup.planned_count if pickup else None),
+        planned_date=date, note=note or f"Вернуть приборы приёмки №{order.pk}", purpose=StopPurpose.DELIVERY,
+    )
+    stop = add_stop(trip, data, employee=employee, client=order.client)
+    stop.lab_order = order
+    fields = ["lab_order"]
+    if window[0] or window[1]:
+        stop.window_start, stop.window_end = window
+        fields += ["window_start", "window_end"]
+    stop.save(update_fields=fields)
+    return stop, True
+
+
 def parse_lines(text: str) -> list[StopInput]:
     """«Адрес; ФИО; телефон; сколько приборов» — по адресу в строке, всё после адреса необязательно."""
     result: list[StopInput] = []
@@ -251,9 +352,22 @@ def set_stop_status(stop: TripStop, status: str) -> TripStop:
     order = stop.work_order
     if order is not None and not order.verifications.exists():
         wanted = WorkOrderStatus.PLANNED if status in (StopStatus.PLANNED, StopStatus.DONE) else WorkOrderStatus.CANCELLED
+        if status == StopStatus.DONE and stop.purpose != StopPurpose.VISIT:
+            # Забор/возврат поверок на месте не даёт: съездили — наряд выезда закрыт.
+            wanted = WorkOrderStatus.DONE
         if order.status != wanted:
             order.status = wanted
-            order.save(update_fields=["status"])
+            order.closed_at = timezone.now() if wanted == WorkOrderStatus.DONE else None
+            order.save(update_fields=["status", "closed_at"])
+    if stop.purpose == StopPurpose.DELIVERY and stop.lab_order_id:
+        # Отвезли приборы обратно — приёмка выдана; вернули отметку — выдача снимается.
+        lab = stop.lab_order
+        if status == StopStatus.DONE and lab.issued_at is None:
+            lab.issued_at = timezone.now()
+            lab.save(update_fields=["issued_at"])
+        elif status == StopStatus.PLANNED and lab.issued_at is not None:
+            lab.issued_at = None
+            lab.save(update_fields=["issued_at"])
     trip = stop.trip
     if status != StopStatus.PLANNED and trip.status == TripStatus.PLANNED:
         trip.status = TripStatus.ACTIVE
@@ -415,6 +529,40 @@ def procurement_progress(procurement: Procurement) -> dict:
         "ready": verifications.filter(status__in=READY).count(),
         "unsuitable": verifications.filter(status__in=READY, suitable=False).count(),
     }
+
+
+def procurement_progress_many(procurements: list[Procurement]) -> dict[int, dict]:
+    """То же, что ``procurement_progress``, для списка закупок — тремя запросами на весь список.
+
+    Поверка относится к закупке через адрес захода (командировка по закупке) или через
+    заказ «в счёт контракта»; если заданы оба — считается по захода.
+    """
+    from django.db.models import Sum
+    from django.db.models.functions import Coalesce
+
+    ids = [item.pk for item in procurements]
+    result = {pk: {"planned": 0, "entered": 0, "ready": 0, "unsuitable": 0} for pk in ids}
+    if not ids:
+        return result
+    for row in (
+        ProcurementItem.objects.filter(procurement_id__in=ids).values("procurement_id").annotate(total=Sum("quantity"))
+    ):
+        result[row["procurement_id"]]["planned"] = row["total"] or 0
+    rows = (
+        Verification.objects.annotate(
+            proc=Coalesce("work_order__trip_stop__trip__procurement_id", "work_order__procurement_id")
+        )
+        .filter(proc__in=ids)
+        .values("proc")
+        .annotate(
+            entered=Count("id", distinct=True),
+            ready=Count("id", filter=Q(status__in=READY), distinct=True),
+            unsuitable=Count("id", filter=Q(status__in=READY, suitable=False), distinct=True),
+        )
+    )
+    for row in rows:
+        result[row["proc"]].update(entered=row["entered"], ready=row["ready"], unsuitable=row["unsuitable"])
+    return result
 
 
 def pass_coverage(trip: Trip) -> list[dict]:

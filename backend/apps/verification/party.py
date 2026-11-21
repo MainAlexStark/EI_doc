@@ -15,11 +15,12 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 import requests
 from django.conf import settings
 
+from apps.core import cache
 from apps.verification.models import Client, ClientKind
 
 logger = logging.getLogger(__name__)
@@ -51,9 +52,15 @@ def valid_inn(inn: str) -> bool:
 
 
 def _dadata(inn: str) -> Party | None:
-    key = getattr(settings, "DADATA_API_KEY", "")
-    if not key:
+    """Реквизиты по ИНН. Кэш на неделю: реквизиты меняются редко, а ИНН спрашивают на каждой приёмке."""
+    if not getattr(settings, "DADATA_API_KEY", ""):
         return None
+    found = cache.remember(cache.key("dadata:party", inn), 7 * 24 * 3600, lambda: _dadata_fetch(inn))
+    return replace(found) if found else None  # копия: вызывающий дописывает client_id/phone
+
+
+def _dadata_fetch(inn: str) -> Party | None:
+    key = getattr(settings, "DADATA_API_KEY", "")
     try:
         response = requests.post(
             FIND_URL, json={"query": inn, "count": 1},
@@ -89,9 +96,16 @@ def _own(client: Client) -> Party:
 
 
 def _dadata_suggest(query: str, count: int) -> list[Party]:
-    key = getattr(settings, "DADATA_API_KEY", "")
-    if not key or count <= 0:
+    """Подсказка организаций — кэш на сутки по запросу (набор букв повторяется у всех)."""
+    if not getattr(settings, "DADATA_API_KEY", "") or count <= 0:
         return []
+    found = cache.remember(cache.key("dadata:suggest", query.casefold(), count), 24 * 3600,
+                           lambda: _dadata_suggest_fetch(query, count))
+    return [replace(item) for item in found]
+
+
+def _dadata_suggest_fetch(query: str, count: int) -> list[Party]:
+    key = getattr(settings, "DADATA_API_KEY", "")
     try:
         response = requests.post(
             SUGGEST_URL, json={"query": query, "count": count, "locations_boost": LOCATIONS_BOOST},

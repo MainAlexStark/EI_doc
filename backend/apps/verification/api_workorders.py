@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core import paging
 from apps.verification.models import WorkOrder, WorkOrderStatus
 
 
@@ -48,11 +50,31 @@ class WorkOrderSerializer(serializers.Serializer):
     verifications_ready = serializers.SerializerMethodField()
     trip_id = serializers.SerializerMethodField()
     trip_title = serializers.SerializerMethodField()
+    # Приёмка, привезённая с выезда («забрать коробку»), и обратный выезд «вернуть приборы».
+    pickup = serializers.SerializerMethodField()
+    delivery = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _logistic(obj: WorkOrder, purpose: str) -> dict | None:
+        stops = [s for s in obj.logistic_stops.all() if s.purpose == purpose]
+        if not stops:
+            return None
+        stop = sorted(stops, key=lambda s: s.pk)[-1]
+        return {"stop_id": stop.pk, "trip_id": stop.trip_id, "trip_title": stop.trip.title,
+                "status": stop.status, "planned_date": stop.planned_date}
+
+    def get_pickup(self, obj: WorkOrder) -> dict | None:
+        return self._logistic(obj, "pickup") if obj.kind == "lab" else None
+
+    def get_delivery(self, obj: WorkOrder) -> dict | None:
+        return self._logistic(obj, "delivery") if obj.kind == "lab" else None
 
     def get_procurement_label(self, obj: WorkOrder) -> str:
         return f"{obj.procurement.label} · {obj.procurement.customer.name}" if obj.procurement_id else ""
 
     def get_verifications_ready(self, obj: WorkOrder) -> int:
+        if hasattr(obj, "n_ready"):
+            return obj.n_ready
         return obj.verifications.filter(status__in=["ready", "accepted"]).count()
 
     def get_trip_id(self, obj: WorkOrder) -> int | None:
@@ -64,19 +86,36 @@ class WorkOrderSerializer(serializers.Serializer):
         return stop.trip.title if stop else ""
 
     def get_verifications_total(self, obj: WorkOrder) -> int:
+        if hasattr(obj, "n_total"):
+            return obj.n_total
         return obj.verifications.count()
 
     def get_verifications_accepted(self, obj: WorkOrder) -> int:
+        if hasattr(obj, "n_accepted"):
+            return obj.n_accepted
         return obj.verifications.filter(status="accepted").count()
 
 
+def with_counts(qs):
+    """Счётчики поверок одним запросом на весь список, а не по три на каждый наряд."""
+    return qs.annotate(
+        n_total=Count("verifications", distinct=True),
+        n_ready=Count("verifications", filter=Q(verifications__status__in=["ready", "accepted"]), distinct=True),
+        n_accepted=Count("verifications", filter=Q(verifications__status="accepted"), distinct=True),
+    )
+
+
 class WorkOrderListView(APIView):
-    """GET /api/work-orders/?status=&assigned_employee=&date_from=&date_to=&id=&trip="""
+    """GET /api/work-orders/?status=&assigned_employee=&date_from=&date_to=&id=&trip=&kind=&issued=
+
+    Массив до ``limit`` (200) или страница при ``?page_size=`` — см. apps.core.paging.
+    ``issued=0`` — приёмки, ещё не выданные заказчику.
+    """
 
     def get(self, request):
-        qs = WorkOrder.objects.select_related(
+        qs = with_counts(WorkOrder.objects.select_related(
             "client", "site", "assigned_employee", "trip_stop__trip", "procurement__customer"
-        ).prefetch_related("verifications")
+        ).prefetch_related("logistic_stops__trip"))
         kind = request.query_params.get("kind")
         if kind:
             qs = qs.filter(kind=kind)
@@ -101,7 +140,10 @@ class WorkOrderListView(APIView):
         date_to = request.query_params.get("date_to")
         if date_to:
             qs = qs.filter(scheduled_date__lte=date_to)
-        return Response(WorkOrderSerializer(qs[:200], many=True).data)
+        issued = request.query_params.get("issued")
+        if issued in ("0", "1"):
+            qs = qs.filter(issued_at__isnull=issued == "0")
+        return paging.respond(request, qs, lambda rows: WorkOrderSerializer(rows, many=True).data)
 
 
 class WorkOrderCreateSerializer(serializers.Serializer):

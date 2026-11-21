@@ -19,3 +19,15 @@ RST_MCP_URL = ""
 GEOCODER = "off"
 DGIS_API_KEY = ""
 ROUTE_BASE_ADDRESS = ""
+
+# Внешние ключи из локального .env не должны менять поведение тестов: с
+# заданными CAPTCHA_* публичная форма требует токен и отвечает 400, с DaData —
+# идёт в сеть. Тесты, которым ключ нужен, включают его через override_settings.
+CAPTCHA_CLIENT_KEY = ""
+CAPTCHA_SERVER_KEY = ""
+DADATA_API_KEY = ""
+YANDEX_VISION_API_KEY = ""
+YANDEX_SEARCH_API_KEY = ""
+TELEGRAM_BOT_TOKEN = ""
+AGENT_URL = ""
+EXTERNAL_CACHE_ENABLED = False

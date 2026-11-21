@@ -90,7 +90,7 @@ class Instrument(models.Model):
         "catalog.SiType", on_delete=models.PROTECT, related_name="instruments",
         verbose_name="тип СИ",
     )
-    serial_number = models.CharField("заводской номер", max_length=60)
+    serial_number = models.CharField("заводской номер", max_length=60, db_index=True)
     manufacture_year = models.PositiveSmallIntegerField("год выпуска", null=True, blank=True)
     owner = models.ForeignKey(
         Client, on_delete=models.PROTECT, related_name="instruments", null=True, blank=True,
@@ -222,7 +222,12 @@ class Verification(models.Model):
         verbose_name = "поверка"
         verbose_name_plural = "поверки"
         ordering = ["-verified_at"]
-        indexes = [models.Index(fields=["verifier", "verified_at"])]
+        indexes = [
+            models.Index(fields=["verifier", "verified_at"]),
+            # Счётчики «черновики / на нормоконтроле» по поверителю и по наряду.
+            models.Index(fields=["verifier", "status"], name="verification_verifier_status"),
+            models.Index(fields=["work_order", "status"], name="verification_order_status"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.instrument} от {self.verified_at:%d.%m.%Y}"
@@ -553,7 +558,12 @@ class WorkOrder(models.Model):
         verbose_name = "наряд"
         verbose_name_plural = "наряды"
         ordering = ["-scheduled_date", "-created_at"]
-        indexes = [models.Index(fields=["status", "scheduled_date"])]
+        indexes = [
+            models.Index(fields=["status", "scheduled_date"]),
+            # «Приёмки»: заказы в работе / к выдаче; «Сегодня» — мои наряды на дату.
+            models.Index(fields=["kind", "status", "issued_at"], name="workorder_kind_status_issued"),
+            models.Index(fields=["assigned_employee", "scheduled_date"], name="workorder_employee_date"),
+        ]
 
     def __str__(self) -> str:
         return f"Наряд №{self.pk} — {self.site}"

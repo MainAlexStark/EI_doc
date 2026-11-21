@@ -238,9 +238,59 @@ def save_program(user, data: dict, *, sources=None, plan_check: dict | None = No
         program.plan_check = plan_check or {}
         program.created_via_assistant = via_assistant
         program.needs_review = not reviewer
+        program.reviewed_by, program.reviewed_at = (user, timezone.now()) if reviewer else (None, None)
         program.is_active = True
         program.save()
     return program
+
+
+# ---------------------------------------------------------------------------
+# Шаблон плана по виду ИО: из аттестации, проверка, применение к новому ИО
+# ---------------------------------------------------------------------------
+def program_from_attestation(att: EquipmentAttestation, user, *, title: str = "", equipment_kind: str = "",
+                             note: str = "") -> AttestationProgram:
+    """Шаблон из плана уже проведённой аттестации: структура протокола без конкретного ИО и измерений."""
+    if not att.plan:
+        raise AttestationError("у аттестации нет плана — шаблону не из чего взяться")
+    kind = _s(equipment_kind or att.plan.get("equipment_kind") or att.equipment.get("name"), 200)
+    title = _s(title, 250) or f"{kind} — по аттестации {att.full_number or f'№{att.pk}'}"
+    sources = [f"план аттестации {att.full_number or f'№{att.pk}'}: {att.equipment.get('name', '')} "
+               f"№ {att.equipment.get('serial_number', '')}".strip()]
+    program = save_program(user, {"title": title, "equipment_kind": kind, "plan": att.plan, "note": note},
+                           sources=sources + list(att.sources or [])[:20], plan_check=att.plan_check or None,
+                           via_assistant=False)
+    # План, проверенный метрологом в самой аттестации, остаётся проверенным и в шаблоне.
+    if att.plan_approved and program.needs_review and is_reviewer(user):
+        program.needs_review = False
+    program.source_attestation = att
+    program.save(update_fields=["source_attestation", "needs_review"])
+    return program
+
+
+def approve_program(program: AttestationProgram, user) -> AttestationProgram:
+    if not is_reviewer(user):
+        raise PermissionDenied("Шаблон аттестации проверяет метролог или руководитель")
+    program.needs_review = False
+    program.reviewed_by, program.reviewed_at = user, timezone.now()
+    program.save(update_fields=["needs_review", "reviewed_by", "reviewed_at"])
+    return program
+
+
+def apply_program(program: AttestationProgram, user, data: dict) -> EquipmentAttestation:
+    """Новая аттестация по шаблону: оборудование, комиссия, СИ — из запроса, план — из шаблона.
+
+    План проверенного шаблона считается проверенным и в аттестации; черновик шаблона —
+    аттестация ждёт проверки плана метрологом, как обычно.
+    """
+    if not program.is_active:
+        raise AttestationError("шаблон выключен")
+    card = {**data, "plan": program.plan}
+    att = create(user, card, program=program, sources=[f"шаблон «{program.title}»", *(program.sources or [])[:20]],
+                 plan_check=program.plan_check or None)
+    if not program.needs_review and not att.plan_approved:
+        att.plan_approved_by, att.plan_approved_at = program.reviewed_by, program.reviewed_at or timezone.now()
+        att.save(update_fields=["plan_approved_by", "plan_approved_at"])
+    return att
 
 
 def approve_plan(att: EquipmentAttestation, user) -> EquipmentAttestation:

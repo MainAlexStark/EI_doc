@@ -52,7 +52,14 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
              python manage.py set_telegram_webhook --quiet &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"
+             gunicorn -c config/gunicorn.py config.wsgi:application"
+    # GUNICORN_WORKERS / GUNICORN_THREADS / GUNICORN_TIMEOUT — из .env, см. backend/config/gunicorn.py
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     expose:
       - "8000"
     # ports:
@@ -63,7 +70,7 @@ services:
 
   worker:
     <<: *backend
-    command: ["celery", "-A", "config", "worker", "-l", "info", "--concurrency", "4"]
+    command: ["sh", "-c", "celery -A config worker -l info --concurrency $${CELERY_CONCURRENCY:-4}"]
 
   beat:
     <<: *backend

@@ -23,6 +23,18 @@ def healthz(request):
             cursor.execute("SELECT 1")
     except DatabaseError:
         return JsonResponse({"status": "db unavailable"}, status=503)
+    if request.GET.get("deep"):
+        # ?deep=1 — ещё и Redis (кэш и брокер очереди). Для мониторинга, не для deploy.sh:
+        # без Redis сайт работает (кэш обходится), но фоновые задачи стоят.
+        from django.core.cache import cache
+
+        try:
+            cache.set("ei:healthz", "1", 5)
+            redis_ok = cache.get("ei:healthz") == "1"
+        except Exception:  # noqa: BLE001
+            redis_ok = False
+        return JsonResponse({"status": "ok" if redis_ok else "degraded", "db": "ok",
+                             "cache": "ok" if redis_ok else "unavailable"}, status=200 if redis_ok else 503)
     return JsonResponse({"status": "ok"})
 
 

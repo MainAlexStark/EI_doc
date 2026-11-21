@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import tempfile
 from pathlib import Path
 from unittest import mock
 
@@ -19,6 +20,9 @@ from apps.catalog.models import MeasurementFamily, SiType
 from apps.core.models import Role, User
 
 SAMPLES = json.loads((Path(__file__).parent / "fixtures" / "fif_samples.json").read_text(encoding="utf-8"))
+
+# Своя папка на прогон: общая /tmp/ei-test-media могла остаться от другого пользователя без прав на запись.
+TEST_MEDIA = tempfile.mkdtemp(prefix="ei-test-media-")
 
 
 def fake_response(payload=None, *, content=b"", headers=None):
@@ -136,7 +140,7 @@ def card(name: str) -> FifCard:
     return FifClient.parse_card(SAMPLES[name])
 
 
-@override_settings(MEDIA_ROOT="/tmp/ei-test-media", SENDFILE_ROOT="/tmp/ei-test-media")
+@override_settings(MEDIA_ROOT=TEST_MEDIA, SENDFILE_ROOT=TEST_MEDIA)
 class ApiTestCase(TestCase):
     def setUp(self) -> None:
         self.family = MeasurementFamily.objects.create(code="water-meter", name="Счётчики воды", calculator_key="water_meter")
@@ -209,7 +213,7 @@ class ApiTestCase(TestCase):
         assert response.data["url"].startswith("https://fgis.gost.ru/")
 
 
-@override_settings(MEDIA_ROOT="/tmp/ei-test-media")
+@override_settings(MEDIA_ROOT=TEST_MEDIA)
 class LimitsTestCase(TestCase):
     def _spec_with(self, content: bytes) -> FifCard:
         result = card("card_puls")

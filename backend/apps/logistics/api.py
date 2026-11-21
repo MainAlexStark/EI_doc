@@ -9,10 +9,20 @@
     POST              /api/trips/{id}/next-visit/       следующий заход с неотработанными адресами
     PATCH/DELETE      /api/trip-stops/{id}/             отметка, заметка, точка / убрать
 
+    POST              /api/pickups/                     «забрать приборы» у юрлица — адрес в дне поверителя
+    POST              /api/trip-stops/{id}/pickup/      «Забрал»: адрес выполнен + приёмка (наряд lab)
+    POST              /api/orders/{id}/delivery/        обратный выезд «вернуть приборы»
+
     GET/POST          /api/procurements/                закупки
     GET/PATCH         /api/procurements/{id}/           карточка: объём, документы, пропуска, заходы
     POST              /api/procurements/{id}/documents/ загрузить файл
     GET/DELETE        /api/procurement-documents/{id}/  скачать / удалить
+    GET               /api/procurements/{id}/documents/ документы с состоянием текста
+    GET               /api/procurement-documents/{id}/text/   текст частями
+    POST              /api/procurement-documents/{id}/extract/ прочитать текст заново
+    GET               /api/procurements/{id}/search/?q=  поиск по тексту документов
+    GET/PUT           /api/procurements/{id}/summary/   выжимка (требования, перечень СИ, сроки, …)
+    POST              /api/procurements/{id}/visit-plan/ план заходов по перечню СИ (apply — завести)
     POST              /api/procurements/{id}/passes/    пропуск
     PATCH/DELETE      /api/passes/{id}/
 
@@ -27,6 +37,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Count, Q
+from django.db.models.functions import Length
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django_sendfile import sendfile
@@ -36,8 +47,9 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core import paging
 from apps.core.models import Employee, Role
-from apps.logistics import geocode, planner, service
+from apps.logistics import geocode, planner, procurement_docs, service
 from apps.logistics.models import (
     DocumentKind,
     Pass,
@@ -47,7 +59,9 @@ from apps.logistics.models import (
     ProcurementItem,
     ProcurementLaw,
     ProcurementStatus,
+    StopPurpose,
     StopStatus,
+    TextStatus,
     Trip,
     TripKind,
     TripStatus,
@@ -196,6 +210,9 @@ def stop_data(stop: TripStop) -> dict:
         "eta": stop.eta,
         "drive_minutes": round(stop.drive_seconds / 60) if stop.drive_seconds is not None else None,
         "work_order_id": stop.work_order_id,
+        "purpose": stop.purpose,
+        "purpose_display": stop.get_purpose_display(),
+        "lab_order_id": stop.lab_order_id,
         "verifications_total": getattr(stop, "verifications_total", 0),
         "verifications_ready": getattr(stop, "verifications_ready", 0),
         "verifications_unsuitable": getattr(stop, "verifications_unsuitable", 0),
@@ -232,7 +249,17 @@ def document_data(doc: ProcurementDocument) -> dict:
         "size": _size(doc),
         "uploaded_by": doc.uploaded_by.full_name if doc.uploaded_by_id else "",
         "created_at": doc.created_at,
+        "text_status": doc.text_status,
+        "text_status_display": doc.get_text_status_display(),
+        "text_error": doc.text_error,
+        "text_chars": getattr(doc, "text_chars", None),
+        "text_extracted_at": doc.text_extracted_at,
     }
+
+
+def documents_qs(item: Procurement):
+    """Документы без самого текста (он бывает в мегабайты) — только его длина."""
+    return item.documents.select_related("uploaded_by").defer("text").annotate(text_chars=Length("text"))
 
 
 def _size(doc: ProcurementDocument) -> int:
@@ -276,7 +303,8 @@ def procurement_detail(item: Procurement, user) -> dict:
         contact=item.contact,
         note=item.note,
         items=[{"id": row.pk, "title": row.title, "quantity": row.quantity} for row in item.items.all()],
-        documents=[document_data(doc) for doc in item.documents.select_related("uploaded_by")],
+        documents=[document_data(doc) for doc in documents_qs(item)],
+        summary=procurement_docs.summary_data(item),
         passes=[pass_data(row) for row in item.passes.select_related("employee", "site")],
         sites=[
             {"id": site.pk, "address": site.address, "is_restricted": site.is_restricted}
@@ -322,9 +350,15 @@ class TripListView(APIView):
         procurement = request.query_params.get("procurement")
         if procurement:
             qs = qs.filter(procurement_id=procurement)
-        trips = list(qs[:200])
-        counts = service.trip_counts([trip.pk for trip in trips])
-        return Response([trip_brief(trip, counts.get(trip.pk)) for trip in trips])
+        kind = request.query_params.get("kind")
+        if kind:
+            qs = qs.filter(kind=kind)
+
+        def rows(trips):
+            counts = service.trip_counts([trip.pk for trip in trips])
+            return [trip_brief(trip, counts.get(trip.pk)) for trip in trips]
+
+        return paging.respond(request, qs, rows)
 
     def post(self, request):
         payload = TripWriteSerializer(data=request.data)
@@ -427,6 +461,7 @@ class StopWriteSerializer(serializers.Serializer):
     window_start = serializers.TimeField(required=False, allow_null=True)
     window_end = serializers.TimeField(required=False, allow_null=True)
     service_minutes = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=600)
+    purpose = serializers.ChoiceField(choices=StopPurpose.choices, required=False)
 
 
 def _stop_response(stop: TripStop, code: int = 200) -> Response:
@@ -677,13 +712,15 @@ class ProcurementListView(APIView):
             qs = qs.filter(status__in=[ProcurementStatus.PREPARING, ProcurementStatus.ACTIVE])
         elif state == "closed":
             qs = qs.filter(status__in=[ProcurementStatus.DONE, ProcurementStatus.CANCELLED])
-        result = []
-        for item in qs[:200]:
-            row = procurement_brief(item)
-            row["trips_total"] = item.trips_total
-            row["progress"] = service.procurement_progress(item)
-            result.append(row)
-        return Response(result)
+        def rows(items):
+            progress = service.procurement_progress_many(items)
+            for item in items:
+                row = procurement_brief(item)
+                row["trips_total"] = item.trips_total
+                row["progress"] = progress[item.pk]
+                yield row
+
+        return paging.respond(request, qs, rows)
 
     def post(self, request):
         require_manager(request)
@@ -735,7 +772,13 @@ MAX_DOCUMENT_BYTES = 40 * 1024 * 1024
 
 
 class ProcurementDocumentsView(APIView):
+    """GET — документы закупки с состоянием текста; POST — загрузить (текст читается в фоне)."""
+
     parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request, pk: int):
+        item = get_object_or_404(visible_procurements(request.user), pk=pk)
+        return Response([document_data(doc) for doc in documents_qs(item)])
 
     def post(self, request, pk: int):
         require_manager(request)
@@ -753,6 +796,7 @@ class ProcurementDocumentsView(APIView):
             file=upload,
             uploaded_by=employee_of(request.user),
         )
+        procurement_docs.schedule_extract(doc)
         return Response(document_data(doc), status=status.HTTP_201_CREATED)
 
 
@@ -773,6 +817,131 @@ class ProcurementDocumentView(APIView):
         doc.file.delete(save=False)
         doc.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def visible_document(request, pk: int) -> ProcurementDocument:
+    doc = get_object_or_404(ProcurementDocument, pk=pk)
+    if not visible_procurements(request.user).filter(pk=doc.procurement_id).exists():
+        raise Http404
+    return doc
+
+
+class ProcurementDocumentTextView(APIView):
+    """GET /api/procurement-documents/{id}/text/?offset=0&max_chars=20000 — текст документа частями.
+
+    Ответ: {"id", "title", "text_status", "total", "offset", "text", "next_offset" (null — конец), "page"}.
+    """
+
+    def get(self, request, pk: int):
+        doc = visible_document(request, pk)
+        try:
+            offset = max(0, int(request.query_params.get("offset") or 0))
+            size = min(max(int(request.query_params.get("max_chars") or 20000), 1000), 100000)
+        except ValueError:
+            raise ValidationError({"detail": "offset и max_chars — числа"}) from None
+        text = doc.text or ""
+        part = text[offset: offset + size]
+        return Response({
+            "id": doc.pk, "title": doc.title, "text_status": doc.text_status, "text_error": doc.text_error,
+            "total": len(text), "offset": offset, "text": part,
+            "next_offset": offset + len(part) if offset + len(part) < len(text) else None,
+            "page": procurement_docs.page_at(text, offset),
+        })
+
+
+class ProcurementDocumentExtractView(APIView):
+    """POST /api/procurement-documents/{id}/extract/ — прочитать текст заново, сразу (не в фоне)."""
+
+    def post(self, request, pk: int):
+        require_manager(request)
+        doc = procurement_docs.extract(visible_document(request, pk))
+        doc.text_chars = len(doc.text)
+        return Response(document_data(doc))
+
+
+class ProcurementSearchView(APIView):
+    """GET /api/procurements/{id}/search/?q=пропуск — по тексту всех документов закупки.
+
+    Ответ: {"query", "results": [{"document_id", "title", "kind", "kind_display", "hits",
+    "snippets": [{"offset", "page", "text"}]}], "unread": [документы без текста]}.
+    """
+
+    def get(self, request, pk: int):
+        item = get_object_or_404(visible_procurements(request.user), pk=pk)
+        query = (request.query_params.get("q") or "").strip()
+        if len(query) < 2:
+            raise ValidationError({"detail": "Запрос — хотя бы 2 символа"})
+        unread = [
+            {"id": doc.pk, "title": doc.title, "text_status": doc.text_status}
+            for doc in item.documents.exclude(text_status=TextStatus.DONE).only("id", "title", "text_status")
+        ]
+        return Response({"query": query, "results": procurement_docs.search(item, query), "unread": unread})
+
+
+class ProcurementSummaryView(APIView):
+    """GET/PUT /api/procurements/{id}/summary/ — выжимка из документов.
+
+    PUT {"summary": {requirements: [{text, source}], instruments: [{name, type, registry_number,
+    quantity, address, note, source}], stages: [{title, date_from, date_to, note, source}],
+    access: [...], contacts: [{name, position, phone, email, note}], penalties: [...],
+    deadline: "YYYY-MM-DD", notes: ""}, "sources"?: [..]} — сохраняет с отметкой кто/когда.
+    """
+
+    def get(self, request, pk: int):
+        item = get_object_or_404(visible_procurements(request.user).select_related("summary_by"), pk=pk)
+        return Response(procurement_docs.summary_data(item))
+
+    def put(self, request, pk: int):
+        require_manager(request)
+        item = get_object_or_404(Procurement, pk=pk)
+        try:
+            procurement_docs.save_summary(item, request.user, request.data.get("summary"),
+                                          sources=request.data.get("sources") or [])
+        except procurement_docs.SummaryError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        return Response(procurement_docs.summary_data(item))
+
+
+class VisitPlanSerializer(serializers.Serializer):
+    per_day = serializers.IntegerField(default=40, min_value=1, max_value=1000)
+    days_per_trip = serializers.IntegerField(default=5, min_value=1, max_value=30)
+    start = serializers.DateField(required=False, allow_null=True)
+    apply = serializers.BooleanField(default=False)
+    lead_id = serializers.IntegerField(required=False, allow_null=True)
+    member_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+
+
+class ProcurementVisitPlanView(APIView):
+    """POST /api/procurements/{id}/visit-plan/ — план заходов по перечню СИ из выжимки.
+
+    {"per_day": 40, "days_per_trip": 5, "start": "YYYY-MM-DD"?, "apply": false, "lead_id"?, "member_ids"?}
+    Ответ: план {"trips": [{"number", "date_start", "date_end", "quantity", "days": [{"date",
+    "quantity", "stops": [{"address", "quantity", "instruments"}]}]}], "warnings", ...};
+    при ``apply`` — ещё "created": [командировка как в списке].
+    """
+
+    def post(self, request, pk: int):
+        item = get_object_or_404(visible_procurements(request.user), pk=pk)
+        payload = VisitPlanSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        try:
+            plan = procurement_docs.plan_visits(item, per_day=data["per_day"], days_per_trip=data["days_per_trip"],
+                                                start=data.get("start"))
+            if not data["apply"]:
+                return Response(plan)
+            require_manager(request)
+            lead = (get_object_or_404(Employee, pk=data["lead_id"], is_active=True) if data.get("lead_id")
+                    else employee_of(request.user))
+            if lead is None:
+                raise ValidationError({"detail": "Выберите старшего (lead_id)"})
+            members = list(Employee.objects.filter(pk__in=data.get("member_ids") or [], is_active=True))
+            trips = procurement_docs.create_visits(item, plan, lead=lead, members=members)
+        except (procurement_docs.SummaryError, service.TripError) as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+        counts = service.trip_counts([trip.pk for trip in trips])
+        return Response({**plan, "created": [trip_brief(trip, counts.get(trip.pk)) for trip in trips]},
+                        status=status.HTTP_201_CREATED)
 
 
 class PassWriteSerializer(serializers.Serializer):
@@ -950,3 +1119,146 @@ class VisitCreateView(APIView):
              "employee": employee.full_name, "trip_title": stop.trip.title},
             status=status.HTTP_201_CREATED,
         )
+
+
+# ---------------------------------------------------------------------------
+# Режим «Город»: забрать коробку с предприятия и вернуть её
+# ---------------------------------------------------------------------------
+class PickupSerializer(serializers.Serializer):
+    client_id = serializers.IntegerField(required=False, allow_null=True)
+    inn = serializers.CharField(max_length=12, required=False, allow_blank=True)
+    name = serializers.CharField(max_length=250, required=False, allow_blank=True)
+    address = serializers.CharField(max_length=350, required=False, allow_blank=True)
+    site_id = serializers.IntegerField(required=False, allow_null=True)
+    latitude = serializers.FloatField(required=False, allow_null=True, min_value=-90, max_value=90)
+    longitude = serializers.FloatField(required=False, allow_null=True, min_value=-180, max_value=180)
+    fias_id = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    postal_code = serializers.CharField(max_length=6, required=False, allow_blank=True)
+    contact_name = serializers.CharField(max_length=160, required=False, allow_blank=True)
+    contact_phone = serializers.CharField(max_length=32, required=False, allow_blank=True)
+    planned_count = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=9999)
+    date = serializers.DateField()
+    window_start = serializers.TimeField(required=False, allow_null=True)
+    window_end = serializers.TimeField(required=False, allow_null=True)
+    employee_id = serializers.IntegerField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=300, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        start, end = attrs.get("window_start"), attrs.get("window_end")
+        if start and end and end <= start:
+            raise serializers.ValidationError("Конец интервала раньше начала")
+        if not (attrs.get("client_id") or attrs.get("inn") or (attrs.get("name") or "").strip()):
+            raise serializers.ValidationError("Укажите заказчика: client_id, ИНН или название")
+        return attrs
+
+
+def _assignee(request, employee_id: int | None) -> Employee:
+    """Руководство назначает любого; поверитель — только себя."""
+    me = employee_of(request.user)
+    if employee_id:
+        if not is_manager(request.user) and (me is None or employee_id != me.pk):
+            raise PermissionDenied("Назначать другого сотрудника могут руководители и менеджеры")
+        return get_object_or_404(Employee, pk=employee_id, is_active=True)
+    if me is None:
+        raise ValidationError({"detail": "Выберите исполнителя"})
+    return me
+
+
+class PickupCreateView(APIView):
+    """POST /api/pickups/ — «забрать приборы у заказчика» адресом в дне поверителя.
+
+    Заказчик — по client_id, ИНН (своя база) или названию; адрес — присланный, иначе
+    юридический. Ответ — адрес (как в карточке выезда) + ``trip_id``/``trip_title``.
+    """
+
+    def post(self, request):
+        from apps.verification.api_orders import _client
+
+        payload = PickupSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        employee = _assignee(request, data.get("employee_id"))
+        with transaction.atomic():
+            if data.get("client_id"):
+                client = get_object_or_404(Client, pk=data["client_id"])
+            else:
+                inn = "".join(ch for ch in data.get("inn", "") if ch.isdigit())
+                client = _client({"inn": inn, "name": data.get("name", ""), "phone": data.get("contact_phone", "")})
+            item = service.StopInput(
+                address=data.get("address", ""), site_id=data.get("site_id"),
+                latitude=data.get("latitude"), longitude=data.get("longitude"),
+                fias_id=data.get("fias_id", ""), postal_code=data.get("postal_code", ""),
+                contact_name=data.get("contact_name", ""), contact_phone=data.get("contact_phone", ""),
+                planned_count=data.get("planned_count"), note=data.get("note", ""),
+            )
+            if not item.address.strip() and not item.site_id and not client.legal_address:
+                raise ValidationError({"detail": "Укажите адрес, откуда забрать приборы"})
+            stop = guarded(lambda: service.add_pickup(
+                employee, data["date"], client, item, window=(data.get("window_start"), data.get("window_end")),
+            ))
+        body = stop_data(service.stops_with_counts(stop.trip).get(pk=stop.pk))
+        body.update(trip_id=stop.trip_id, trip_title=stop.trip.title, employee=employee.full_name)
+        return Response(body, status=status.HTTP_201_CREATED)
+
+
+class TripStopPickupView(APIView):
+    """POST /api/trip-stops/{id}/pickup/ {"count"?: 12, "note"?: "…"} — «Забрал».
+
+    Адрес становится выполненным, заводится приёмка (наряд lab, «Приёмки») с этим заказчиком
+    и пометкой «привезено с выезда …». Повтор отдаёт ту же приёмку (200 вместо 201).
+    Ответ: {"order": наряд как в «Приёмках», "stop": адрес}.
+    """
+
+    def post(self, request, pk: int):
+        from apps.verification.api_workorders import WorkOrderSerializer
+
+        stop = get_object_or_404(TripStop.objects.select_related("trip"), pk=pk)
+        require_trip(request, stop.trip_id, write=True)
+        count = request.data.get("count")
+        if count not in (None, ""):
+            try:
+                count = int(count)
+            except (TypeError, ValueError):
+                raise ValidationError({"count": "Число приборов"}) from None
+            if not 0 < count < 10000:
+                raise ValidationError({"count": "Число приборов от 1 до 9999"})
+        else:
+            count = None
+        order, created = guarded(lambda: service.mark_picked_up(stop, count=count, note=str(request.data.get("note") or "")))
+        fresh = service.stops_with_counts(stop.trip).get(pk=stop.pk)
+        return Response(
+            {"order": WorkOrderSerializer(order).data, "stop": stop_data(fresh)},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class DeliverySerializer(serializers.Serializer):
+    date = serializers.DateField()
+    employee_id = serializers.IntegerField(required=False, allow_null=True)
+    window_start = serializers.TimeField(required=False, allow_null=True)
+    window_end = serializers.TimeField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=300, required=False, allow_blank=True)
+
+
+class OrderDeliveryView(APIView):
+    """POST /api/orders/{id}/delivery/ — обратный выезд «вернуть приборы» после поверки.
+
+    Адрес — тот, откуда забирали (или юридический). Отметка «выполнен» у этого адреса
+    сама ставит приёмке «выдано заказчику». Повтор — тот же ждущий адрес (200).
+    """
+
+    def post(self, request, pk: int):
+        from apps.verification.api_orders import _order
+
+        order = _order(request, pk)
+        payload = DeliverySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        employee = _assignee(request, data.get("employee_id"))
+        stop, created = guarded(lambda: service.add_delivery(
+            order, employee, data["date"], window=(data.get("window_start"), data.get("window_end")),
+            note=data.get("note", ""),
+        ))
+        body = stop_data(service.stops_with_counts(stop.trip).get(pk=stop.pk))
+        body.update(trip_id=stop.trip_id, trip_title=stop.trip.title, employee=employee.full_name)
+        return Response(body, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)

@@ -26,6 +26,7 @@ from apps.catalog.api_types import (
     SiTypePresetsView,
 )
 from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
+from apps.core.today import TodayView
 from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import frontend_index, frontend_root_file, healthz
 from apps.logistics.tiles import TileView
@@ -33,6 +34,7 @@ from apps.logistics import api_dispatch
 from apps.hub.api import (
     AddressSuggestView,
     CaptchaConfigView,
+    RequestBulkView,
     RequestConfirmView,
     RequestCreateView,
     RequestListView,
@@ -66,7 +68,7 @@ from apps.verification.api_journal import (
     NumberingPreviewView,
     SignProtocolsView,
 )
-from apps.verification.api_field import WorkOrderVerificationsView
+from apps.verification.api_field import OrderInstrumentsBulkView, WorkOrderVerificationsView
 from apps.verification.api_orders import (
     ClientLookupView,
     ClientSuggestView,
@@ -134,6 +136,7 @@ urlpatterns = [
     path("api/catalog/families/", FamilyOptionsView.as_view(), name="family_options"),
     path("api/core/employees/", EmployeeListView.as_view(), name="employee_list"),
     path("api/core/employees/me/", MeView.as_view(), name="me"),
+    path("api/core/today/", TodayView.as_view(), name="core_today"),
     # Сотрудники и учётные записи — без Django-админки (apps/core/staff.py)
     path("api/core/staff/", api_dispatch.StaffListView.as_view(), name="staff_list"),
     path("api/core/staff/<int:pk>/", api_dispatch.StaffDetailView.as_view(), name="staff_detail"),
@@ -216,6 +219,7 @@ urlpatterns = [
     path("api/hub/captcha-config/", CaptchaConfigView.as_view(), name="captcha_config"),
     path("api/hub/requests/", RequestCreateView.as_view(), name="request_create"),
     path("api/hub/requests/list/", RequestListView.as_view(), name="request_list"),
+    path("api/hub/requests/bulk/", RequestBulkView.as_view(), name="request_bulk"),
     path("api/hub/requests/<int:pk>/route/", RequestRouteView.as_view(), name="request_route"),
     path("api/hub/requests/<int:pk>/confirm/", RequestConfirmView.as_view(), name="request_confirm"),
     path("api/hub/requests/<int:pk>/reject/", RequestRejectView.as_view(), name="request_reject"),
@@ -241,6 +245,7 @@ urlpatterns = [
     path("api/orders/", OrderCreateView.as_view(), name="order_create"),
     path("api/orders/<int:pk>/", OrderDetailView.as_view(), name="order_detail"),
     path("api/orders/<int:pk>/issue/", OrderIssueView.as_view(), name="order_issue"),
+    path("api/orders/<int:pk>/instruments/bulk/", OrderInstrumentsBulkView.as_view(), name="order_instruments_bulk"),
     path("api/orders/<int:pk>/act/<str:kind>.pdf", OrderActView.as_view(), name="order_act"),
     # Бланк с QR и распознавание (второй срез офлайна, claude/scans.md)
     path(

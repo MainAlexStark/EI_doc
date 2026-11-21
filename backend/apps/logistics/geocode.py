@@ -21,6 +21,8 @@ import re
 import requests
 from django.conf import settings
 
+from apps.core import cache
+
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
 
 logger = logging.getLogger(__name__)
@@ -139,6 +141,14 @@ def geocode(address: str, hint: str = "") -> Point | None:
     current = mode()
     if current == "off" or len(address) < 5:
         return None
+    # Найденная точка — на месяц: адреса одни и те же из захода в заход. «Не нашли» не
+    # запоминаем — геокодер мог быть недоступен.
+    found = cache.remember(cache.key("geocode", current, address.casefold(), hint.casefold()), 30 * 24 * 3600,
+                           lambda: _lookup(current, address, hint))
+    return tuple(found) if found else None
+
+
+def _lookup(current: str, address: str, hint: str) -> Point | None:
     if current in ("auto", "dadata"):
         point = _dadata(address)
         if point or current == "dadata":

@@ -14,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.core import cache
 from apps.arshin.fif import FifClient, FifUnavailable, mark_ambiguous
 from apps.catalog.models import MeasurementFamily, PricingSettings, SiType
 from apps.catalog.registry_year import fits_year, parse_year
@@ -156,9 +157,18 @@ class FamilyOptionsView(APIView):
     def get(self, request):
         # Счётчики (те, что требуют времени визита) — первыми: с ними приходят чаще всего.
         # «Прочие СИ» — служебное семейство для неугаданных типов, заявителю его не показываем.
+        # Самый частый анонимный запрос (каждое открытие формы) — из кэша; сбрасывается
+        # сигналом при правке семейств и цен (apps.catalog.apps).
+        return Response(cache.remember(FAMILY_OPTIONS_KEY, 600, self._build, keep=lambda value: True))
+
+    @staticmethod
+    def _build() -> dict:
         families = MeasurementFamily.objects.exclude(code="other").order_by("-requires_time_slot", "name")
         settings_obj = PricingSettings.current()
-        return Response({
+        return {
             "families": FamilyOptionSerializer(families, many=True).data,
             "priority_discount_percent": settings_obj.priority_discount_percent,
-        })
+        }
+
+
+FAMILY_OPTIONS_KEY = "ei:catalog:family-options:v1"

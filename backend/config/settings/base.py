@@ -107,7 +107,11 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD"),
         "HOST": env("DB_HOST", default="localhost"),
         "PORT": env("DB_PORT", default="5432"),
-        "CONN_MAX_AGE": 60,
+        # Постоянные соединения: под нагрузкой не открывать новое на каждый запрос.
+        # CONN_HEALTH_CHECKS — перед повторным использованием соединение проверяется,
+        # иначе после рестарта postgres первый запрос каждого потока падал бы 500.
+        "CONN_MAX_AGE": env.int("DB_CONN_MAX_AGE", default=60),
+        "CONN_HEALTH_CHECKS": True,
     }
 }
 
@@ -127,7 +131,18 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.AnonRateThrottle",),
-    "DEFAULT_THROTTLE_RATES": {"anon": "20/hour", "address_suggest": "120/min", "map_tiles": "3000/min"},
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": env("THROTTLE_ANON", default="20/hour"),
+        # Публичная форма заявки — свой бюджет на IP: вход в систему (тоже анонимный)
+        # и подсказки не съедают лимит формы, а бот не заваливает очередь заявками.
+        "public_request": env("THROTTLE_PUBLIC_REQUEST", default="20/hour"),
+        "public_request_burst": env("THROTTLE_PUBLIC_REQUEST_BURST", default="5/min"),
+        "address_suggest": "120/min",
+        "map_tiles": "3000/min",
+    },
+    # За Caddy REMOTE_ADDR — адрес прокси, и без этого все посетители сайта делили бы
+    # один анонимный лимит на всех. 1 — один доверенный прокси перед gunicorn (prod).
+    "NUM_PROXIES": env.int("NUM_PROXIES", default=0),
     "PAGE_SIZE": 50,
 }
 
@@ -336,9 +351,13 @@ CELERY_TASK_ROUTES = {"apps.assistant.tasks.*": {"queue": "assistant"}}
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": env("REDIS_URL", default="redis://localhost:6379/1"),
+        "LOCATION": env("REDIS_CACHE_URL", default=env("REDIS_URL", default="redis://localhost:6379/1")),
+        "TIMEOUT": 300,
     }
 }
+# Ответы внешних сервисов (DaData: реквизиты по ИНН, подсказки, геокодер) кэшируются в
+# Redis — apps.core.cache.remember. В тестах выключено, чтобы моки не «залипали».
+EXTERNAL_CACHE_ENABLED = env.bool("EXTERNAL_CACHE_ENABLED", default=True)
 
 LOGGING = {
     "version": 1,

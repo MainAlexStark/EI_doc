@@ -146,6 +146,23 @@ osrm (с этапа 4) — и общий Caddy на машину вместо с
 | **4** | Карта, планировщик командировок, VRP-маршруты |
 | **5** | Аршин, госзакупки |
 
+## Нагрузка (21.11.2026)
+
+- Списки (`/api/work-orders/`, `/api/hub/requests/list/`, `/api/trips/`, `/api/procurements/`) — без N+1
+  (счётчики аннотациями), массив с потолком `?limit=` (200, max 1000) или страница `?page_size=&page=` →
+  `{count, page, page_size, next_page, results}` (`apps.core.paging`). Тесты на число запросов —
+  `apps/core/tests/test_load.py`.
+- Индексы на полях фильтров: наряды (вид+статус+выдача, исполнитель+дата), поверки (поверитель+статус,
+  наряд+статус), адреса (день+отметка), выезды (вид+старший+дата), заводской номер.
+- Postgres: `CONN_MAX_AGE` (`DB_CONN_MAX_AGE`, 60 с) + `CONN_HEALTH_CHECKS`.
+- Redis-кэш: ответы DaData (ИНН — неделя, подсказки — сутки), геокодер (месяц), список семейств для формы
+  (сброс сигналом) — `apps.core.cache`, без Redis работает напрямую.
+- Публичная форма заявки — свой лимит на IP (`public_request` 20/час, `public_request_burst` 5/мин);
+  IP за Caddy — из `X-Forwarded-For` (`NUM_PROXIES`, в prod 1).
+- gunicorn — `backend/config/gunicorn.py`: `GUNICORN_WORKERS`, `GUNICORN_THREADS` (gthread), `GUNICORN_TIMEOUT`,
+  `GUNICORN_MAX_REQUESTS`; `/healthz?deep=1` проверяет ещё и Redis; healthcheck в docker-compose.
+- `GET /api/core/today/` — сводка главного экрана за ≤ 12 запросов.
+
 ## Чего не делать
 
 Микросервисы · нативные мобильные приложения · Excel или LibreOffice на сервере ·

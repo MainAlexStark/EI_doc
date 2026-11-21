@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from django.conf import settings
 from django.db import models
 from simple_history.models import HistoricalRecords
 
@@ -59,7 +60,8 @@ class Procurement(models.Model):
     amount = models.DecimalField("цена контракта, ₽", max_digits=12, decimal_places=2, null=True, blank=True)
     eis_url = models.URLField("ссылка на закупку", max_length=400, blank=True)
     status = models.CharField(
-        "состояние", max_length=10, choices=ProcurementStatus.choices, default=ProcurementStatus.ACTIVE
+        "состояние", max_length=10, choices=ProcurementStatus.choices, default=ProcurementStatus.ACTIVE,
+        db_index=True,
     )
     responsible = models.ForeignKey(
         "core.Employee", on_delete=models.SET_NULL, null=True, blank=True,
@@ -70,6 +72,17 @@ class Procurement(models.Model):
         help_text="Кто встречает и подписывает акты: должность, ФИО, телефон",
     )
     note = models.TextField("примечание", blank=True)
+    # Выжимка из документов закупки (ТЗ, контракт): требования, перечень СИ, сроки, допуск,
+    # контакты, штрафы. Заполняет ассистент карточкой «Подтвердить» или человек; формат —
+    # apps.logistics.procurement_docs.clean_summary. Прежние версии — в истории закупки.
+    summary = models.JSONField("выжимка из документов", default=dict, blank=True)
+    summary_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="выжимку сохранил",
+    )
+    summary_at = models.DateTimeField("выжимка сохранена", null=True, blank=True)
+    summary_via_assistant = models.BooleanField("выжимка от ассистента", default=False)
+    summary_sources = models.JSONField("откуда выжимка", default=list, blank=True)
     created_at = models.DateTimeField("заведена", auto_now_add=True)
 
     history = HistoricalRecords()
@@ -130,8 +143,19 @@ class DocumentKind(models.TextChoices):
     OTHER = "other", "Другое"
 
 
+class TextStatus(models.TextChoices):
+    PENDING = "pending", "Читается"
+    DONE = "done", "Текст извлечён"
+    EMPTY = "empty", "Без текста (скан)"
+    FAILED = "failed", "Не прочитан"
+
+
 class ProcurementDocument(models.Model):
-    """Файл по закупке. Отдаётся только через вьюху с проверкой прав (django-sendfile)."""
+    """Файл по закупке. Отдаётся только через вьюху с проверкой прав (django-sendfile).
+
+    Текст (pdf/docx/xlsx) извлекается в фоне после загрузки — по нему ищут человек
+    и ассистент (apps.logistics.procurement_docs).
+    """
 
     procurement = models.ForeignKey(
         Procurement, on_delete=models.CASCADE, related_name="documents", verbose_name="закупка"
@@ -143,6 +167,12 @@ class ProcurementDocument(models.Model):
         "core.Employee", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="+", verbose_name="загрузил",
     )
+    text = models.TextField("текст документа", blank=True)
+    text_status = models.CharField(
+        "текст", max_length=8, choices=TextStatus.choices, default=TextStatus.PENDING,
+    )
+    text_error = models.CharField("почему не прочитан", max_length=300, blank=True)
+    text_extracted_at = models.DateTimeField("текст извлечён", null=True, blank=True)
     created_at = models.DateTimeField("загружен", auto_now_add=True)
 
     class Meta:
@@ -264,7 +294,11 @@ class Trip(models.Model):
         verbose_name = "выезд"
         verbose_name_plural = "выезды"
         ordering = ["-date_start", "-created_at"]
-        indexes = [models.Index(fields=["status", "date_start"])]
+        indexes = [
+            models.Index(fields=["status", "date_start"]),
+            # День поверителя в городе ищется по виду, старшему и дате на каждую заявку.
+            models.Index(fields=["kind", "lead", "date_start"], name="trip_kind_lead_date"),
+        ]
 
     def __str__(self) -> str:
         return self.title
@@ -279,6 +313,14 @@ class Trip(models.Model):
         if not self.procurement_id:
             return None
         return Trip.objects.filter(procurement_id=self.procurement_id, pk__lte=self.pk).count()
+
+
+class StopPurpose(models.TextChoices):
+    """Зачем едем по адресу. Забор и возврат — режим «Город»: коробка с предприятия."""
+
+    VISIT = "visit", "Поверка на месте"
+    PICKUP = "pickup", "Забрать приборы"
+    DELIVERY = "delivery", "Вернуть приборы"
 
 
 class StopStatus(models.TextChoices):
@@ -309,6 +351,14 @@ class TripStop(models.Model):
         related_name="trip_stop", verbose_name="наряд",
     )
     status = models.CharField("состояние", max_length=10, choices=StopStatus.choices, default=StopStatus.PLANNED)
+    purpose = models.CharField(
+        "зачем едем", max_length=8, choices=StopPurpose.choices, default=StopPurpose.VISIT,
+    )
+    lab_order = models.ForeignKey(
+        "verification.WorkOrder", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="logistic_stops", verbose_name="приёмка",
+        help_text="Забор — приёмка, заведённая из этого адреса; возврат — приёмка, которую везём обратно",
+    )
     planned_date = models.DateField("день", null=True, blank=True)
     planned_count = models.PositiveSmallIntegerField(
         "ожидается приборов", null=True, blank=True
@@ -338,6 +388,10 @@ class TripStop(models.Model):
         verbose_name = "адрес командировки"
         verbose_name_plural = "адреса командировки"
         ordering = ["position", "id"]
+        indexes = [
+            # Панель, карта выездов и «Сегодня»: адреса на день по отметке.
+            models.Index(fields=["planned_date", "status"], name="tripstop_date_status"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.trip}: {self.site}"

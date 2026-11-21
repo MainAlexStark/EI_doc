@@ -172,11 +172,11 @@ DONE_TEXT = {
 
 def _registry() -> tuple[dict, dict]:
     """Свои исполнители + личный кабинет + администрирование — cabinet и admin_tools импортируют этот модуль."""
-    from apps.assistant import admin_tools, cabinet
+    from apps.assistant import admin_tools, cabinet, procurement_tools
 
     return (
-        {**EXECUTORS, **cabinet.EXECUTORS, **admin_tools.EXECUTORS},
-        {**DONE_TEXT, **cabinet.DONE_TEXT, **admin_tools.DONE_TEXT},
+        {**EXECUTORS, **cabinet.EXECUTORS, **admin_tools.EXECUTORS, **procurement_tools.EXECUTORS},
+        {**DONE_TEXT, **cabinet.DONE_TEXT, **admin_tools.DONE_TEXT, **procurement_tools.DONE_TEXT},
     )
 
 

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import re
 
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
@@ -17,12 +19,26 @@ from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
 from apps.catalog.models import MeasurementFamily
+from apps.core import paging
 from apps.core.models import Employee
+from apps.core.net import client_ip
 from apps.hub import captcha, routing, service
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
 from apps.hub.models import Request, RequestItem, RequestStatus
 from apps.hub.pricing import estimate
 from apps.verification.models import Client, Site, WorkOrder
+
+
+class PublicRequestThrottle(AnonRateThrottle):
+    """Заявок с одного адреса — не больше ``public_request`` (по умолчанию 20 в час)."""
+
+    scope = "public_request"
+
+
+class PublicRequestBurstThrottle(AnonRateThrottle):
+    """И не пачкой: бот, отправляющий заявки подряд, упрётся через несколько штук."""
+
+    scope = "public_request_burst"
 
 
 class AddressSuggestThrottle(AnonRateThrottle):
@@ -189,7 +205,10 @@ class RequestCreateView(APIView):
     цена обновлялась вживую без похода на сервер при каждом клике.
     """
 
-    permission_classes = [AllowAny]  # троттлинг — DEFAULT_THROTTLE_RATES.anon = 20/час
+    permission_classes = [AllowAny]
+    # Свой бюджет на IP (DEFAULT_THROTTLE_RATES.public_request / _burst); адрес за Caddy —
+    # из X-Forwarded-For (REST_FRAMEWORK.NUM_PROXIES), иначе все посетители делили бы один лимит.
+    throttle_classes = [PublicRequestBurstThrottle, PublicRequestThrottle]
 
     @extend_schema(request=RequestCreateSerializer, responses={201: None})
     def post(self, request):
@@ -206,7 +225,7 @@ class RequestCreateView(APIView):
         # Пойманного honeypot'ом бота капчей не перепроверяем — он и так уже
         # помечен спамом ниже и сохраняется для статистики, как и раньше.
         if not honeypot_tripped and captcha.is_configured():
-            if not captcha.verify(captcha_token, remote_ip=request.META.get("REMOTE_ADDR", "")):
+            if not captcha.verify(captcha_token, remote_ip=client_ip(request)):
                 return Response(
                     {"detail": "Капча не пройдена — обновите её на форме и попробуйте снова"},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -235,7 +254,7 @@ class RequestCreateView(APIView):
 
         obj = Request.objects.create(
             source="site",
-            ip_address=request.META.get("REMOTE_ADDR"),
+            ip_address=client_ip(request) or None,
             honeypot_tripped=honeypot_tripped,
             status=RequestStatus.SPAM if honeypot_tripped else RequestStatus.NEW,
             district=None if honeypot_tripped else routing.resolve_district(district_name),
@@ -296,7 +315,10 @@ class RequestSerializer(serializers.Serializer):
 
 
 class RequestListView(APIView):
-    """GET /api/hub/requests/?status=&district=&assigned_employee="""
+    """GET /api/hub/requests/?status=&district=&assigned_employee=&q=
+
+    Массив до ``limit`` (200) или страница при ``?page_size=`` — см. apps.core.paging.
+    """
 
     def get(self, request):
         qs = Request.objects.select_related(
@@ -311,7 +333,12 @@ class RequestListView(APIView):
         assigned_param = request.query_params.get("assigned_employee")
         if assigned_param:
             qs = qs.filter(assigned_employee_id=assigned_param)
-        return Response(RequestSerializer(qs[:200], many=True).data)
+        q = (request.query_params.get("q") or "").strip()
+        if q:
+            qs = qs.filter(
+                Q(contact_name__icontains=q) | Q(contact_phone__icontains=q) | Q(address__icontains=q)
+            )
+        return paging.respond(request, qs, lambda rows: RequestSerializer(rows, many=True).data)
 
 
 class RequestRouteView(APIView):
@@ -376,6 +403,113 @@ class RequestRejectView(APIView):
             obj, reason=payload.validated_data.get("reason", ""), spam=payload.validated_data["spam"],
         )
         return Response(RequestSerializer(obj).data)
+
+
+BULK_ACTIONS = ("confirm", "assign", "reject", "spam")
+BULK_MAX = 100
+
+
+class RequestBulkSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=BULK_ACTIONS)
+    ids = serializers.ListField(child=serializers.IntegerField(), min_length=1, max_length=BULK_MAX)
+    employee_id = serializers.IntegerField(required=False, allow_null=True)
+    scheduled_date = serializers.DateField(required=False, allow_null=True)
+    scheduled_time = serializers.TimeField(required=False, allow_null=True)
+    reason = serializers.CharField(max_length=250, required=False, allow_blank=True)
+
+
+class RequestBulkView(APIView):
+    """POST /api/hub/requests/bulk/ — разбор входящих пачкой (режим «Заявки»).
+
+    {"action": "confirm"|"assign"|"reject"|"spam", "ids": [..], "employee_id"?, "scheduled_date"?,
+     "scheduled_time"?, "reason"?}
+
+    * confirm — наряд по каждой заявке; исполнитель — employee_id, иначе подобранный роутингом;
+    * assign  — только назначить исполнителя (заявка «Подобран исполнитель»), наряд не заводится;
+    * reject / spam — отклонить с причиной / пометить спамом.
+
+    Каждая заявка — своя транзакция: одна неудачная не откатывает остальные. Повтор того же
+    действия безопасен — уже подтверждённая/отклонённая заявка просто попадает в ``skipped``.
+    Ответ: {"done": [id], "skipped": [{"id", "reason"}], "errors": [{"id", "error"}], "items": [заявка]}.
+    """
+
+    def post(self, request):
+        from apps.logistics.dispatch import can_control
+
+        if not can_control(request.user):
+            return Response({"detail": "Разбирать заявки пачкой могут руководство, метролог и менеджер"},
+                            status=status.HTTP_403_FORBIDDEN)
+        payload = RequestBulkSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        action = data["action"]
+        employee = None
+        if data.get("employee_id"):
+            employee = get_object_or_404(Employee, pk=data["employee_id"], is_active=True)
+        if action == "assign" and employee is None:
+            raise serializers.ValidationError({"employee_id": "Кому назначить?"})
+
+        ids = list(dict.fromkeys(data["ids"]))
+        found = {obj.pk: obj for obj in Request.objects.select_related("suggested_employee").filter(pk__in=ids)}
+        done, skipped, errors = [], [], []
+        for pk in ids:
+            obj = found.get(pk)
+            if obj is None:
+                errors.append({"id": pk, "error": "Заявки нет"})
+                continue
+            try:
+                outcome = self._apply(obj, action, employee, data)
+            except (service.RequestActionError, ValueError) as exc:
+                errors.append({"id": pk, "error": str(exc)})
+                continue
+            if outcome:
+                skipped.append({"id": pk, "reason": outcome})
+            else:
+                done.append(pk)
+        items = Request.objects.filter(pk__in=ids).select_related(
+            "district", "suggested_employee", "assigned_employee"
+        ).prefetch_related("items__family")
+        return Response({
+            "done": done, "skipped": skipped, "errors": errors,
+            "items": RequestSerializer(items, many=True).data,
+        })
+
+    @staticmethod
+    def _apply(obj: Request, action: str, employee, data: dict) -> str:
+        """Пусто — сделано; текст — почему пропущено (уже в нужном состоянии)."""
+        from django.db import transaction
+
+        closed = (RequestStatus.CONFIRMED, RequestStatus.DONE, RequestStatus.CANCELLED)
+        if action == "confirm":
+            if obj.status in closed:
+                return "уже подтверждена"
+            if obj.status in (RequestStatus.REJECTED, RequestStatus.SPAM):
+                return "отклонена — сначала верните её"
+            who = employee or obj.suggested_employee
+            if who is None:
+                raise ValueError("Не подобран исполнитель — укажите employee_id")
+            with transaction.atomic():
+                service.confirm_request(
+                    obj, employee=who, scheduled_date=data.get("scheduled_date"),
+                    scheduled_time=data.get("scheduled_time"),
+                )
+            return ""
+        if action == "assign":
+            if obj.status not in (RequestStatus.NEW, RequestStatus.ROUTED):
+                return "заявка уже разобрана"
+            obj.suggested_employee = employee
+            obj.status = RequestStatus.ROUTED
+            obj.routed_at = timezone.now()
+            obj.save(update_fields=["suggested_employee", "status", "routed_at"])
+            return ""
+        spam = action == "spam"
+        target = RequestStatus.SPAM if spam else RequestStatus.REJECTED
+        if obj.status == target:
+            return "уже отмечена"
+        if obj.status in closed:
+            raise ValueError("По заявке уже есть наряд — отмените наряд, а не заявку")
+        service.reject_request(obj, reason=data.get("reason", ""), spam=spam)
+        return ""
 
 
 def _notify_work_order_assigned(work_order: WorkOrder) -> None:

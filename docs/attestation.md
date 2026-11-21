@@ -129,6 +129,19 @@
 `POST …/<id>/approve-plan/` · `POST …/<id>/sign/ {protocol_date}` · `GET …/<id>/protocol.docx|pdf` ·
 `GET /api/attestations/programs/`.
 
+## Шаблоны плана по виду ИО (21.11.2026)
+
+`AttestationProgram` — это и есть шаблон: вид оборудования, программа/методика (документ), план JSON,
+состояние **черновик → проверен** (`needs_review`, `reviewed_by`, `reviewed_at`), откуда сделан
+(`source_attestation`). Новый ИО того же вида заводится применением шаблона — план копируется,
+оборудование, комиссия и СИ берутся из запроса. План проверенного шаблона в новой аттестации считается
+проверенным; черновик — ждёт метролога, как обычно. Правка шаблона не метрологом снимает отметку о проверке.
+
+`GET/POST /api/attestations/programs/?equipment_kind=&status=draft|reviewed&all=1&plan=0` ·
+`GET/PATCH …/programs/<id>/` · `POST …/programs/<id>/approve/` (метролог) ·
+`POST …/programs/<id>/apply/ {equipment, kind?, commission?, instruments?, texts?}` → аттестация ·
+`POST /api/attestations/<id>/save-as-program/ {title?, equipment_kind?, note?}` — шаблон из плана аттестации.
+
 ## Дальше
 
 - Программы аттестации компании загрузить в «Программы аттестации» (админка) и в файлы ассистента;

@@ -103,3 +103,33 @@ DaData часть плановых адресов останется без то
 Добавление адреса без связи (сейчас нужна сеть; поверки по уже заведённому адресу —
 офлайн как раньше), предзагрузка тайлов района, VRP/OSRM, планирование от накопленного
 спроса и истекающих МПИ, резервирование эталонов, PDF-пакет на выезд, расходы.
+
+# 21.11.2026: забрать коробку с предприятия, документы закупки
+
+## «Город»: забор и возврат приборов
+
+У адреса дня (`TripStop`) появилось «зачем едем» — `purpose`: `visit` (поверка на месте), `pickup`
+(забрать приборы у юрлица), `delivery` (вернуть). `lab_order` — приёмка, связанная с адресом.
+
+- `POST /api/pickups/ {client_id | inn+name, address?, contact_name, contact_phone, planned_count, date,
+  window_start?, window_end?, employee_id?, note?}` — адрес в дне поверителя (адрес по умолчанию —
+  юридический). Поверитель записывает только себя.
+- `POST /api/trip-stops/{id}/pickup/ {count?, note?}` — «Забрал»: адрес выполнен, наряд выезда закрыт,
+  заводится приёмка (`kind=lab`, «привезено с выезда …»). Повтор отдаёт ту же приёмку.
+- `POST /api/orders/{id}/delivery/ {date, employee_id?, window_start?, window_end?}` — обратный выезд;
+  отметка «выполнен» у него ставит приёмке «выдано». У приёмки в списке нарядов — `pickup` и `delivery`.
+
+## «Закупки»: документы для агента и человека
+
+Текст загруженных документов (pdf/docx/xlsx, `apps.assistant.extract`) читается в фоне (Celery
+`extract_procurement_document`, без брокера — сразу), хранится в `ProcurementDocument.text`; сканы без
+текстового слоя помечаются. Старые документы — `manage.py extract_procurement_texts`.
+
+`GET /api/procurements/{id}/documents/` · `GET /api/procurement-documents/{id}/text/?offset=&max_chars=` ·
+`POST /api/procurement-documents/{id}/extract/` · `GET /api/procurements/{id}/search/?q=` ·
+`GET/PUT /api/procurements/{id}/summary/` — выжимка (требования, перечень СИ с адресами, сроки/этапы,
+пропуска и допуск, контакты, штрафы; кто и когда сохранил) · `POST /api/procurements/{id}/visit-plan/
+{per_day, days_per_trip, start, apply}` — план заходов по перечню СИ, `apply` заводит командировки.
+
+Ассистент: `ei_procurement_documents`, `ei_procurement_search`, `ei_procurement_summary_propose`,
+`ei_procurement_visits_propose` — запись только карточкой «Подтвердить», права как у закупок.

@@ -18,10 +18,12 @@ from simple_history.models import HistoricalRecords
 
 
 class AttestationProgram(models.Model):
-    """Типовая программа и методика аттестации — заготовка плана для вида ИО.
+    """Шаблон плана аттестации по виду ИО: типовая программа и методика — заготовка плана.
 
-    Ассистент берёт её за основу и уточняет по эксплуатационной документации
-    конкретного оборудования (режимы, допуски).
+    Переиспользуется для новых ИО того же вида: «применить к новому ИО» заводит аттестацию
+    с этим планом (``service.apply_program``). Делается из документов (ассистент), из
+    плана уже проведённой аттестации (``service.program_from_attestation``) или руками.
+    Состояние: черновик (``needs_review``) → проверен метрологом (``reviewed_by``/``reviewed_at``).
     """
 
     title = models.CharField("название", max_length=250, unique=True)
@@ -50,6 +52,15 @@ class AttestationProgram(models.Model):
         related_name="+", verbose_name="завёл",
     )
     created_via_assistant = models.BooleanField("заведена ассистентом", default=False)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="проверил",
+    )
+    reviewed_at = models.DateTimeField("проверен", null=True, blank=True)
+    source_attestation = models.ForeignKey(
+        "EquipmentAttestation", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="derived_programs", verbose_name="сделан по аттестации",
+    )
 
     history = HistoricalRecords()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -60,22 +60,130 @@ def _fail(exc: Exception) -> Response:
     return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+def program_data(program: AttestationProgram, *, with_plan: bool = True) -> dict:
+    data = {
+        "id": program.id, "title": program.title, "equipment_kind": program.equipment_kind, "note": program.note,
+        "needs_review": program.needs_review, "status": "draft" if program.needs_review else "reviewed",
+        "reviewed_by": _user_name(program.reviewed_by), "reviewed_at": program.reviewed_at,
+        "created_by": _user_name(program.created_by), "created_via_assistant": program.created_via_assistant,
+        "source_attestation_id": program.source_attestation_id, "is_active": program.is_active,
+        "used": getattr(program, "used", None), "sources": program.sources,
+    }
+    if with_plan:
+        data["plan"] = program.plan
+    return data
+
+
 class ProgramListView(APIView):
+    """GET/POST /api/attestations/programs/ — шаблоны планов аттестации по виду ИО.
+
+    GET ?equipment_kind=термостат&status=draft|reviewed&all=1 (с выключенными)&plan=0 (без плана).
+    POST {"title", "equipment_kind", "plan", "note"?} — завести шаблон руками.
+    """
+
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response([
-            {"id": p.id, "title": p.title, "equipment_kind": p.equipment_kind, "note": p.note,
-             "needs_review": p.needs_review, "plan": p.plan}
-            for p in AttestationProgram.objects.filter(is_active=True)
-        ])
+        qs = AttestationProgram.objects.select_related("reviewed_by", "created_by").annotate(used=Count("attestations"))
+        if request.query_params.get("all") != "1":
+            qs = qs.filter(is_active=True)
+        kind = (request.query_params.get("equipment_kind") or "").strip()
+        if kind:
+            qs = qs.filter(Q(equipment_kind__icontains=kind) | Q(title__icontains=kind))
+        state = request.query_params.get("status")
+        if state in ("draft", "reviewed"):
+            qs = qs.filter(needs_review=state == "draft")
+        with_plan = request.query_params.get("plan") != "0"
+        return Response([program_data(p, with_plan=with_plan) for p in qs])
+
+    def post(self, request):
+        try:
+            program = service.save_program(request.user, request.data, via_assistant=False)
+        except service.AttestationError as exc:
+            return _fail(exc)
+        return Response(program_data(program), status=status.HTTP_201_CREATED)
+
+
+class ProgramDetailView(APIView):
+    """GET/PATCH /api/attestations/programs/{id}/ — шаблон; PATCH — title, equipment_kind, plan, note, is_active."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        return Response(program_data(get_object_or_404(AttestationProgram, pk=pk)))
+
+    def patch(self, request, pk):
+        program = get_object_or_404(AttestationProgram, pk=pk)
+        if set(request.data) == {"is_active"}:
+            if not service.can_edit(request.user):
+                raise PermissionDenied("Нет права менять шаблоны аттестации")
+            program.is_active = bool(request.data["is_active"])
+            program.save(update_fields=["is_active"])
+            return Response(program_data(program))
+        merged = {"title": program.title, "equipment_kind": program.equipment_kind, "plan": program.plan,
+                  "note": program.note, **{k: v for k, v in request.data.items() if k in ("title", "equipment_kind", "plan", "note")}}
+        try:
+            program = service.save_program(request.user, merged, sources=program.sources, program_id=program.pk,
+                                           via_assistant=program.created_via_assistant)
+        except service.AttestationError as exc:
+            return _fail(exc)
+        return Response(program_data(program))
+
+
+class ProgramApproveView(APIView):
+    """POST /api/attestations/programs/{id}/approve/ — метролог проверил шаблон."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        program = service.approve_program(get_object_or_404(AttestationProgram, pk=pk), request.user)
+        return Response(program_data(program))
+
+
+class ProgramApplyView(APIView):
+    """POST /api/attestations/programs/{id}/apply/ — новая аттестация ИО по шаблону.
+
+    {"equipment": {name, serial_number, manufacturer, year, owner, location, inventory_number},
+     "kind"?: primary|periodic|repeat, "commission"?, "instruments"?, "texts"?} → карточка аттестации (201).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        program = get_object_or_404(AttestationProgram, pk=pk)
+        data = {k: v for k, v in request.data.items() if k in ("equipment", "kind", "commission", "instruments", "texts")}
+        try:
+            att = service.apply_program(program, request.user, data)
+        except service.AttestationError as exc:
+            return _fail(exc)
+        return Response(detail(att, request.user), status=status.HTTP_201_CREATED)
+
+
+class SaveAsProgramView(APIView):
+    """POST /api/attestations/{id}/save-as-program/ {"title"?, "equipment_kind"?, "note"?} — шаблон из плана аттестации."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        att = get_object_or_404(EquipmentAttestation, pk=pk)
+        try:
+            program = service.program_from_attestation(
+                att, request.user, title=str(request.data.get("title") or ""),
+                equipment_kind=str(request.data.get("equipment_kind") or ""), note=str(request.data.get("note") or ""),
+            )
+        except service.AttestationError as exc:
+            return _fail(exc)
+        return Response(program_data(program), status=status.HTTP_201_CREATED)
 
 
 class AttestationListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = EquipmentAttestation.objects.all()
+        qs = EquipmentAttestation.objects.only(
+            "id", "number", "year", "status", "kind", "equipment", "performed_on", "protocol_date", "suitable",
+            "plan_approved_at", "created_via_assistant", "created_at",
+        )
         q = (request.query_params.get("q") or "").strip()
         for word in q.split():
             qs = qs.filter(

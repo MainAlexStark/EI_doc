@@ -18,6 +18,8 @@ from typing import Any
 import requests
 from django.conf import settings
 
+from apps.core import cache
+
 logger = logging.getLogger(__name__)
 
 SUGGEST_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address"
@@ -53,6 +55,12 @@ class DaDataClient:
         if not self.is_configured or len(query) < 3:
             return []
 
+        rows = cache.remember(cache.key("dadata:address", query.casefold(), limit), 24 * 3600,
+                              lambda: self._fetch(query, limit))
+        return [self._parse(item) for item in rows if isinstance(item, dict)]
+
+    def _fetch(self, query: str, limit: int) -> list[dict]:
+        """Сырые подсказки DaData. Ошибка — исключение (в кэш не попадает)."""
         try:
             response = requests.post(
                 SUGGEST_URL,
@@ -71,7 +79,7 @@ class DaDataClient:
         except ValueError as exc:
             raise AddressSuggestUnavailable("Подсказка адресов вернула не JSON") from exc
 
-        return [self._parse(item) for item in payload.get("suggestions", []) if isinstance(item, dict)]
+        return [item for item in payload.get("suggestions", []) if isinstance(item, dict)]
 
     @staticmethod
     def _parse(item: dict) -> AddressSuggestion:

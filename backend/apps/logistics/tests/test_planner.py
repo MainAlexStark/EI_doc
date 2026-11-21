@@ -185,7 +185,11 @@ class DgisMatrixTests(PlannerBase):
             {"source_id": i, "target_id": j, "status": "OK", "duration": 600 + 60 * (i + j), "distance": 1000 * abs(i - j)}
             for i in range(3) for j in range(3) if i != j
         ]
-        with mock.patch("apps.logistics.matrix.requests.post", return_value=self.reply(routes=routes)) as post:
+        # «Сейчас» зафиксировано за сутки до выезда: тип матрицы зависит от того, далеко ли
+        # выезд от текущего момента, и без этого тест краснел, как только 16.11.2026 прошло.
+        day_before = self.departure - dt.timedelta(days=1)
+        with mock.patch("apps.logistics.matrix.requests.post", return_value=self.reply(routes=routes)) as post, \
+                mock.patch("apps.logistics.matrix.timezone.now", return_value=day_before):
             first = matrix.build(points, self.departure)
             second = matrix.build(points, self.departure)
         post.assert_called_once()  # второй раз — из кэша
@@ -195,6 +199,16 @@ class DgisMatrixTests(PlannerBase):
         assert body["type"] == "statistics" and body["start_time"].endswith("Z")
         assert first.provider == "2gis" and first.traffic and first.seconds[0][2] == 720
         assert second.seconds == first.seconds
+
+    @override_settings(DGIS_API_KEY="demo")
+    def test_departure_within_the_hour_uses_current_traffic(self):
+        routes = [{"source_id": 0, "target_id": 1, "status": "OK", "duration": 300, "distance": 900},
+                  {"source_id": 1, "target_id": 0, "status": "OK", "duration": 320, "distance": 900}]
+        soon = self.departure - dt.timedelta(minutes=20)
+        with mock.patch("apps.logistics.matrix.requests.post", return_value=self.reply(routes=routes)) as post, \
+                mock.patch("apps.logistics.matrix.timezone.now", return_value=soon):
+            matrix.build([BASE, east(1)], self.departure)
+        assert post.call_args.kwargs["json"]["type"] == "jam"
 
     @override_settings(DGIS_API_KEY="demo")
     def test_rejected_start_time_falls_back_to_current_traffic(self):
