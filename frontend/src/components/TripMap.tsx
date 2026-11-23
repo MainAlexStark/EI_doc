@@ -23,17 +23,23 @@ if (typeof caches !== "undefined") {
 
 export type MapPoint = { latitude: number; longitude: number };
 
-const pin = (stop: TripStop, selected: boolean) =>
+const GLYPH: Record<string, string> = { pickup: "▣", delivery: "↩" };
+
+const pin = (stop: TripStop, selected: boolean, color?: string) =>
   L.divIcon({
     className: "",
-    html: `<span class="trip-pin ${stop.status} ${selected ? "selected" : ""}">${stop.position}</span>`,
+    html: `<span class="trip-pin ${stop.status} ${selected ? "selected" : ""} ${color ? "tinted" : ""} ${stop.purpose && stop.purpose !== "visit" ? `purpose-${stop.purpose}` : ""}"${
+      color ? ` style="--c:${color}"` : ""
+    }>${color && stop.status === "done" ? "✓" : stop.position}${GLYPH[stop.purpose ?? ""] ? `<i>${GLYPH[stop.purpose!]}</i>` : ""}</span>`,
     iconSize: [30, 30],
     iconAnchor: [15, 15],
   });
 
 export default function TripMap({
-  stops, selectedId, me, onSelect, onPlace,
+  stops, selectedId, me, onSelect, onPlace, colorOf,
 }: {
+  /** Цвет точки (например, по дню командировки); линия маршрута — своя у каждого цвета. */
+  colorOf?: (stop: TripStop) => string | undefined;
   stops: TripStop[];
   selectedId?: number | null;
   me?: MapPoint | null;
@@ -46,8 +52,8 @@ export default function TripMap({
   const layer = useRef<L.LayerGroup | null>(null);
   const meMarker = useRef<L.CircleMarker | null>(null);
   const fitted = useRef<string | null>(null);
-  const handlers = useRef({ onSelect, onPlace });
-  handlers.current = { onSelect, onPlace };
+  const handlers = useRef({ onSelect, onPlace, colorOf });
+  handlers.current = { onSelect, onPlace, colorOf };
 
   useEffect(() => {
     if (!holder.current) return;
@@ -75,15 +81,19 @@ export default function TripMap({
     if (!instance || !group) return;
     group.clearLayers();
     const located = stops.filter((stop) => stop.latitude != null && stop.longitude != null);
-    const route = located
-      .filter((stop) => stop.status === "planned")
-      .map((stop) => [stop.latitude, stop.longitude] as L.LatLngTuple);
-    if (route.length > 1) {
-      L.polyline(route, { color: "#007aff", weight: 3, opacity: 0.55, dashArray: "2 8", lineCap: "round" }).addTo(group);
+    const colorOf = handlers.current.colorOf;
+    const routes = new Map<string, L.LatLngTuple[]>();
+    for (const stop of located) {
+      if (stop.status !== "planned") continue;
+      const color = colorOf?.(stop) ?? "#2b45e0";
+      routes.set(color, [...(routes.get(color) ?? []), [stop.latitude!, stop.longitude!]]);
+    }
+    for (const [color, route] of routes) {
+      if (route.length > 1) L.polyline(route, { color, weight: 3, opacity: 0.55, dashArray: "2 8", lineCap: "round" }).addTo(group);
     }
     for (const stop of located) {
       L.marker([stop.latitude!, stop.longitude!], {
-        icon: pin(stop, stop.id === selectedId),
+        icon: pin(stop, stop.id === selectedId, colorOf?.(stop)),
         title: stop.address,
         zIndexOffset: stop.id === selectedId ? 1000 : stop.status === "planned" ? 500 : 0,
       })

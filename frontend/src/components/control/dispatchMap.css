@@ -1,0 +1,9 @@
+/* Дополнения карты диспетчерской: метки забора/возврата, номера-клавиши, рамка выбора. */
+.disp-pin { position: relative; }
+.disp-pin > i { position: absolute; right: -6px; top: -6px; font-style: normal; font-size: 10px; line-height: 14px; width: 14px; height: 14px; border-radius: 50%; background: var(--signal); color: var(--on-accent); text-align: center; }
+.disp-pin.purpose-delivery > i { background: var(--purple-dot); }
+.disp-pin.selected { box-shadow: 0 0 0 2.5px var(--sheet), 0 0 0 5px var(--ultramarine); z-index: 2; }
+.disp-legend .legend-item.note { cursor: default; color: var(--graphite); font-size: 11px; }
+.assign-person .assign-num { font-size: 11px; min-width: 18px; text-align: center; padding: 0 4px; border-radius: 4px; background: var(--fill); color: var(--graphite); font-family: var(--font-data); }
+.toolbar-note kbd { font-family: var(--font-data); font-size: 11px; padding: 0 4px; border-radius: 4px; background: var(--fill); }
+@media (pointer: coarse) { .assign-person .assign-num, .toolbar-note { display: none; } }

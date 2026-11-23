@@ -391,9 +391,10 @@ function ProcurementCard({ item, onOpen }: { item: ProcurementRow; onOpen: () =>
   );
 }
 
-function NewTripModal({
-  me, isManager, procurementId, onClose, onCreated, onNewProcurement,
+export function NewTripModal({
+  me, isManager, procurementId, onClose, onCreated, onNewProcurement, initialKind,
 }: {
+  initialKind?: "city" | "classic" | "procurement";
   me: Me;
   isManager: boolean;
   procurementId: number | null;
@@ -403,7 +404,7 @@ function NewTripModal({
 }) {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const [kind, setKind] = useState<"city" | "classic" | "procurement">(procurementId ? "procurement" : "city");
+  const [kind, setKind] = useState<"city" | "classic" | "procurement">(procurementId ? "procurement" : initialKind ?? "city");
   const [destination, setDestination] = useState("");
   const [title, setTitle] = useState("");
   const [dateStart, setDateStart] = useState(isoDay(tomorrow));

@@ -7,6 +7,10 @@ import { GLITCH, SCALES } from "./ascii";
 // показывают случайный символ и встают на место. К краям экрана весы
 // гаснут. Рядом с курсором — мягкое пятно: символы светлее и изредка сбоят;
 // граница пятна размыта и неровная, а само пятно догоняет курсор с инерцией.
+//
+// Бережём слабые телефоны: requestAnimationFrame ~30 кадров/с (на сенсорных — ~15),
+// кадр без пятна и без «перезаписи» не трогает сетку вовсе; вкладка в фоне — пауза;
+// prefers-reduced-motion, экономия трафика или слабое железо — статичная картинка.
 
 const FONT_PX = 12;
 const ROW_PX = 15;
@@ -76,7 +80,12 @@ export default function AsciiField() {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    const nav = navigator as Navigator & { connection?: { saveData?: boolean }; deviceMemory?: number };
+    const weak = Boolean(nav.connection?.saveData) || (nav.hardwareConcurrency ?? 8) <= 2 || (nav.deviceMemory ?? 8) <= 1;
+    const reduced = motionQuery.matches || weak;
+    const frameMs = coarse ? 66 : 33;
     const font = `${FONT_PX}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
 
     let cols = 0;
@@ -105,10 +114,18 @@ export default function AsciiField() {
       }
     };
 
+    let lastW = 0;
+    let lastH = 0;
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
       const w = window.innerWidth;
       const h = window.innerHeight;
+      // На телефоне панель адреса прячется и показывается при прокрутке — высота
+      // скачет на сотню пикселей. Пересчитывать сетку из-за этого незачем: холст
+      // берём с запасом и меняем, только если ширина другая или экран вырос.
+      if (coarse && w === lastW && h <= lastH) return;
+      lastW = w;
+      lastH = h;
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       canvas.style.width = `${w}px`;
@@ -140,7 +157,14 @@ export default function AsciiField() {
       }
     };
     resize();
-    if (reduced) return;
+    if (reduced) {
+      // статичная картинка, но поворот экрана всё равно перерисовываем
+      const onStaticResize = () => resize();
+      window.addEventListener("resize", onStaticResize);
+      return () => window.removeEventListener("resize", onStaticResize);
+    }
+
+    let dirty = true; // есть клетки, которые ещё «перезаписываются»
 
     const step = () => {
       steps += 1;
@@ -152,6 +176,7 @@ export default function AsciiField() {
           target[i] = next;
           delay[i] = Math.floor(Math.random() * SPREAD_FRAMES);
           scramble[i] = 1 + Math.floor(Math.random() * 2);
+          dirty = true;
         }
       }
     };
@@ -161,7 +186,7 @@ export default function AsciiField() {
     let lastFrame = 0;
     const tick = (now: number) => {
       frame = requestAnimationFrame(tick);
-      if (now - lastFrame < 33) return; // ~30 кадров/с хватает
+      if (now - lastFrame < frameMs) return; // ~30 кадров/с хватает, на телефоне ~15
       lastFrame = now;
       if (now - lastStep >= STEP_MS) {
         lastStep = now;
@@ -175,7 +200,12 @@ export default function AsciiField() {
         spot.x += (mouse.x - spot.x) * CURSOR_FOLLOW;
         spot.y += (mouse.y - spot.y) * CURSOR_FOLLOW;
       }
+      const prevPower = spot.power;
       spot.power += ((present ? 1 : 0) - spot.power) * 0.08;
+      if (spot.power < 0.004) spot.power = 0;
+      // Покой: пятна нет и не было, перезаписывать нечего — кадр пустой.
+      if (!dirty && spot.power === 0 && prevPower === 0) return;
+      let pending = false;
 
       const sc = spot.x / cellW;
       const sr = spot.y / ROW_PX;
@@ -196,9 +226,10 @@ export default function AsciiField() {
         if (k > 0.15 && target[i] !== " " && scramble[i] === 0 && Math.random() < 0.035 * k) {
           scramble[i] = 1 + Math.floor(Math.random() * 2);
         }
-        if (delay[i] > 0) { delay[i] -= 1; continue; }
+        if (delay[i] > 0) { delay[i] -= 1; pending = true; continue; }
         if (scramble[i] > 0) {
           scramble[i] -= 1;
+          if (scramble[i] > 0) pending = true;
           const settled = scramble[i] === 0;
           const ch = settled ? target[i] : GLITCH[(Math.random() * GLITCH.length) | 0];
           shown[i] = ch;
@@ -212,19 +243,43 @@ export default function AsciiField() {
           drawCell(i, shown[i], colorFor(lvl, fade[i]));
         }
       }
+      dirty = pending;
     };
     frame = requestAnimationFrame(tick);
 
+    // Вкладка в фоне — не крутим кадры; вернулись — продолжаем с того же места.
+    const onVisibility = () => {
+      cancelAnimationFrame(frame);
+      if (document.visibilityState === "visible") {
+        lastStep = performance.now();
+        frame = requestAnimationFrame(tick);
+      }
+    };
+    // Включили «уменьшить движение» на ходу — останавливаемся на текущем кадре.
+    const onMotion = () => { if (motionQuery.matches) cancelAnimationFrame(frame); };
+    let resizeTimer = 0;
+    const onResize = () => {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => { resize(); dirty = true; }, 150);
+    };
+
     const onMove = (e: PointerEvent) => { mouse.x = e.clientX; mouse.y = e.clientY; };
     const onLeave = () => { mouse.x = -9999; mouse.y = -9999; };
-    window.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerleave", onLeave);
-    window.addEventListener("resize", resize);
+    if (!coarse) {
+      window.addEventListener("pointermove", onMove, { passive: true });
+      document.addEventListener("pointerleave", onLeave);
+    }
+    window.addEventListener("resize", onResize);
+    document.addEventListener("visibilitychange", onVisibility);
+    motionQuery.addEventListener?.("change", onMotion);
     return () => {
       cancelAnimationFrame(frame);
+      window.clearTimeout(resizeTimer);
       window.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerleave", onLeave);
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onVisibility);
+      motionQuery.removeEventListener?.("change", onMotion);
     };
   }, []);
 

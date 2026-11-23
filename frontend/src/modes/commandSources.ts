@@ -5,6 +5,7 @@
 import { fetchJournal, fetchProcurements, fetchRequests, fetchTrips, type HubRequest, type ProcurementRow, type TripBrief } from "../api";
 import { registerCommandSource, scoreText, type CommandItem } from "../ui/CommandPalette";
 import type { Access, Go } from "./types";
+import { registerIntakeSources } from "./intake/commands";
 
 /** Короткий кэш списков — палитра ищет на каждом нажатии, а списки меняются редко. */
 function cached<T>(load: () => Promise<T>, ttl = 60_000): () => Promise<T> {
@@ -118,6 +119,9 @@ export function registerDefaultSources(go: Go, access: Access): () => void {
       { group: "Выезды и командировки", order: 40 },
     ),
   );
+
+  // «Приёмки»: по заказчику / номеру приёмки / заводскому номеру (modes/intake/commands.ts).
+  offs.push(registerIntakeSources(go));
 
   return () => offs.forEach((off) => off());
 }

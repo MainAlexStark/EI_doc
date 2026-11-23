@@ -96,6 +96,8 @@ def own_history(serial: str) -> list[dict]:
             "verifications_count": instrument.verifications_count,
             "last": None if last is None else {
                 "verification_id": last.pk,
+                # Наряд (выезд или приёмка) этой поверки — палитра «Приёмок» ведёт по номеру в приёмку.
+                "work_order_id": last.work_order_id,
                 "verified_at": last.verified_at.isoformat() if last.verified_at else None,
                 "next_verification_date": (
                     last.next_verification_date.isoformat() if last.next_verification_date else None

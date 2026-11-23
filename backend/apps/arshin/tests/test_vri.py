@@ -235,6 +235,7 @@ class ApiTests(Base, TestCase):
         (own,) = body["own"]
         assert own["manufacture_year"] == 2015 and own["si_type"]["id"] == instrument.si_type_id
         assert own["verifications_count"] == 1 and own["last"]["verified_at"].startswith("2026-03-05")
+        assert own["last"]["work_order_id"] == verification.work_order_id
 
     def test_sources_can_be_asked_separately(self):
         fake = self.use(FakeRst())

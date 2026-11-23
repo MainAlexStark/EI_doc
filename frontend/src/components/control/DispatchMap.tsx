@@ -8,6 +8,7 @@ import {
 import Icon from "../../ui/Icon";
 import { Alert, Segmented, Spinner } from "../../ui/controls";
 import AssignPicker from "./AssignPicker";
+import "./dispatchMap.css";
 
 /** Карта всех выездов фирмы — для руководства.
  *
@@ -26,8 +27,9 @@ const keyOf = (p: { type: string; id: number }) => `${p.type}:${p.id}`;
 function pinHtml(p: MapPoint, color: string, selected: boolean): string {
   const queue = p.type !== "stop";
   const label = queue ? (p.type === "request" ? "?" : "!") : String(p.position ?? "");
-  const cls = ["disp-pin", queue ? "queue" : p.status ?? "", selected ? "selected" : ""].join(" ");
-  return `<span class="${cls}" style="--c:${color}">${p.status === "done" ? "✓" : label}</span>`;
+  const cls = ["disp-pin", queue ? "queue" : p.status ?? "", selected ? "selected" : "", p.purpose && p.purpose !== "visit" ? `purpose-${p.purpose}` : ""].join(" ");
+  const glyph = p.purpose === "pickup" ? "<i>▣</i>" : p.purpose === "delivery" ? "<i>↩</i>" : "";
+  return `<span class="${cls}" style="--c:${color}">${p.status === "done" ? "✓" : label}${glyph}</span>`;
 }
 
 function MapCanvas({
@@ -160,7 +162,17 @@ export default function DispatchMap({ onOpenTrip }: { onOpenTrip: (id: number) =
   const [showDone, setShowDone] = useState(true);
   const [busy, setBusy] = useState(false);
   const [focus, setFocus] = useState<MapPoint | null>(null);
+  const [pickDay, setPickDay] = useState<string | null>(null);
   const to = addDays(from, Number(span) - 1);
+  const hotkeys = useRef<(event: KeyboardEvent) => void>(() => undefined);
+
+  // Клавиши, пока что-то выбрано: 1–9 — отдать поверителю по номеру в списке, Esc — снять выбор.
+  // Ловим раньше оболочки (capture), иначе цифры переключили бы режим.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => hotkeys.current(event);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const reload = useCallback(() => {
     setError("");
@@ -260,6 +272,26 @@ export default function DispatchMap({ onOpenTrip }: { onOpenTrip: (id: number) =
 
   const unlocatedQueue = board.queue.filter((p) => p.latitude == null || p.longitude == null);
 
+  hotkeys.current = (event) => {
+    if (!chosen.length || busy || event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+    if (document.body.classList.contains("modal-open")) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setSelected(new Set());
+      return;
+    }
+    const digit = /^Digit([1-9])$/.exec(event.code)?.[1];
+    if (!digit || locked.length === chosen.length) return;
+    const person = people[Number(digit) - 1];
+    if (!person) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void assign(person.id, pickDay ?? commonDate ?? from, null);
+  };
+
   return (
     <div className="dispatch">
       <div className="toolbar">
@@ -280,7 +312,7 @@ export default function DispatchMap({ onOpenTrip }: { onOpenTrip: (id: number) =
           <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> отработанные
         </label>
         <span className="spacer" />
-        <span className="toolbar-note">Shift + клик или рамка — выбрать несколько</span>
+        <span className="toolbar-note">Shift + клик или рамка — выбрать несколько · <kbd>1</kbd>…<kbd>9</kbd> — отдать · <kbd>Esc</kbd> — снять</span>
         <button type="button" className="icon-btn" aria-label="Обновить" onClick={reload}><Icon name="refresh" size={17} /></button>
       </div>
       {notice && <Alert tone="ok" onClose={() => setNotice("")}>{notice}</Alert>}
@@ -296,18 +328,19 @@ export default function DispatchMap({ onOpenTrip }: { onOpenTrip: (id: number) =
             onBox={(keys) => setSelected((cur) => new Set([...cur, ...keys]))}
             focus={focus}
           />
-          <div className="disp-legend glass">
+          <div className="disp-legend glass" aria-label="Легенда: поверители, нажмите — скрыть">
             {board.employees.filter((e) => perEmployee.has(e.id)).map((e) => {
               const row = perEmployee.get(e.id)!;
               return (
                 <button type="button" key={e.id} className={`legend-item ${hidden.has(e.id) ? "off" : ""}`}
                         style={{ "--c": colors.get(e.id) } as CSSProperties} onClick={() => toggleHidden(e.id)}
                         title={hidden.has(e.id) ? "Показать" : "Скрыть"}>
-                  <i /> {e.short_name} <small>{row.done}/{row.total}</small>
+                  <i /> {e.short_name} <small className="data">{row.done}/{row.total}</small>
                 </button>
               );
             })}
             {board.queue.length > 0 && <span className="legend-item queue"><i /> не назначено <small>{board.queue.length}</small></span>}
+            <span className="legend-item note"><b>▣</b> забрать · <b>↩</b> вернуть · ✓ сделано</span>
           </div>
         </div>
 
@@ -363,6 +396,8 @@ export default function DispatchMap({ onOpenTrip }: { onOpenTrip: (id: number) =
                   <div className="field-label" style={{ marginTop: 6 }}>Отдать — одним касанием</div>
                   <AssignPicker
                     key={[...selected].join(",")}
+                    numbered
+                    onDayChange={setPickDay}
                     people={people}
                     currentId={commonEmployee}
                     date={commonDate ?? from}

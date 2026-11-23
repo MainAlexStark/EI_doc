@@ -1,30 +1,48 @@
-/** «Шаблоны протоколов» — режим «Создать шаблон протокола поверки».
+/** Студия шаблона протокола поверки — шаги 3 и 4 режима «Шаблоны поверки СИ» (modes/si-templates).
  *
- * Слева — мои шаблоны в работе (по одному чату на тип СИ). Новый: поиск по Госреестру (ФИФ) →
- * выбор типа → агент получает методику поверки и все документы типа и сам делает первый черновик.
- * В середине — чат с агентом этого типа, справа — протокол по черновику: перерисовывается после
- * каждого сохранения агента. Стрелка вправо вверху («Продолжить») делает черновик действующим
- * шаблоном типа — дальше по нему создаются протоколы на экране «Приёмки».
+ * Слева — чат с ассистентом этого типа СИ (свой чат на тип), справа — живой протокол по черновику:
+ * перерисовывается после каждого сохранения агента, что изменилось — подсвечено. «Продолжить» вверху
+ * открывает шаг 4: проверка и публикация — черновик становится действующим шаблоном типа, метролог
+ * отмечает «проверен», и по типу создаются протоколы (режим «Приёмки»).
+ *
+ * Клавиши: ⌘Enter — отправить сообщение, ⌘S — сохранить черновик (его сохраняет ассистент — покажем
+ * редакцию), ⌘. — переключить «Протокол / Состав».
  *
  * Сервер — apps/assistant/template_workspace.py, /api/assistant/template-workspaces/.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./assistant.css";
-import { downloadFile } from "../api";
-import FifTypeSearch from "../components/FifTypeSearch";
+import "../modes/si-templates/si-templates.css";
+import { approveVerificationTemplate, downloadFile } from "../api";
 import { loadPresets } from "../components/SiTypeForm";
+import type { Go } from "../modes/types";
+import Stepper from "../modes/si-templates/Stepper";
+import {
+  DIGEST_KEYS,
+  DIGEST_LABEL,
+  STATUS_LABEL,
+  STATUS_PILL,
+  diffDigest,
+  dropTemplatesCache,
+  workspaceStatus,
+  type DigestDiff,
+  type DigestKey,
+} from "../modes/si-templates/api";
+import { useHotkey } from "../ui/Hotkeys";
 import Icon from "../ui/Icon";
-import { Modal } from "../ui/Modal";
-import { Alert, PageActions, Segmented, Spinner } from "../ui/controls";
+import Kbd from "../ui/Kbd";
+import { Sheet } from "../ui/Sheet";
+import { Skeleton, SkeletonText } from "../ui/Skeleton";
+import { toast } from "../ui/Toast";
+import { Alert, PageActions, Segmented } from "../ui/controls";
 import { PHONE, useMediaQuery } from "../ui/hooks";
 import {
-  fetchModels,
   getWorkspace,
-  listWorkspaces,
-  openWorkspace,
   publishWorkspace,
+  sendMessage,
   setWorkspaceFamily,
+  uploadAttachment,
   workspacePreview,
   workspacePreviewPath,
   type ModelInfo,
@@ -33,220 +51,75 @@ import {
 } from "./api";
 import ChatView from "./ChatView";
 
-const HASH = "#/si-templates";
+export const STUDIO_STEPS = [
+  { key: "type", label: "Тип СИ", hint: "Поиск в Госреестре (ФИФ)" },
+  { key: "docs", label: "Документы", hint: "Методика, описание типа, свои файлы" },
+  { key: "studio", label: "Шаблон с ассистентом", hint: "Чат и живой протокол" },
+  { key: "publish", label: "Проверка и публикация", hint: "Метролог проверяет — по типу создаются протоколы" },
+];
 
-/** `#/protocol-templates/<id типа СИ>` — пришли с экрана поверки или из справочника: сразу открыть этот тип. */
-function siTypeFromHash(): number | null {
-  const match = window.location.hash.match(/^#\/(?:si-templates|protocol-templates)\/(\d+)/);
-  return match ? Number(match[1]) : null;
-}
+/** Файлы и пожелание с шага 2 — передаются ассистенту, когда он закончит первый черновик. */
+export type PendingHandoff = { files: File[]; note: string };
 
-export default function TemplateStudio() {
-  const phone = useMediaQuery(PHONE);
-  const [items, setItems] = useState<TemplateWorkspace[]>([]);
-  const [current, setCurrent] = useState<number | null>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [listOpen, setListOpen] = useState(!phone);
-  const [opening, setOpening] = useState(false);
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [defaultModel, setDefaultModel] = useState("");
-  const [error, setError] = useState("");
-
-  const loadList = useCallback(() => {
-    listWorkspaces().then(setItems).catch((e) => setError((e as Error).message));
-  }, []);
-
-  useEffect(() => {
-    loadList();
-    fetchModels()
-      .then((d) => {
-        setModels(d.models);
-        setDefaultModel(d.default);
-      })
-      .catch(() => undefined);
-  }, [loadList]);
-
-  const open = useCallback(
-    async (body: { si_type?: number; fif_uuid?: string; name?: string }) => {
-      setOpening(true);
-      setError("");
-      try {
-        const workspace = await openWorkspace(body);
-        setSearchOpen(false);
-        setCurrent(workspace.id);
-        if (phone) setListOpen(false);
-        loadList();
-      } catch (e) {
-        setError((e as Error).message);
-      } finally {
-        setOpening(false);
-      }
-    },
-    [loadList, phone],
-  );
-
-  // Пришли по ссылке «Создать шаблон протокола» для конкретного типа (с экрана поверки, из справочника).
-  useEffect(() => {
-    const fromHash = () => {
-      const siType = siTypeFromHash();
-      if (siType) {
-        window.history.replaceState(null, "", HASH);
-        void open({ si_type: siType });
-      }
-    };
-    fromHash();
-    window.addEventListener("hashchange", fromHash);
-    return () => window.removeEventListener("hashchange", fromHash);
-  }, [open]);
-
-  const select = (id: number) => {
-    setCurrent(id);
-    if (phone) setListOpen(false);
-  };
-
-  return (
-    <div className={`assistant tpl-studio ${listOpen ? "" : "no-sidebar"}`}>
-      <PageActions>
-        <button type="button" onClick={() => setSearchOpen(true)} aria-label="Новый шаблон">
-          <Icon name="plus" size={16} strokeWidth={2.2} />
-          <span className="hide-phone">Новый шаблон</span>
-        </button>
-      </PageActions>
-
-      {listOpen && (
-        <aside className="conv-sidebar">
-          <div className="conv-group">Шаблоны в работе</div>
-          <div className="conv-list">
-            {items.map((w) => (
-              <div
-                key={w.id}
-                className={`conv-item tpl-item ${current === w.id ? "active" : ""}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => select(w.id)}
-                onKeyDown={(e) => e.key === "Enter" && select(w.id)}
-              >
-                <span className="conv-title">
-                  {w.si_type.name}
-                  <small>
-                    № {w.si_type.registry_number} · {w.status === "published" && !w.has_draft ? "действует" : w.has_draft ? `черновик, ред. ${w.revision}` : "готовится"}
-                  </small>
-                </span>
-                {w.agent_busy && <span className="spinner sm" title="Ассистент работает" />}
-                {w.status === "published" && !w.has_draft && <Icon name="checkCircle" size={14} className="ok-text" />}
-              </div>
-            ))}
-            {items.length === 0 && (
-              <div className="conv-empty">Пока пусто. «Новый шаблон» → найдите тип в Госреестре — ассистент соберёт шаблон по методике поверки.</div>
-            )}
-          </div>
-        </aside>
-      )}
-
-      <section className="assistant-main">
-        {error && <div className="assistant-alert"><Alert onClose={() => setError("")}>{error}</Alert></div>}
-        {opening && <Spinner label="Открываю тип и передаю ассистенту методику…" />}
-        {!opening && current ? (
-          <Workspace
-            key={current}
-            id={current}
-            models={models}
-            defaultModel={defaultModel}
-            listOpen={listOpen}
-            onToggleList={() => setListOpen((o) => !o)}
-            onChanged={loadList}
-          />
-        ) : (
-          !opening && (
-            <div className="welcome">
-              <div className="welcome-inner tpl-welcome">
-                <div className="welcome-logo"><Icon name="layers" size={28} strokeWidth={1.8} /></div>
-                <h2>Шаблон протокола поверки</h2>
-                <p className="muted">
-                  Найдите тип СИ в Госреестре. Ассистент прочитает методику поверки и документы типа из ФИФ и соберёт
-                  шаблон протокола — он появится справа от чата. Правьте его словами, а когда всё верно — нажмите
-                  «Продолжить» вверху: по шаблону можно будет создавать протоколы этого типа.
-                </p>
-                <div className="card tpl-search">
-                  <FifTypeSearch
-                    autoFocus={!phone}
-                    label="Тип СИ"
-                    inputId="tpl-type-search"
-                    onPickFif={(draft) =>
-                      draft.fif_uuid
-                        ? void open({ fif_uuid: draft.fif_uuid, name: draft.name })
-                        : setError("Шаблон делается по документам из Госреестра — выберите тип из подсказок ФИФ")
-                    }
-                    onPickLocal={(item) => item.si_type_id && void open({ si_type: item.si_type_id })}
-                  />
-                </div>
-              </div>
-            </div>
-          )
-        )}
-      </section>
-
-      <Modal open={searchOpen} onClose={() => setSearchOpen(false)} size="lg" title="Новый шаблон протокола"
-        subtitle="Выберите тип из Госреестра — методика и документы уйдут ассистенту">
-        {searchOpen && (
-          <FifTypeSearch
-            autoFocus
-            inputId="tpl-type-search-modal"
-            onPickFif={(draft) =>
-              draft.fif_uuid
-                ? void open({ fif_uuid: draft.fif_uuid, name: draft.name })
-                : setError("Шаблон делается по документам из Госреестра — выберите тип из подсказок ФИФ")
-            }
-            onPickLocal={(item) => item.si_type_id && void open({ si_type: item.si_type_id })}
-          />
-        )}
-      </Modal>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Рабочее место одного типа: чат + протокол
-// ---------------------------------------------------------------------------
 type Families = { id: number; name: string; calculator_key: string }[];
 
-function Workspace({
+export default function TemplateStudio({
   id,
   models,
   defaultModel,
-  listOpen,
-  onToggleList,
+  isReviewer,
+  handoff,
+  onHandoffDone,
   onChanged,
+  onBack,
+  onStepBack,
+  go,
 }: {
   id: number;
   models: ModelInfo[];
   defaultModel: string;
-  listOpen: boolean;
-  onToggleList: () => void;
+  isReviewer: boolean;
+  handoff?: PendingHandoff | null;
+  onHandoffDone?: () => void;
   onChanged: () => void;
+  onBack: () => void;
+  /** Клик по пройденному шагу 1–2: вернуться к выбору типа. */
+  onStepBack?: (step: 0 | 1) => void;
+  go: Go;
 }) {
   const phone = useMediaQuery(PHONE);
   const narrow = useMediaQuery("(max-width: 1180px)");
   const [ws, setWs] = useState<TemplateWorkspace | null>(null);
   const [families, setFamilies] = useState<Families>([]);
   const [pane, setPane] = useState<"chat" | "protocol">("chat");
-  const [publishing, setPublishing] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [view, setView] = useState<"pdf" | "parts">("pdf");
+  const [publishOpen, setPublishOpen] = useState(false);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [chatKey, setChatKey] = useState(0);
+  const [diff, setDiff] = useState<{ revision: number; diff: DigestDiff } | null>(null);
+  const [handoffState, setHandoffState] = useState<"" | "waiting" | "sending">(handoff && (handoff.files.length || handoff.note) ? "waiting" : "");
   const busyRef = useRef(false);
   const lastRef = useRef<TemplateWorkspace | null>(null);
+  const handoffRef = useRef(handoff);
 
   const load = useCallback(async () => {
     try {
       const data = await getWorkspace(id);
       const prev = lastRef.current;
-      // Новая редакция или агент закончил — обновить и список слева.
       if (prev && (prev.revision !== data.revision || prev.agent_busy !== data.agent_busy)) onChanged();
+      if (prev && prev.revision !== data.revision) {
+        const before = prev.draft ?? prev.published ?? null;
+        const after = data.draft ?? data.published ?? null;
+        const changed = diffDigest(before, after);
+        if (changed) setDiff({ revision: data.revision, diff: changed });
+      }
       lastRef.current = data;
       busyRef.current = data.agent_busy;
       setWs(data);
+      setLoadError("");
     } catch (e) {
-      setError((e as Error).message);
+      setLoadError((e as Error).message);
     }
   }, [id, onChanged]);
 
@@ -270,28 +143,60 @@ function Workspace({
       .catch(() => undefined);
   }, []);
 
-  const template = ws ? ws.draft ?? ws.published ?? null : null;
-  const canPublish = Boolean(ws?.draft) && !ws?.si_type.is_water;
+  // Шаг 2 → ассистенту: свои файлы и пожелание, как только он свободен (первый черновик готов).
+  useEffect(() => {
+    const pending = handoffRef.current;
+    if (!ws || ws.agent_busy || !pending || handoffState !== "waiting") return;
+    setHandoffState("sending");
+    void (async () => {
+      try {
+        const attachments = [];
+        for (const file of pending.files) attachments.push(await uploadAttachment(file, ws.conversation));
+        const names = attachments.map((a) => `«${a.name}»`).join(", ");
+        const text = [
+          attachments.length ? `Приложил свои документы к типу: ${names}. Прочитай их и учти в шаблоне (если расходятся с ФИФ — скажи, где).` : "",
+          pending.note ? `Что важно учесть: ${pending.note}` : "",
+        ].filter(Boolean).join("\n\n");
+        await sendMessage(ws.conversation, text, attachments.map((a) => a.id), defaultModel);
+        handoffRef.current = null;
+        setHandoffState("");
+        onHandoffDone?.();
+        setChatKey((k) => k + 1);
+        void load();
+      } catch (e) {
+        setHandoffState("waiting");
+        handoffRef.current = null;
+        setError(`Не удалось передать ваши файлы ассистенту: ${(e as Error).message}. Приложите их в чате скрепкой.`);
+      }
+    })();
+  }, [ws, handoffState, defaultModel, load, onHandoffDone]);
 
-  const publish = async () => {
-    if (!ws) return;
-    setPublishing(true);
-    setError("");
-    try {
-      const data = await publishWorkspace(ws.id);
-      setWs(data);
-      setNotice(
-        data.published?.needs_review
-          ? "Шаблон действует: на экране «Приёмки» по этому типу теперь протокол по шаблону. Метролог проверит шаблон — до этого протокол не подписывается."
-          : "Шаблон действует: на экране «Приёмки» по этому типу теперь протокол по шаблону.",
-      );
-      onChanged();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPublishing(false);
-    }
-  };
+  const template = ws ? ws.draft ?? ws.published ?? null : null;
+  const status = ws ? workspaceStatus(ws) : "draft";
+
+  // --- клавиши -------------------------------------------------------------
+  useHotkey(
+    "mod+enter",
+    () => {
+      const area = document.querySelector<HTMLTextAreaElement>(".si-studio .tpl-chat textarea, .si-studio .tpl-single textarea");
+      if (!area || !area.value.trim()) return;
+      area.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    },
+    { allowInInputs: true, description: "Отправить сообщение ассистенту", group: "Шаблоны поверки", enabled: !publishOpen },
+  );
+  useHotkey(
+    "mod+s",
+    () => {
+      if (!ws) return;
+      if (ws.agent_busy) toast.info("Ассистент правит черновик — сохранит сам, редакция обновится справа");
+      else if (ws.draft) toast.success(`Черновик сохранён — ред. ${ws.revision}`, { description: "Его сохраняет ассистент после каждой правки" });
+      else toast.info(ws.published ? "Правок нет — действует опубликованный шаблон" : "Черновика пока нет — напишите ассистенту, что нужно");
+    },
+    { allowInInputs: true, description: "Сохранить черновик", group: "Шаблоны поверки" },
+  );
+  useHotkey("mod+.", () => setView((v) => (v === "pdf" ? "parts" : "pdf")), {
+    allowInInputs: true, description: "Протокол ↔ состав шаблона", group: "Шаблоны поверки",
+  });
 
   const changeFamily = async (family: number) => {
     if (!ws) return;
@@ -302,25 +207,43 @@ function Workspace({
     }
   };
 
-  if (!ws) return error ? <div className="assistant-alert"><Alert>{error}</Alert></div> : <Spinner />;
+  if (!ws) {
+    return (
+      <div className="si-studio">
+        {loadError ? (
+          <div className="si-studio-error">
+            <Alert>Рабочее место не открылось: {loadError}</Alert>
+            <div className="si-step-actions">
+              <button type="button" onClick={onBack}>К списку шаблонов</button>
+              <button type="button" className="primary" onClick={() => void load()}>Повторить</button>
+            </div>
+          </div>
+        ) : (
+          <StudioSkeleton />
+        )}
+      </div>
+    );
+  }
 
+  const published = ws.status === "published" && !ws.draft;
+  const canPublish = Boolean(ws.draft) && !ws.si_type.is_water;
   const nextButton = (
     <button
       type="button"
-      className="primary tpl-next"
-      disabled={!canPublish || publishing}
-      onClick={() => void publish()}
+      className={`tpl-next ${published ? "" : "primary"}`}
+      disabled={!ws.draft && !published}
+      onClick={() => setPublishOpen(true)}
       title={
         canPublish
-          ? "Продолжить: черновик станет действующим шаблоном — по нему можно создавать протоколы"
-          : ws.status === "published"
-            ? "Шаблон уже действует. Новые правки ассистента — в черновик, затем снова «Продолжить»"
+          ? "Продолжить: проверка и публикация — по шаблону начнут создаваться протоколы"
+          : published
+            ? "Шаблон действует — посмотреть статус проверки"
             : "Дождитесь, пока ассистент сохранит черновик"
       }
     >
-      {ws.status === "published" && !ws.draft ? (
+      {published ? (
         <>
-          <Icon name="check" size={16} /> Действует
+          <Icon name={status === "reviewed" ? "checkCircle" : "clock"} size={16} /> {status === "reviewed" ? "Проверен" : "На проверке"}
         </>
       ) : (
         <>
@@ -332,6 +255,7 @@ function Workspace({
 
   const chat = (
     <ChatView
+      key={`${ws.conversation}-${chatKey}`}
       conversationId={ws.conversation}
       models={models}
       defaultModel={defaultModel}
@@ -339,21 +263,40 @@ function Workspace({
       onOpenContextFile={() => undefined}
     />
   );
-  const protocol = <ProtocolPane ws={ws} template={template} />;
+  const protocol = (
+    <ProtocolPane
+      ws={ws}
+      template={template}
+      view={view}
+      onView={setView}
+      diff={diff && diff.revision === ws.revision ? diff.diff : null}
+      onDismissDiff={() => setDiff(null)}
+    />
+  );
 
   return (
-    <>
-      <div className="assistant-bar tpl-bar">
-        <button className={`icon-btn ${listOpen ? "active" : ""}`} title="Шаблоны в работе" aria-label="Шаблоны в работе" onClick={onToggleList}>
-          <Icon name="sidebar" />
+    <div className="si-studio">
+      <PageActions>{nextButton}</PageActions>
+      <div className="si-studio-head">
+        <button type="button" className="icon-btn" title="Все шаблоны" aria-label="Все шаблоны" onClick={onBack}>
+          <Icon name="arrowLeft" size={18} />
         </button>
-        <div className="tpl-bar-title">
-          <b className="assistant-title">{ws.si_type.name}</b>
+        <div className="si-studio-title">
+          <b>{ws.si_type.name}</b>
           <span className="sub">
-            № {ws.si_type.registry_number}
+            <span className="data">№ {ws.si_type.registry_number}</span>
             {ws.si_type.manufacturer ? ` · ${ws.si_type.manufacturer}` : ""}
+            {ws.si_type.needs_review ? " · тип ждёт проверки" : ""}
           </span>
         </div>
+        {!phone && (
+          <Stepper
+            steps={STUDIO_STEPS}
+            current={published ? 3 : 2}
+            onPick={onStepBack ? (i) => (i < 2 ? onStepBack(i as 0 | 1) : setPublishOpen(false)) : undefined}
+            className="compact"
+          />
+        )}
         {families.length > 0 && (
           <label className="tpl-family" title="Вид СИ — от него зависит, как поверяется тип: счётчики воды — калькулятором, остальное — по шаблону">
             <span className="hide-phone">Вид СИ</span>
@@ -364,18 +307,19 @@ function Workspace({
             </select>
           </label>
         )}
-        <span className={`pill ${ws.status === "published" && !ws.draft ? "ok" : "muted"}`}>
-          {ws.status === "published" && !ws.draft ? "действует" : ws.draft ? `черновик · ред. ${ws.revision}` : "готовится"}
+        <span className={`pill ${STATUS_PILL[status]}`} title={ws.draft ? `Черновик, редакция ${ws.revision}` : undefined}>
+          {STATUS_LABEL[status]}
+          {ws.draft ? <span className="data"> · ред. {ws.revision}</span> : null}
         </span>
       </div>
-      {/* «Продолжить» — вверху страницы, рядом с «Новый шаблон». */}
-      <PageActions>{nextButton}</PageActions>
+
       {error && <div className="assistant-alert"><Alert onClose={() => setError("")}>{error}</Alert></div>}
-      {notice && (
+      {handoffState && (
         <div className="assistant-alert">
-          <Alert tone="ok" onClose={() => setNotice("")}>
-            {notice}{" "}
-            <a href="#/intake" className="link">Перейти к поверкам</a>
+          <Alert tone="info">
+            {handoffState === "sending"
+              ? "Передаю ассистенту ваши файлы и пожелание…"
+              : `Ассистент собирает первый черновик по документам ФИФ. Ваши файлы (${handoffRef.current?.files.length ?? 0}) и пожелание передам, как только он закончит.`}
           </Alert>
         </div>
       )}
@@ -387,6 +331,7 @@ function Workspace({
           </Alert>
         </div>
       )}
+
       {narrow ? (
         <>
           <div className="tpl-switch">
@@ -396,7 +341,7 @@ function Workspace({
               onChange={setPane}
               options={[
                 { value: "chat", label: "Чат", icon: "sparkle" },
-                { value: "protocol", label: phone ? "Протокол" : `Протокол${ws.draft ? ` · ред. ${ws.revision}` : ""}`, icon: "doc" },
+                { value: "protocol", label: phone ? "Протокол" : `Протокол${ws.draft ? ` · ред. ${ws.revision}` : ""}`, icon: "doc", count: diff ? diff.diff.changed.size : undefined },
               ]}
             />
           </div>
@@ -408,18 +353,213 @@ function Workspace({
           {protocol}
         </div>
       )}
-    </>
+
+      <PublishSheet
+        open={publishOpen}
+        onClose={() => setPublishOpen(false)}
+        ws={ws}
+        template={template}
+        isReviewer={isReviewer}
+        onDone={(data) => {
+          setWs(data);
+          lastRef.current = data;
+          dropTemplatesCache();
+          onChanged();
+        }}
+        go={go}
+      />
+    </div>
+  );
+}
+
+function StudioSkeleton() {
+  return (
+    <div className="si-studio-skel" role="status" aria-label="Открываю рабочее место">
+      <div className="si-studio-head">
+        <Skeleton width={28} height={28} radius={8} />
+        <span className="grow"><Skeleton width="40%" height={15} /><Skeleton width="25%" height={11} style={{ marginTop: 6 }} /></span>
+      </div>
+      <div className="tpl-split">
+        <div className="si-skel-pane"><SkeletonText lines={4} /><SkeletonText lines={3} /></div>
+        <div className="si-skel-pane"><Skeleton height="70%" radius={10} /></div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Шаг 4: проверка и публикация
+// ---------------------------------------------------------------------------
+function PublishSheet({
+  open, onClose, ws, template, isReviewer, onDone, go,
+}: {
+  open: boolean;
+  onClose: () => void;
+  ws: TemplateWorkspace;
+  template: TemplateDigest | null;
+  isReviewer: boolean;
+  onDone: (ws: TemplateWorkspace) => void;
+  go: Go;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const published = ws.status === "published" && !ws.draft;
+  const status = workspaceStatus(ws);
+
+  const checks = useMemo(() => {
+    if (!template) return [];
+    const rows: { ok: boolean | null; label: string; text: string }[] = [
+      { ok: Boolean(template.method), label: "Методика", text: template.method || "не указана — попросите ассистента сослаться на МП" },
+      { ok: template.operations.length > 0, label: "Операции поверки", text: template.operations.length ? `${template.operations.length}: ${template.operations.slice(0, 3).join("; ")}${template.operations.length > 3 ? "…" : ""}` : "нет" },
+      { ok: template.modes.length > 0, label: "Поверяемые точки", text: template.modes.join("; ") || "нет" },
+      { ok: template.characteristics.length > 0, label: "Характеристики", text: template.characteristics.join("; ") || "нет" },
+      { ok: template.kits.length > 0 ? true : null, label: "Наборы эталонов", text: template.kits.length ? template.kits.join("; ") : "не выбраны — поверитель отметит эталоны сам" },
+      {
+        ok: template.check == null ? null : template.check.ok,
+        label: "Сверка формул с примером",
+        text: template.check == null ? "примера в методике нет — метролог сверяет формулы с МП" : template.check.ok ? "формулы сходятся" : "есть расхождения — попросите ассистента найти причину",
+      },
+    ];
+    return rows;
+  }, [template]);
+
+  const publish = async () => {
+    if (busy || published) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await publishWorkspace(ws.id);
+      onDone(data);
+      toast.success("Шаблон опубликован", {
+        description: data.published?.needs_review ? "Ждёт проверки метролога — до неё протокол не подписывается" : "Проверен — по типу можно создавать протоколы",
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approve = async () => {
+    const pub = ws.published;
+    if (!pub) return;
+    setBusy(true);
+    setError("");
+    try {
+      await approveVerificationTemplate(pub.id);
+      onDone({ ...ws, published: { ...pub, needs_review: false } });
+      toast.success("Шаблон проверен", { description: "Протоколы по нему можно подписывать" });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useHotkey("mod+enter", () => void (published ? (isReviewer && status === "review" ? approve() : undefined) : publish()), {
+    allowInInputs: true, enabled: open, global: true,
+  });
+
+  const footer = published ? (
+    <div className="si-step-actions">
+      <button type="button" onClick={onClose}>Остаться в студии</button>
+      {isReviewer && status === "review" && (
+        <button type="button" className="primary" disabled={busy} onClick={() => void approve()}>
+          <Icon name="check" size={16} /> Проверен — всё верно <Kbd keys="mod+enter" className="on-accent kbd-hint" />
+        </button>
+      )}
+      <button type="button" className={isReviewer && status === "review" ? "" : "primary"} onClick={() => go("intake")}>
+        Создать протоколы <Icon name="arrowRight" size={16} />
+      </button>
+    </div>
+  ) : (
+    <div className="si-step-actions">
+      <button type="button" onClick={onClose}>Вернуться к шаблону</button>
+      <button type="button" className="primary" disabled={busy || !ws.draft || ws.si_type.is_water} onClick={() => void publish()}>
+        {busy ? "Публикую…" : "Опубликовать"} <Kbd keys="mod+enter" className="on-accent kbd-hint" />
+      </button>
+    </div>
+  );
+
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      size="md"
+      title={published ? "Шаблон действует" : "Проверка и публикация"}
+      subtitle={`${ws.si_type.name} · № ${ws.si_type.registry_number}`}
+      footer={footer}
+    >
+      <div className="si-publish">
+        {published ? (
+          <>
+            <div className={`si-publish-state ${status}`}>
+              <Icon name={status === "reviewed" ? "checkCircle" : "clock"} size={22} />
+              <div>
+                <b>{status === "reviewed" ? "Проверен метрологом" : "Ждёт проверки метролога"}</b>
+                <p className="sub">
+                  {status === "reviewed"
+                    ? "По этому типу в «Приёмках» создаются протоколы по шаблону и подписываются."
+                    : isReviewer
+                      ? "Сверьте шаблон с методикой (вкладка «Состав» и пустой протокол) и отметьте «Проверен»."
+                      : "Протоколы по шаблону уже создаются, но подписать их можно после проверки метролога."}
+                </p>
+              </div>
+            </div>
+            <p className="sub">Новые правки в чате пойдут в черновик и вступят в силу после следующего «Продолжить».</p>
+          </>
+        ) : (
+          <>
+            <p className="sub">
+              После публикации шаблон начнёт действовать: в «Приёмках» по этому типу протокол пойдёт по нему.{" "}
+              {isReviewer ? "Вы метролог — шаблон сразу будет отмечен проверенным." : "Метролог проверит его; до проверки протокол по шаблону не подписывается."}
+            </p>
+            {ws.si_type.is_water && <Alert tone="warn">Тип стоит в «Счётчиках воды» — поменяйте «Вид СИ», если это не счётчик воды.</Alert>}
+          </>
+        )}
+        <ul className="si-checks">
+          {checks.map((row) => (
+            <li key={row.label} className={row.ok === false ? "bad" : row.ok ? "ok" : "neutral"}>
+              <Icon name={row.ok === false ? "alert" : row.ok ? "checkCircle" : "info"} size={15} />
+              <span>
+                <b>{row.label}</b>
+                <span className="sub">{row.text}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+        {template && (
+          <button
+            type="button"
+            className="sm"
+            onClick={() => void downloadFile(workspacePreviewPath(ws.id, "docx", ws.revision, false), `Шаблон протокола — ${ws.si_type.name}.docx`).catch((e) => setError((e as Error).message))}
+          >
+            <Icon name="download" size={14} /> Пустой протокол в Word
+          </button>
+        )}
+        {error && <Alert onClose={() => setError("")}>{error}</Alert>}
+      </div>
+    </Sheet>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Протокол по черновику
 // ---------------------------------------------------------------------------
-function ProtocolPane({ ws, template }: { ws: TemplateWorkspace; template: TemplateDigest | null }) {
-  const [view, setView] = useState<"pdf" | "parts">("pdf");
+function ProtocolPane({
+  ws, template, view, onView, diff, onDismissDiff,
+}: {
+  ws: TemplateWorkspace;
+  template: TemplateDigest | null;
+  view: "pdf" | "parts";
+  onView: (view: "pdf" | "parts") => void;
+  diff: DigestDiff | null;
+  onDismissDiff: () => void;
+}) {
   const [url, setUrl] = useState("");
   const [pdfError, setPdfError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [flash, setFlash] = useState(false);
   const hasTemplate = Boolean(template);
 
   const urlRef = useRef("");
@@ -431,9 +571,14 @@ function ProtocolPane({ ws, template }: { ws: TemplateWorkspace; template: Templ
       .then((made) => {
         if (cancelled) return URL.revokeObjectURL(made);
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+        const first = !urlRef.current;
         urlRef.current = made;
         setUrl(made);
         setPdfError("");
+        if (!first) {
+          setFlash(true);
+          window.setTimeout(() => setFlash(false), 1400);
+        }
       })
       .catch((e) => !cancelled && setPdfError((e as Error).message))
       .finally(() => !cancelled && setLoading(false));
@@ -457,6 +602,14 @@ function ProtocolPane({ ws, template }: { ws: TemplateWorkspace; template: Templ
               ? ws.agent_activity || "Читает методику поверки и документы типа из ФИФ"
               : "Напишите ассистенту, что нужно, — он сохранит черновик, и протокол появится здесь."}
           </span>
+          {ws.agent_busy && (
+            <div className="si-wait-skel" aria-hidden="true">
+              <Skeleton height={12} width="70%" />
+              <Skeleton height={10} />
+              <Skeleton height={10} width="85%" />
+              <Skeleton height={60} radius={6} />
+            </div>
+          )}
           {ws.documents && ws.documents.length > 0 && <Documents docs={ws.documents} />}
         </div>
       </div>
@@ -465,15 +618,15 @@ function ProtocolPane({ ws, template }: { ws: TemplateWorkspace; template: Templ
 
   const which = ws.draft ? `Черновик · ред. ${ws.revision}` : "Действующий шаблон";
   return (
-    <div className="tpl-protocol">
+    <div className={`tpl-protocol ${flash ? "si-flash" : ""}`}>
       <div className="tpl-protocol-bar">
         <Segmented
           size="sm"
           value={view}
-          onChange={setView}
+          onChange={onView}
           options={[
             { value: "pdf", label: "Протокол" },
-            { value: "parts", label: "Состав" },
+            { value: "parts", label: "Состав", count: diff ? diff.changed.size : undefined },
           ]}
         />
         <span className="sub grow">
@@ -481,61 +634,87 @@ function ProtocolPane({ ws, template }: { ws: TemplateWorkspace; template: Templ
           {ws.agent_busy && <> · <span className="spinner sm" /> ассистент правит</>}
           {loading && !ws.agent_busy && " · обновляю…"}
         </span>
-        <button type="button" className="sm" title="Скачать пустой протокол в Word"
-          onClick={() => void downloadFile(workspacePreviewPath(ws.id, "docx", ws.revision, false), `Шаблон протокола — ${ws.si_type.name}.docx`)}>
+        <button
+          type="button"
+          className="sm"
+          title="Скачать пустой протокол в Word"
+          onClick={() => void downloadFile(workspacePreviewPath(ws.id, "docx", ws.revision, false), `Шаблон протокола — ${ws.si_type.name}.docx`)}
+        >
           <Icon name="download" size={14} /> Word
         </button>
       </div>
+      {diff && (
+        <div className="si-diff-bar" role="status">
+          <Icon name="sparkle" size={14} />
+          <span className="grow">
+            Ред. {ws.revision}: изменилось — {DIGEST_KEYS.filter((k) => diff.changed.has(k)).map((k) => DIGEST_LABEL[k].toLowerCase()).join(", ")}
+          </span>
+          {view === "pdf" && <button type="button" className="link" onClick={() => onView("parts")}>Показать</button>}
+          <button type="button" className="icon-btn" aria-label="Скрыть" onClick={onDismissDiff}><Icon name="x" size={13} /></button>
+        </div>
+      )}
       {view === "pdf" ? (
         pdfError ? (
           <div className="tpl-parts">
             <Alert tone="warn">PDF не собрался: {pdfError}. Ниже — состав шаблона; Word скачивается кнопкой выше.</Alert>
-            <Parts template={template} ws={ws} />
+            <Parts template={template} ws={ws} diff={diff} />
           </div>
         ) : url ? (
           <iframe className="tpl-pdf" src={`${url}#toolbar=0&navpanes=0&view=FitH`} title="Протокол по шаблону" />
         ) : (
-          <Spinner label="Собираю протокол…" />
+          <div className="tpl-parts"><Skeleton height="100%" radius={8} style={{ minHeight: 360 }} /></div>
         )
       ) : (
         <div className="tpl-parts">
-          <Parts template={template} ws={ws} />
+          <Parts template={template} ws={ws} diff={diff} />
         </div>
       )}
     </div>
   );
 }
 
-function Parts({ template, ws }: { template: TemplateDigest; ws: TemplateWorkspace }) {
-  const rows: [string, string | string[]][] = [
-    ["Методика", template.method || "—"],
-    ["Вид СИ", template.si_kind || ws.si_type.type_title || "—"],
-    ["Параметры прибора", template.params.map((p) => `${p.label}${p.unit ? `, ${p.unit}` : ""} — ${p.from_type ? "из типа" : "вносит поверитель"}`)],
-    ["Операции поверки", template.operations],
-    ["Поверяемые точки", template.modes],
-    ["Величины в точке", template.points.map((p) => (template.repeats && template.repeats > 1 ? `${p} × ${template.repeats}` : p))],
-    ["Характеристики", template.characteristics],
-    ["Наборы эталонов", template.kits.length ? template.kits : ["не выбраны — метрологу добавить в перечень"]],
-    ["Источники", template.sources],
+function Parts({ template, ws, diff }: { template: TemplateDigest; ws: TemplateWorkspace; diff: DigestDiff | null }) {
+  const rows: [DigestKey, string | string[]][] = [
+    ["method", template.method || "—"],
+    ["si_kind", template.si_kind || ws.si_type.type_title || "—"],
+    ["params", template.params.map((p) => `${p.label}${p.unit ? `, ${p.unit}` : ""} — ${p.from_type ? "из типа" : "вносит поверитель"}`)],
+    ["operations", template.operations],
+    ["modes", template.modes],
+    ["points", template.points.map((p) => (template.repeats && template.repeats > 1 ? `${p} × ${template.repeats}` : p))],
+    ["characteristics", template.characteristics],
+    ["kits", template.kits.length ? template.kits : ["не выбраны — метрологу добавить в перечень"]],
+    ["sources", template.sources],
   ];
   return (
     <>
       <dl className="tpl-dl">
-        {rows.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>
-              {Array.isArray(value) ? (
-                value.length ? <ul>{value.map((v, i) => <li key={i}>{v}</li>)}</ul> : "—"
-              ) : (
-                value
-              )}
-            </dd>
-          </div>
-        ))}
-        <div>
+        {rows.map(([key, value]) => {
+          const changed = diff?.changed.has(key);
+          const added = diff?.added.get(key);
+          const removed = diff?.removed.get(key) ?? [];
+          return (
+            <div key={key} className={changed ? "si-changed" : ""}>
+              <dt>{DIGEST_LABEL[key]}</dt>
+              <dd>
+                {Array.isArray(value) ? (
+                  value.length ? (
+                    <ul>
+                      {value.map((v, i) => <li key={i} className={added?.has(v) ? "si-added" : ""}>{v}</li>)}
+                      {removed.map((v, i) => <li key={`r${i}`} className="si-removed">{v}</li>)}
+                    </ul>
+                  ) : (
+                    "—"
+                  )
+                ) : (
+                  <span className={changed ? "si-added" : ""}>{value}</span>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+        <div className={diff?.changed.has("check") ? "si-changed" : ""}>
           <dt>Сверка с примером</dt>
-          <dd>{template.check == null ? "нет примера в методике" : template.check.ok ? "формулы сходятся" : <span className="warn-text">есть расхождения</span>}</dd>
+          <dd>{template.check == null ? "нет примера в методике" : template.check.ok ? <span className="pass-text">формулы сходятся</span> : <span className="fail-text">есть расхождения</span>}</dd>
         </div>
       </dl>
       {ws.documents && ws.documents.length > 0 && <Documents docs={ws.documents} />}

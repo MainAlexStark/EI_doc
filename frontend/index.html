@@ -3,7 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EI_doc — журнал поверок</title>
+    <!-- Тот же index.html отдаётся и кабинету ("/"), и одностраничнику фирмы ("/o-nas/"):
+         поисковики и мессенджеры видят описание фирмы, кабинет меняет title сам (main.tsx).
+         Реквизиты — как в src/landing/firm.ts. -->
+    <title>Поверка счётчиков и средств измерений в Кирове — Единица Измерения</title>
+    <meta name="description" content="Поверка счётчиков воды и тепла, манометров, весов, термометров и других средств измерений в Кирове и Кировской области. Выезд в любой день, окно визита 2 часа, результат — в ФГИС «Аршин». Аттестация испытательного оборудования." />
+    <link rel="canonical" href="/o-nas/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:site_name" content="Единица Измерения" />
+    <meta property="og:title" content="Поверка средств измерений в Кирове — Единица Измерения" />
+    <meta property="og:description" content="Законная работа начинается с поверки. Счётчики, манометры, весы, термометры; выезд по Кирову и области; запись в ФГИС «Аршин». Тел. +7 953 137-00-83." />
+    <meta property="og:image" content="/icon-512.png" />
+    <meta name="twitter:card" content="summary" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "LocalBusiness",
+        "name": "ООО «Единица Измерения»",
+        "alternateName": "Единица Измерения",
+        "description": "Поверка средств измерений: счётчики воды и тепла у населения, СИ предприятий (манометры, весы, термометры), выезд в районы Кировской области, аттестация испытательного оборудования.",
+        "telephone": "+7-953-137-00-83",
+        "image": "/icon-512.png",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "ул. Горького, 4",
+          "addressLocality": "Киров",
+          "addressRegion": "Кировская область",
+          "addressCountry": "RU"
+        },
+        "areaServed": { "@type": "AdministrativeArea", "name": "Кировская область" },
+        "openingHoursSpecification": [
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            "opens": "08:00",
+            "closes": "17:00"
+          }
+        ],
+        "knowsAbout": ["поверка средств измерений", "поверка счётчиков воды", "аттестация испытательного оборудования", "ФГИС Аршин"]
+      }
+    </script>
     <!-- manifest/иконки лежат в public/ и копируются как есть в корень dist —
          поэтому путь абсолютный и не зависит от base "/static/frontend/",
          который используется только для JS/CSS бандла (см. vite.config.ts). -->

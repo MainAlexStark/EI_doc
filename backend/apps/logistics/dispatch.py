@@ -424,7 +424,7 @@ def map_points(date_from: dt.date, date_to: dt.date) -> dict:
             "window_end": _t(stop.window_end), "planned_count": stop.planned_count,
             "employee_id": emp.pk, "employee": emp.full_name,
             "latitude": _f(stop.site.latitude), "longitude": _f(stop.site.longitude),
-            "work_order_id": stop.work_order_id, "note": stop.note,
+            "work_order_id": stop.work_order_id, "note": stop.note, "purpose": stop.purpose,
         }
         (points if row["latitude"] is not None and row["longitude"] is not None else unlocated).append(row)
 

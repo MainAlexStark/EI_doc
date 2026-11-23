@@ -83,6 +83,8 @@ export type MapPoint = {
   status?: "planned" | "done" | "no_answer" | "postponed" | "refused";
   status_display?: string;
   work_order_id?: number | null;
+  /** Зачем едем: поверка, забрать приборы, вернуть. */
+  purpose?: "visit" | "pickup" | "delivery";
   // только в очереди
   source?: string;
 };

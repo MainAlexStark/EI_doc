@@ -3,6 +3,9 @@ import { ApiError, call, json, type Me } from "../api";
 import Icon from "../ui/Icon";
 import { Modal } from "../ui/Modal";
 import { Alert, EmptyState, PageActions, SearchField, Spinner } from "../ui/controls";
+import { toast } from "../ui/Toast";
+import { programFromAttestation, type Plan, type PlanCheck } from "../modes/att-templates/api";
+import PlanEditor, { PlanCheckReport } from "../modes/att-templates/PlanEditor";
 
 /**
  * Аттестация испытательного оборудования (холодильники, термостаты, шкафы…).
@@ -12,24 +15,7 @@ import { Alert, EmptyState, PageActions, SearchField, Spinner } from "../ui/cont
  * ассистент, ни сервер их не придумывают. Расчёт и заключение — сервер.
  */
 
-type Point = { key: string; label: string; role: "volume" | "control"; groups: string[] };
-type Mode = { key: string; label: string; setpoint: string; params: Record<string, string> };
-type Tolerance = { kind: "range" | "abs" | "none"; min?: string; max?: string; limit?: string };
-type Characteristic = {
-  key: string; expr: string; text: string; per: "mode" | "point"; group: string; label: string; decimals: number;
-  tolerance: Tolerance; source: string;
-};
-type Condition = { key: string; label: string; unit: string; decimals: number };
-type PlanCheck = {
-  source?: string; ok?: boolean; stale?: boolean; errors?: string[]; unchecked?: string[];
-  rows?: { mode: string; key: string; label: string; point: string; expected: string; computed: string; ok: boolean }[];
-};
-type Plan = {
-  equipment_kind: string; program: string; documents: string[]; quantity: string; unit: string;
-  checked: { label: string; value: string }[]; repeats: number; points: Point[]; modes: Mode[];
-  characteristics: Characteristic[]; conditions: Condition[]; procedure: string[]; purpose: string;
-  periodicity: string; layout: unknown[];
-};
+// Типы плана и редактор плана — общие с режимом «Шаблоны аттестации» (modes/att-templates).
 type ModeMeasurements = { display: string; readings: Record<string, string[]> };
 type Result = {
   modes: {
@@ -98,18 +84,28 @@ async function download(id: number, fmt: "docx" | "pdf") {
 }
 
 // ===========================================================================
-export default function Attestations({ me }: { me: Me | null }) {
-  const [openId, setOpenId] = useState<number | null>(null);
-  if (openId) return <AttestationView id={openId} onBack={() => setOpenId(null)} />;
-  return <AttestationList me={me} onOpen={setOpenId} />;
+export default function Attestations({
+  me, initialOpenId = null, initialCreate = false, onProgramCreated,
+}: {
+  me: Me | null;
+  /** Сразу открыть аттестацию (из режима «Шаблоны аттестации» — «Применить к новому ИО»). */
+  initialOpenId?: number | null;
+  /** Сразу открыть окно «Новая аттестация». */
+  initialCreate?: boolean;
+  /** Из плана аттестации сделан шаблон — режим откроет его. */
+  onProgramCreated?: (programId: number) => void;
+}) {
+  const [openId, setOpenId] = useState<number | null>(initialOpenId);
+  if (openId) return <AttestationView id={openId} onBack={() => setOpenId(null)} onProgramCreated={onProgramCreated} />;
+  return <AttestationList me={me} onOpen={setOpenId} initialCreate={initialCreate} />;
 }
 
-function AttestationList({ me, onOpen }: { me: Me | null; onOpen: (id: number) => void }) {
+function AttestationList({ me, onOpen, initialCreate }: { me: Me | null; onOpen: (id: number) => void; initialCreate?: boolean }) {
   const [items, setItems] = useState<Summary[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(!!initialCreate);
   const canCreate = me?.role !== "observer";
 
   const load = useCallback(async () => {
@@ -254,7 +250,7 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (id: number) => void; 
 }
 
 // ===========================================================================
-function AttestationView({ id, onBack }: { id: number; onBack: () => void }) {
+function AttestationView({ id, onBack, onProgramCreated }: { id: number; onBack: () => void; onProgramCreated?: (programId: number) => void }) {
   const [data, setData] = useState<Detail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -292,6 +288,15 @@ function AttestationView({ id, onBack }: { id: number; onBack: () => void }) {
       <PageActions>
         <button type="button" disabled={busy} onClick={() => void run(() => download(id, "docx"))}><Icon name="download" size={16} /> Word</button>
         <button type="button" disabled={busy} onClick={() => void run(() => download(id, "pdf"))}><Icon name="download" size={16} /> PDF</button>
+        {onProgramCreated && (
+          <button type="button" disabled={busy} title="План этой аттестации станет шаблоном для других ИО того же вида"
+            onClick={() => void run(async () => {
+              const program = await programFromAttestation(id);
+              toast.success("Шаблон сделан по аттестации", { description: program.title, action: { label: "Открыть", onClick: () => onProgramCreated(program.id) } });
+            })}>
+            <Icon name="layers" size={16} /> Сделать шаблоном
+          </button>
+        )}
       </PageActions>
       <button type="button" className="back" onClick={onBack}>
         <Icon name="chevronLeft" size={20} /> Все аттестации
@@ -433,10 +438,9 @@ function CardEditor({ data, busy, onSave }: {
 function PlanView({ data, busy, onApprove, onSave }: {
   data: Detail; busy: boolean; onApprove: () => void; onSave: (plan: unknown) => void;
 }) {
-  const plan = data.plan;
-  const [raw, setRaw] = useState(() => JSON.stringify(plan, null, 2));
-  const [rawError, setRawError] = useState("");
-  useEffect(() => setRaw(JSON.stringify(data.plan, null, 2)), [data.plan]);
+  const [plan, setPlan] = useState<Plan>(data.plan);
+  useEffect(() => setPlan(data.plan), [data.plan]);
+  const dirty = JSON.stringify(plan) !== JSON.stringify(data.plan);
 
   return (
     <details className="card" open={!data.plan_approved}>
@@ -445,51 +449,26 @@ function PlanView({ data, busy, onApprove, onSave }: {
         {data.plan_approved
           ? <span className="pill ok">проверил {data.plan_approved_by}</span>
           : <span className="pill warn">ждёт проверки метролога</span>}
+        {data.plan_check?.rows && (data.plan_check.stale
+          ? <span className="pill warn">сверка устарела</span>
+          : data.plan_check.ok ? <span className="pill ok">формулы сходятся</span> : <span className="pill bad">формулы не сходятся</span>)}
       </summary>
-      <p className="sub">{plan.program}</p>
-      <p>
-        {plan.quantity}, {plan.unit} · режимы: {plan.modes.map((m) => `${m.label} (задано ${comma(m.setpoint)}${
-          Object.keys(m.params ?? {}).length ? `; ${Object.entries(m.params).map(([k, v]) => `${k} = ${comma(v)}`).join(", ")}` : ""})`).join(", ")} ·{" "}
-        точек: {plan.points.length} (контрольные: {plan.points.filter((p) => p.role === "control").map((p) => p.label).join(", ") || "нет"}) ·{" "}
-        измерений в точке: {plan.repeats}
+      <p className="sub">
+        {data.plan.program} · {data.plan.quantity}, {data.plan.unit} · режимов {data.plan.modes.length} · точек {data.plan.points.length} ·
+        измерений в точке {data.plan.repeats}{data.plan.modes.length ? ` · ${data.plan.modes.map((m) => `${m.label} (задано ${comma(m.setpoint)})`).join(", ")}` : ""}
       </p>
-      <div className="table-wrap">
-        <table className="compact">
-          <thead><tr><th>Характеристика</th><th>Формула (как считает EI_doc)</th><th>Допуск</th><th>Источник</th></tr></thead>
-          <tbody>
-            {plan.characteristics.map((c) => (
-              <tr key={c.key}>
-                <td>{c.label}{c.per === "point" && <span className="sub"> · по точкам{c.group !== "all" ? ` группы ${c.group}` : ""}</span>}</td>
-                <td><div>{c.text}</div><code className="sub">{c.key} = {c.expr}</code></td>
-                <td>{data.plan_tolerances[c.key] ?? "—"}</td>
-                <td className="sub">{c.source || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <PlanEditor plan={plan} onChange={setPlan} readOnly={!data.can_edit} check={data.plan_check} tolerances={data.plan_tolerances} />
+      <div className="actions">
+        {data.can_edit && (
+          <button type="button" disabled={busy || !dirty} onClick={() => onSave(plan)} title="После правки план снова проверяет метролог">
+            Сохранить план
+          </button>
+        )}
+        {dirty && <span className="sub">есть несохранённые правки — после сохранения план снова проверяет метролог</span>}
+        {data.can_review && !data.plan_approved && (
+          <button type="button" className="primary" disabled={busy || dirty} onClick={onApprove}>План проверен</button>
+        )}
       </div>
-      <PlanCheckView check={data.plan_check} />
-      {plan.layout?.length > 0 && <p className="sub">Вид протокола — по каркасу из примера ({plan.layout.length} блоков).</p>}
-      {data.can_edit && (
-        <details>
-          <summary className="sub">Править план (JSON) — после правки план снова проверяет метролог</summary>
-          <textarea className="code" rows={16} value={raw} onChange={(e) => setRaw(e.target.value)} />
-          {rawError && <div className="error">{rawError}</div>}
-          <button type="button" disabled={busy} onClick={() => {
-            try {
-              setRawError("");
-              onSave(JSON.parse(raw));
-            } catch {
-              setRawError("Это не JSON — проверьте скобки и кавычки");
-            }
-          }}>Сохранить план</button>
-        </details>
-      )}
-      {data.can_review && !data.plan_approved && (
-        <div className="actions">
-          <button type="button" className="primary" disabled={busy} onClick={onApprove}>План проверен</button>
-        </div>
-      )}
     </details>
   );
 }
@@ -641,36 +620,5 @@ function ResultsView({ data }: { data: Detail }) {
   );
 }
 
-function PlanCheckView({ check }: { check: PlanCheck }) {
-  if (!check || !check.rows) {
-    return <p className="sub">Сверки формул с примером нет — метролог сверяет формулы с методикой.</p>;
-  }
-  return (
-    <details className="plan-check" open={!check.ok || check.stale}>
-      <summary>
-        Сверка с примером{check.source ? ` (${check.source})` : ""}:{" "}
-        {check.stale ? <span className="pill warn">план менялся после сверки</span>
-          : check.ok ? <span className="pill ok">всё сходится</span> : <span className="pill bad">есть расхождения</span>}
-      </summary>
-      <div className="table-wrap">
-        <table className="compact">
-          <thead><tr><th>Режим</th><th>Характеристика</th><th>В примере</th><th>Посчитано</th><th /></tr></thead>
-          <tbody>
-            {check.rows.map((r, i) => (
-              <tr key={i}>
-                <td>{r.mode}</td>
-                <td>{r.label}{r.point && <span className="sub">, точка {r.point}</span>}</td>
-                <td className="num">{r.expected}</td>
-                <td className="num">{r.computed}</td>
-                <td>{r.ok ? <span className="pill ok">да</span> : <span className="pill bad">нет</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {(check.errors ?? []).length > 0 && <ul className="problems">{check.errors!.map((e) => <li key={e}>{e}</li>)}</ul>}
-      {(check.unchecked ?? []).length > 0 && <p className="sub">Не с чем сверить: {check.unchecked!.join(", ")}</p>}
-    </details>
-  );
-}
-
+// Отчёт сверки — PlanCheckReport (modes/att-templates/PlanEditor).
+export { PlanCheckReport };

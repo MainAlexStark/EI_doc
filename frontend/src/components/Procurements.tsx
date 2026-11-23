@@ -524,7 +524,7 @@ export function ProcurementForm({
   );
 }
 
-function PassModal({
+export function PassModal({
   procurement, pass, onClose, onSaved,
 }: {
   procurement: Procurement;

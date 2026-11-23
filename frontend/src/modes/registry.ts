@@ -26,14 +26,14 @@ export const SECTIONS: SectionDef[] = [
     key: "city", title: "Город", short: "Город", icon: "route", digit: 1, group: "modes",
     description: "Выезды по Кирову и Яранску: адреса дня, окна, забор коробок",
     component: lazy(() => import("./city")),
-    primary: { label: "Запись", icon: "plus", action: "new-visit" },
+    primary: { label: "Новое", icon: "plus", action: "new" },  // меню: Запись / Забрать коробку
     keywords: "выезды адреса день маршрут киров яранск забрать коробку",
   },
   {
     key: "trips", title: "Командировки", short: "Поездки", icon: "car", digit: 2, group: "modes",
     description: "Поездки на несколько дней: районы, сёла, адреса по дням, офлайн",
     component: lazy(() => import("./trips")),
-    primary: { label: "Командировка", icon: "plus", action: "new-trip" },
+    primary: { label: "Командировка", icon: "plus", action: "new" },
     keywords: "командировка поездка район село выезд",
   },
   {
@@ -59,19 +59,22 @@ export const SECTIONS: SectionDef[] = [
     key: "requests", title: "Заявки", short: "Заявки", icon: "inbox", digit: 6, group: "modes",
     description: "Входящие с сайта и по телефону: разбор на потоке, назначение",
     visible: manager, component: lazy(() => import("./requests")), flush: true,
+    primary: { label: "Запись", icon: "phone", action: "new" },
     keywords: "заявка входящие сайт телефон назначить",
   },
   {
     key: "si-templates", title: "Шаблоны поверки СИ", short: "Шаблоны", icon: "layers", digit: 7, group: "modes",
     description: "Тип в ФИФ → методика → шаблон протокола вместе с ассистентом",
     component: lazy(() => import("./si-templates")), flush: true,
-    keywords: "шаблон протокол методика фиф аршин тип си",
+    primary: { label: "Новый шаблон", icon: "plus", action: "new" },
+    keywords: "шаблон протокол методика фиф аршин тип си поверка метролог проверка",
   },
   {
     key: "att-templates", title: "Шаблоны аттестации", short: "Аттестация", icon: "shield", digit: 8, group: "modes",
     description: "Аттестация ИО по ГОСТ Р 8.568: план, формулы, протокол",
     visible: manager, component: lazy(() => import("./att-templates")),
-    keywords: "аттестация испытательное оборудование ио гост 8.568",
+    primary: { label: "Новый шаблон", icon: "plus", action: "new" },
+    keywords: "аттестация испытательное оборудование ио гост 8.568 холодильник термостат шкаф камера план формулы",
   },
 
   // --- Работа ------------------------------------------------------------

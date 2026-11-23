@@ -1,0 +1,93 @@
+/* Режим «Город» — день поверителя на телефоне в машине: крупно, одним касанием. */
+
+.city { max-width: 760px; display: flex; flex-direction: column; gap: 12px; touch-action: pan-y; }
+.city.is-wide { max-width: 1240px; }
+.city.is-wide > :not(.city-split):not(.dispatch) { max-width: 760px; }
+
+.city-head { display: flex; flex-direction: column; gap: 8px; }
+.city-day-nav { display: flex; align-items: center; gap: 6px; }
+.city-day-title { position: relative; font-size: 20px; font-weight: 650; letter-spacing: -0.01em; padding: 2px 6px; border-radius: 8px; cursor: pointer; }
+.city-day-title:hover { background: var(--hover); }
+.city-day-title input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.city-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.city-people .chip small { color: var(--graphite); }
+
+/* --- прогресс дня ----------------------------------------------------- */
+.city-progress { display: flex; flex-direction: column; gap: 6px; }
+.city-progress-text { font-size: 15px; }
+.city-progress-text b { font-size: 22px; }
+.city-bar { display: flex; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.city-bar i { display: block; height: 100%; transition: width var(--dur-3) var(--ease-out); }
+.city-bar i.ok { background: var(--pass); }
+.city-bar i.miss { background: var(--signal); }
+.city-all-done { display: flex; gap: 8px; align-items: center; color: var(--ok); font-weight: 600; padding: 10px 4px; }
+
+/* --- следующий адрес -------------------------------------------------- */
+.city-next, .trips-next {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  background-image: linear-gradient(90deg, var(--accent) 0 4px, transparent 4px);
+}
+.city-next.pickup { background-image: linear-gradient(90deg, var(--signal) 0 4px, transparent 4px); }
+.city-next.delivery { background-image: linear-gradient(90deg, var(--purple-dot) 0 4px, transparent 4px); }
+.city-next-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.city-next-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--graphite); display: inline-flex; gap: 5px; align-items: center; }
+.city-window { font-weight: 650; color: var(--signal-ink); background: var(--warn-soft); padding: 2px 8px; border-radius: 999px; font-size: 14px; }
+.city-eta { color: var(--graphite); font-size: 13px; font-family: var(--font-data); }
+button.city-next-address { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+.city-next-address b { font-size: 19px; line-height: 1.25; font-weight: 650; }
+.city-next-address span { color: var(--graphite); font-size: 14px; }
+.city-restricted { display: flex; gap: 6px; align-items: center; color: var(--warn); font-size: 13px; }
+.city-big-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.city-big-actions > .btn, .city-big-actions > button { min-height: 52px; justify-content: center; font-size: 15px; }
+.city-marks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.city-marks button.trip-mark { min-height: 48px; }
+
+.city-route-bar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* --- список ----------------------------------------------------------- */
+.city-row { position: relative; }
+.city-row.is-closed { opacity: 0.72; }
+.city-row-actions { position: absolute; right: 10px; bottom: 8px; display: flex; gap: 4px; }
+.city-row .trip-stop { padding-right: 96px; }
+.city-foot { margin: 4px; }
+
+/* --- создание --------------------------------------------------------- */
+.city-create { display: flex; flex-direction: column; gap: 10px; }
+button.city-create-btn {
+  display: flex; gap: 14px; align-items: center; text-align: left; justify-content: flex-start;
+  min-height: 72px; padding: 12px 16px; border-radius: 12px; white-space: normal;
+}
+.city-create-btn span { display: flex; flex-direction: column; gap: 2px; }
+.city-create-btn b { font-size: 16px; }
+.city-create-btn small { color: var(--graphite); font-size: 13px; font-weight: 400; }
+
+.city-suggest { position: relative; }
+.city-suggest-list {
+  position: absolute; z-index: 5; top: 100%; left: 0; right: 0; margin-top: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 14%, transparent);
+  display: flex; flex-direction: column; max-height: 300px; overflow: auto;
+}
+.city-suggest-list button { all: unset; cursor: pointer; padding: 9px 12px; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--rule); }
+.city-suggest-list button:hover, .city-suggest-list button:focus-visible { background: var(--accent-softer); }
+.city-suggest-list .sub { font-size: 12px; color: var(--graphite); }
+
+/* --- офлайн (общий с «Командировками») --------------------------------- */
+.offline-strip {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 10px;
+  background: var(--warn-soft); color: var(--warn); font-size: 13px;
+}
+.offline-strip.is-off { background: var(--crit-soft); color: var(--crit); }
+
+/* метки забора / возврата на карте */
+.trip-pin { position: relative; }
+.trip-pin > i { position: absolute; right: -6px; top: -6px; font-style: normal; font-size: 10px; line-height: 14px; width: 14px; height: 14px; border-radius: 50%; background: var(--signal); color: var(--on-accent); text-align: center; }
+.trip-pin.purpose-delivery > i { background: var(--purple-dot); }
+.trip-pin.tinted { background: var(--c); }
+.trip-pin.tinted.done { opacity: 0.6; }
+
+@media (max-width: 760px) {
+  .city-day-title { font-size: 18px; }
+  .city-marks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .city-big-actions > .btn, .city-big-actions > button { min-height: 56px; flex-direction: column; gap: 2px; font-size: 13px; }
+}

@@ -9,8 +9,12 @@ import Icon from "../../ui/Icon";
 export type PickPerson = { id: number; name: string; color?: string; hint?: string; muted?: boolean };
 
 export default function AssignPicker({
-  people, currentId, date, withDate = true, withTime = false, busy, onPick, compact,
+  people, currentId, date, withDate = true, withTime = false, busy, onPick, compact, onDayChange, numbered,
 }: {
+  /** Сообщать выбранный день наружу (клавиши 1–9 на карте назначают на него). */
+  onDayChange?: (day: string) => void;
+  /** Показать номера 1…9 у людей — подсказка клавиш. */
+  numbered?: boolean;
   people: PickPerson[];
   currentId?: number | null;
   date?: string | null;
@@ -29,7 +33,7 @@ export default function AssignPicker({
           {withDate && (
             <label>
               <span>День</span>
-              <input type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+              <input type="date" value={day} onChange={(e) => { setDay(e.target.value); onDayChange?.(e.target.value); }} />
             </label>
           )}
           {withTime && (
@@ -41,7 +45,7 @@ export default function AssignPicker({
         </div>
       )}
       <div className="assign-people" role="listbox" aria-label="Кому">
-        {people.map((p) => (
+        {people.map((p, index) => (
           <button
             type="button"
             key={p.id}
@@ -52,6 +56,7 @@ export default function AssignPicker({
             onClick={() => onPick(p.id, day || null, time || null)}
             title={p.hint}
           >
+            {numbered && index < 9 && <kbd className="kbd-hint assign-num">{index + 1}</kbd>}
             <span className="dot" style={{ background: p.color ?? "var(--faint)" }} />
             <span className="who">{p.name}</span>
             {p.hint && <span className="hint">{p.hint}</span>}

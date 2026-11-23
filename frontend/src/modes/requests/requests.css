@@ -1,0 +1,102 @@
+/* Режим «Заявки» — разбор потоком. Основа — .split/.mail-item из styles.css. */
+
+.rq-loading { padding: 20px; max-width: 420px; }
+
+.rq-toolbar { display: flex; align-items: center; gap: 8px; }
+.rq-toolbar .segmented { flex: 1; }
+.rq-search { position: relative; }
+.rq-search input { padding-right: 34px; }
+.rq-search .kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.rq-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.rq-filters select { min-height: 32px; font-size: 13px; padding-top: 4px; padding-bottom: 4px; }
+
+/* строка списка: чекбокс появляется при наведении и при выделении */
+.rq-item { cursor: pointer; padding-left: 34px; outline: none; }
+.rq-item .unread { left: 10px; }
+.rq-check {
+  position: absolute; left: 8px; top: 11px; width: 16px; height: 16px; margin: 0;
+  opacity: 0; transition: opacity var(--dur-1) var(--ease-out); accent-color: var(--accent);
+}
+.rq-item:hover .rq-check, .rq-item.is-selected .rq-check, .rq-check:focus-visible { opacity: 1; }
+.rq-item:hover .unread, .rq-item.is-selected .unread { opacity: 0; }
+.rq-item.is-selected:not(.active) { background: var(--accent-soft); }
+.rq-item.is-fresh:not(.active) {
+  background: color-mix(in srgb, var(--signal) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--signal);
+  animation: rq-arrive 1.2s var(--ease-out) 1;
+}
+@keyframes rq-arrive { from { background: color-mix(in srgb, var(--signal) 30%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .rq-item.is-fresh { animation: none; } .rq-check { transition: none; } }
+@media (hover: none) { .rq-check { opacity: 1; } .rq-item .unread { display: none; } }
+
+.rq-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px 12px;
+  border-top: 0.5px solid var(--hair); font-size: 11.5px; color: var(--graphite);
+}
+
+/* карточка */
+.rq-detail { outline: none; }
+.rq-card { display: flex; flex-direction: column; gap: 14px; }
+.rq-card-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.rq-card-titles { flex: 1; min-width: 220px; }
+.rq-card-meta { font-size: 13px; color: var(--graphite); }
+.rq-card h2 { margin: 4px 0 0; font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
+.rq-contacts { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--rule); border-radius: 12px; padding: 4px; }
+.rq-contact { display: flex; align-items: center; gap: 4px; }
+.rq-contact-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px;
+  color: var(--ink); text-decoration: none; font-size: 14.5px;
+}
+.rq-contact-main .icon { color: var(--graphite); flex: none; }
+.rq-contact-main:hover { background: var(--accent-softer); color: var(--accent-ink); }
+.rq-contact-main.data { font-size: 16px; font-weight: 600; }
+.rq-note { margin: -4px 0 0; display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.rq-facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 14px; }
+.rq-facts > div { display: contents; }
+.rq-facts dt { color: var(--graphite); }
+.rq-facts dd { margin: 0; }
+.rq-inline { margin-left: 8px; }
+.rq-h { margin: 6px 2px -6px; font-size: 13px; font-weight: 600; color: var(--graphite); text-transform: uppercase; letter-spacing: 0.04em; }
+.rq-sum { min-width: 84px; text-align: right; }
+
+.rq-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.rq-actions .grow { flex: 1; }
+.rq-actions button { display: inline-flex; align-items: center; gap: 6px; }
+.rq-actions .kbd { margin-left: 2px; }
+.sheet-foot .rq-actions { margin: 0; padding: 0; border: 0; width: 100%; }
+
+/* выделено несколько */
+.rq-batch { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.rq-batch-count {
+  font-size: 44px; line-height: 1; font-weight: 600; color: var(--accent);
+  padding: 10px 16px; border-radius: 14px; background: var(--accent-softer);
+}
+.rq-batch h2 { margin: 0; font-size: 22px; }
+.rq-batch p { margin: 0; }
+.rq-batch-list { list-style: none; margin: 0; padding: 0; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.rq-batch .rq-actions { width: 100%; }
+
+.rq-picker-hint { margin-top: 12px; }
+
+/* телефон: список во весь экран, карточка листом */
+@media (max-width: 760px) {
+  .split.rq { grid-template-columns: 1fr; height: auto; min-height: 0; border-top: 0; }
+  .split.rq .split-list { border-right: 0; }
+  .split.rq .split-list-body { overflow: visible; padding-bottom: 90px; }
+  .rq-item { padding-top: 12px; padding-bottom: 12px; }
+  .rq-check { top: 14px; width: 20px; height: 20px; }
+  .rq-item { padding-left: 40px; }
+  .rq-actions button { min-height: 44px; flex: 1 1 auto; justify-content: center; }
+  .rq-actions .grow { display: none; }
+  .rq-card h2 { font-size: 21px; }
+  .rq-phone-batch {
+    position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 30;
+    display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-radius: 14px;
+    background: var(--ink); color: var(--paper); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  }
+  .rq-phone-batch span { flex: 1; font-weight: 600; }
+  .rq-phone-batch .ghost { color: var(--paper); }
+}

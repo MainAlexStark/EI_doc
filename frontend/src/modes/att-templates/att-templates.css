@@ -1,0 +1,87 @@
+/* Режим «Шаблоны аттестации» (шаги, строки списка, баннер проверки — из si-templates.css). */
+
+.att-mode { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.att-tabs { display: flex; }
+.att-page { display: flex; flex-direction: column; gap: 14px; max-width: 1120px; width: 100%; }
+.att-back { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; align-self: flex-start; }
+.att-off { display: inline-flex; gap: 6px; align-items: center; }
+.att-kinds { display: flex; flex-direction: column; gap: 12px; }
+.att-kind { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.att-kind-head { display: flex; align-items: center; gap: 10px; }
+.att-kind .si-rows { border-radius: 10px; }
+.att-missing-kinds, .att-kind-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+/* --- новый шаблон ---------------------------------------------------- */
+.att-new { animation: pop-in var(--dur-2) var(--ease-out); }
+.att-docs-form { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.att-docs-form .si-files select { font-size: 12.5px; min-height: 28px; padding: 2px 6px; max-width: 190px; }
+.att-build {
+  display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; min-height: 0;
+  height: calc(100dvh - var(--head-top, 64px) - var(--tabbar-h, 0px) - 120px); min-height: 460px;
+}
+.att-build-chat { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.att-build-side { padding: 14px; display: flex; flex-direction: column; gap: 10px; align-self: start; }
+.att-build-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.att-build-side .link { align-self: flex-start; font-size: 12.5px; }
+
+/* --- шаблон ---------------------------------------------------------- */
+.att-program-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.att-program-head .grow { flex: 1; min-width: 260px; }
+.att-title-input {
+  width: 100%; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; border: 1px solid transparent;
+  background: transparent; padding: 2px 6px; margin-left: -6px; border-radius: 8px;
+}
+.att-title-input:hover:not(:disabled), .att-title-input:focus { border-color: var(--rule); background: var(--surface); }
+.att-meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.att-meta label { display: inline-flex; align-items: center; gap: 6px; }
+.att-meta label input { min-height: 28px; padding: 2px 8px; font-size: 13px; width: 220px; }
+.att-plan-card { padding: 14px 16px; }
+.att-program-foot { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.att-sources ul { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
+
+/* --- редактор плана -------------------------------------------------- */
+.att-plan { display: flex; flex-direction: column; gap: 14px; }
+.att-tables { display: flex; flex-direction: column; gap: 20px; }
+.att-tables h4 { margin: 0 0 8px; font-size: 14px; display: flex; gap: 8px; align-items: baseline; }
+.att-tables h4 .sub { font-weight: 400; font-size: 12px; }
+.att-general .field.wide { grid-column: 1 / -1; }
+table.att-edit td { padding: 3px 4px; vertical-align: middle; }
+table.att-edit input, table.att-edit select { width: 100%; min-height: 30px; padding: 3px 8px; font-size: 13px; }
+table.att-edit td.k { width: 84px; }
+table.att-edit td.num { width: 110px; }
+table.att-edit td:last-child { width: 36px; }
+table.att-edit tr.control td { background: var(--accent-softer, transparent); }
+.att-add { margin-top: 6px; }
+.att-chars { display: flex; flex-direction: column; gap: 10px; }
+.att-char { border: 1px solid var(--rule); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.att-char-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.att-char-label { flex: 1; min-width: 200px; font-weight: 600; }
+.att-char-key { width: 110px; }
+.att-char-row select { width: auto; min-height: 32px; }
+.att-char-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.4fr) 80px; gap: 8px 10px; }
+.att-char-grid .field { margin: 0; }
+.att-char-grid .field.wide { grid-column: 1 / -1; }
+.att-tol-row { display: flex; gap: 6px; }
+.att-tol-row select { width: 120px; flex: 0 0 auto; }
+.att-tol-row input { flex: 1; min-width: 0; }
+.att-char-foot { font-size: 12px; }
+input.att-missing { border-color: var(--fail); }
+.att-json textarea { width: 100%; font-size: 12.5px; line-height: 1.45; }
+
+/* --- сверка с примером ----------------------------------------------- */
+.att-check { display: flex; flex-direction: column; gap: 8px; }
+.att-check.empty { flex-direction: row; gap: 8px; align-items: flex-start; color: var(--graphite); font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.att-check-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.att-check-table tr.bad td { background: var(--crit-soft, var(--warn-soft)); color: var(--fail-ink, var(--fail)); }
+.att-check-table td .pass-text, .att-check-table td .fail-text { display: inline-flex; gap: 3px; align-items: center; }
+
+@media (max-width: 900px) {
+  .att-build { grid-template-columns: 1fr; height: auto; }
+  .att-build-chat { height: 70dvh; }
+  .att-char-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .att-char-grid { grid-template-columns: 1fr; }
+  .att-meta label input { width: 160px; }
+}
+@media (prefers-reduced-motion: reduce) { .att-new { animation: none; } }

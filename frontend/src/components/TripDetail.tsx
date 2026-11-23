@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   addTripStop,
   addTripStopsBulk,
@@ -60,7 +60,7 @@ const TripMap = lazy(() => import("./TripMap"));
 
 type Filter = "all" | "planned" | "done" | "missed";
 
-const MARKS: { status: StopStatus; label: string; icon: IconName }[] = [
+export const MARKS: { status: StopStatus; label: string; icon: IconName }[] = [
   { status: "done", label: "Выполнен", icon: "checkCircle" },
   { status: "no_answer", label: "Не открыли", icon: "lock" },
   { status: "postponed", label: "Перенос", icon: "clock" },
@@ -624,7 +624,7 @@ export default function TripDetail({
   );
 }
 
-function StopRow({
+export function StopRow({
   stop, me, active, onOpen, showDay = false,
 }: {
   stop: TripStop;
@@ -655,6 +655,8 @@ function StopRow({
           </div>
         )}
         <div className="trip-tags">
+          {stop.purpose === "pickup" && <span className="pill info"><Icon name="box" size={12} /> забрать</span>}
+          {stop.purpose === "delivery" && <span className="pill purple"><Icon name="truck" size={12} /> вернуть</span>}
           {stop.status !== "planned" && <span className={`pill ${STOP_TONE[stop.status]}`}>{stop.status_display}</span>}
           {stop.status === "planned" && stop.eta && (
             <span className={`pill ${isLate(stop) ? "bad" : "info"} plain`} title="Приезд по плану маршрута">
@@ -684,9 +686,11 @@ function StopRow({
   );
 }
 
-function StopSheet({
-  stop, trip, canEdit, busy, index, total, onClose, onWork, onMark, onMove, onRemove, onSaved, onPlaceOnMap, onError,
+export function StopSheet({
+  stop, trip, canEdit, busy, index, total, onClose, onWork, onMark, onMove, onRemove, onSaved, onPlaceOnMap, onError, primary,
 }: {
+  /** Своя главная кнопка вместо «Поверять приборы» (забор / возврат в «Городе»). */
+  primary?: ReactNode;
   stop: TripStop;
   trip: Trip;
   canEdit: boolean;
@@ -768,9 +772,11 @@ function StopSheet({
           </Alert>
         )}
 
-        <button type="button" className="primary big" disabled={stop.work_order_id == null} onClick={onWork}>
-          <Icon name="gauge" /> {stop.verifications_total > 0 ? "Приборы и измерения" : "Поверять приборы"}
-        </button>
+        {primary ?? (
+          <button type="button" className="primary big" disabled={stop.work_order_id == null} onClick={onWork}>
+            <Icon name="gauge" /> {stop.verifications_total > 0 ? "Приборы и измерения" : "Поверять приборы"}
+          </button>
+        )}
 
         <div className="trip-quick">
           {hasPoint(stop) ? (
@@ -905,7 +911,7 @@ function StopSheet({
   );
 }
 
-function AddStopModal({
+export function AddStopModal({
   trip, procurement, onClose, onAdded,
 }: {
   trip: Trip;
@@ -1165,7 +1171,7 @@ function AddStopModal({
   );
 }
 
-function BulkModal({ trip, onClose, onAdded }: { trip: Trip; onClose: () => void; onAdded: (trip: Trip, notice: string) => void }) {
+export function BulkModal({ trip, onClose, onAdded }: { trip: Trip; onClose: () => void; onAdded: (trip: Trip, notice: string) => void }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -1221,7 +1227,7 @@ function BulkModal({ trip, onClose, onAdded }: { trip: Trip; onClose: () => void
   );
 }
 
-function EditTripModal({
+export function EditTripModal({
   trip, isManager, onClose, onSaved, onDelete,
 }: {
   trip: Trip;
@@ -1325,7 +1331,7 @@ function EditTripModal({
   );
 }
 
-function NextVisitModal({ trip, onClose, onCreated }: { trip: Trip; onClose: () => void; onCreated: (id: number) => void }) {
+export function NextVisitModal({ trip, onClose, onCreated }: { trip: Trip; onClose: () => void; onCreated: (id: number) => void }) {
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1383,19 +1389,19 @@ function NextVisitModal({ trip, onClose, onCreated }: { trip: Trip; onClose: () 
 // ---------------------------------------------------------------------------
 // Маршрут дня (apps/logistics/planner.py)
 // ---------------------------------------------------------------------------
-const clock = (iso: string) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+export const clock = (iso: string) => new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 
-const duration = (minutes: number) => {
+export const duration = (minutes: number) => {
   if (minutes < 60) return `${minutes} мин`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
 };
 
-const windowText = (stop: TripStop) =>
+export const windowText = (stop: TripStop) =>
   stop.window_end ? `${stop.window_start}–${stop.window_end}` : `с ${stop.window_start}`;
 
-const isLate = (stop: TripStop) => {
+export const isLate = (stop: TripStop) => {
   if (!stop.eta || !stop.window_end) return false;
   const eta = new Date(stop.eta);
   const [h, m] = stop.window_end.split(":").map(Number);
@@ -1408,7 +1414,7 @@ const localInput = (date: Date) => {
 };
 
 /** Когда выезжаем: если день выезда сегодня или уже идёт — сейчас (с округлением), иначе начало рабочего дня. */
-function defaultDeparture(trip: Trip): string {
+export function defaultDeparture(trip: Trip): string {
   const now = new Date();
   const day = trip.date_start ? new Date(`${trip.date_start}T${trip.work_day[0]}:00`) : null;
   if (!day || day.getTime() <= now.getTime() || trip.status === "active") {
@@ -1418,9 +1424,9 @@ function defaultDeparture(trip: Trip): string {
   return localInput(day);
 }
 
-const spansDays = (trip: Trip) => !!(trip.date_start && trip.date_end && trip.date_end > trip.date_start);
+export const spansDays = (trip: Trip) => !!(trip.date_start && trip.date_end && trip.date_end > trip.date_start);
 
-function planDefaults(trip: Trip): PlanPayload {
+export function planDefaults(trip: Trip): PlanPayload {
   const last = trip.route;
   return {
     start: trip.has_base ? "base" : "me",
@@ -1433,10 +1439,10 @@ function planDefaults(trip: Trip): PlanPayload {
   };
 }
 
-const dayLabel = (iso: string) =>
+export const dayLabel = (iso: string) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString("ru-RU", { weekday: "short", day: "numeric", month: "long" });
 
-function RouteCard({
+export function RouteCard({
   route, canEdit, busy, onReplan, onFromMe,
 }: {
   route: RouteSummary;
@@ -1473,7 +1479,7 @@ function RouteCard({
   );
 }
 
-function PlanModal({
+export function PlanModal({
   trip, me, onClose, onApplied,
 }: {
   trip: Trip;

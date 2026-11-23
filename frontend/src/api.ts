@@ -1241,6 +1241,8 @@ export type OwnInstrumentHistory = {
   verifications_count: number;
   last: {
     verification_id: number;
+    /** Наряд этой поверки (выезд или приёмка). */
+    work_order_id?: number | null;
     verified_at: string | null;
     next_verification_date: string | null;
     suitable: boolean;
@@ -1382,6 +1384,11 @@ export type TripStop = {
   service_minutes: number | null;
   eta: string | null;
   drive_minutes: number | null;
+  /** Зачем едем: поверка на месте, забрать приборы у юрлица, вернуть после поверки. */
+  purpose?: "visit" | "pickup" | "delivery";
+  purpose_display?: string;
+  /** Приёмка, связанная с адресом (забор / возврат). */
+  lab_order_id?: number | null;
 };
 
 export type TripSummary = {

@@ -1,0 +1,151 @@
+/* Режим «Шаблоны поверки СИ» (+ шаги «.flow-steps», общие с «Шаблонами аттестации»). */
+
+.si-mode { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.si-page { padding: 6px 32px 48px; max-width: 1120px; width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.si-page-foot { padding-top: 4px; }
+.si-section-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--graphite); }
+
+/* --- шаги ------------------------------------------------------------ */
+.flow-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; flex-wrap: wrap; counter-reset: none; }
+.flow-step { display: flex; align-items: center; }
+.flow-step + .flow-step::before { content: ""; width: 18px; height: 1px; background: var(--rule); margin-right: 6px; }
+.flow-step button {
+  display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px 6px;
+  min-height: 0; font-size: 13px; color: var(--graphite); border-radius: 8px; box-shadow: none;
+}
+.flow-step button:disabled { opacity: 1; cursor: default; }
+.flow-step.done button:hover { background: var(--fill-hover); color: var(--ink); }
+.flow-num {
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto;
+  font-family: var(--font-data); font-size: 12px; font-weight: 600;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--graphite);
+}
+.flow-step.done .flow-num { background: var(--pass); border-color: var(--pass); color: #fff; }
+.flow-step.current .flow-num { background: var(--ultramarine); border-color: var(--ultramarine); color: var(--on-accent, #fff); }
+.flow-step.current .flow-label { color: var(--ink); font-weight: 600; }
+.flow-steps.compact .flow-label { display: none; }
+.flow-steps.compact .flow-step.current .flow-label { display: inline; }
+.flow-steps.compact .flow-step + .flow-step::before { width: 10px; margin-right: 2px; }
+
+/* --- шаги 1–2 -------------------------------------------------------- */
+.si-new { display: flex; flex-direction: column; gap: 16px; max-width: 860px; animation: pop-in var(--dur-2) var(--ease-out); }
+.si-new-head h2 { margin: 4px 0 4px; font-size: 24px; font-weight: 650; letter-spacing: -0.02em; }
+.si-new-head p { margin: 0; }
+.si-new-head .alert { margin-top: 10px; }
+.si-back { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
+.si-search-card { padding: 16px 18px; }
+.si-recent { display: flex; flex-direction: column; gap: 8px; }
+.si-recent-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; }
+.si-recent-item {
+  display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: 2px 8px; text-align: left;
+  padding: 10px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); min-height: 0;
+}
+.si-recent-item b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-recent-item .pill { grid-row: 1 / 3; grid-column: 2; align-self: center; }
+.si-recent-item:hover { border-color: var(--ultramarine); }
+
+.si-docs-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.si-docs { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.si-docs .sub { margin: 0; }
+.si-doc-group { display: flex; flex-direction: column; gap: 6px; }
+.si-doc-skel { display: flex; flex-direction: column; gap: 8px; }
+.si-doc {
+  display: flex; align-items: center; gap: 8px; text-align: left; padding: 8px 10px; min-height: 0;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); font-size: 13px;
+}
+.si-doc:hover { border-color: var(--ultramarine); }
+.si-doc .grow, .si-files .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-drop { border-style: dashed; transition: border-color var(--dur-1), background var(--dur-1); }
+.si-drop.over { border-color: var(--ultramarine); background: var(--accent-softer, var(--surface-2)); }
+.si-drop > button { align-self: flex-start; }
+.si-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.si-files li { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.si-note textarea { min-height: 56px; }
+.si-step-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+.si-step-actions .primary { display: inline-flex; gap: 8px; align-items: center; }
+
+/* --- список ---------------------------------------------------------- */
+.si-list { display: flex; flex-direction: column; gap: 14px; }
+.si-list-head h2 { margin: 0 0 4px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+.si-list-head p { margin: 0; max-width: 720px; }
+.si-list-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.si-list-tools .grow { flex: 1; min-width: 220px; }
+.si-review-banner {
+  display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 14px; min-height: 0;
+  border: 1px solid var(--signal); background: var(--warn-soft); border-radius: 10px; color: var(--ink);
+}
+.si-review-banner .sub { color: var(--graphite); }
+.si-rows { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); overflow: hidden; }
+.si-row {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px; text-align: left; border: 0; border-radius: 0;
+  background: transparent; min-height: 56px; box-shadow: none; border-top: 1px solid var(--rule);
+}
+.si-row:first-child { border-top: 0; }
+.si-row:hover { background: var(--fill-hover); }
+.si-row.review { background-image: linear-gradient(90deg, var(--signal) 0 3px, transparent 3px); }
+.si-row-icon { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: 0 0 auto; }
+.si-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.si-row-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-row-main .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.si-row-go { color: var(--faint, var(--muted)); }
+
+/* --- студия ---------------------------------------------------------- */
+.si-studio {
+  display: flex; flex-direction: column; background: var(--surface); overflow: hidden;
+  height: calc(100dvh - var(--head-top, 64px) - var(--tabbar-h, 0px)); min-height: 420px;
+}
+.si-studio-head {
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px; min-height: 50px; flex-wrap: wrap;
+  border-bottom: 0.5px solid var(--hair);
+}
+.si-studio-title { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; }
+.si-studio-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; }
+.si-studio-title .sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-studio-error { padding: 24px; display: flex; flex-direction: column; gap: 12px; max-width: 620px; }
+.si-studio-skel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.si-skel-pane { padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+.si-wait-skel { align-self: stretch; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding: 14px; border-radius: 10px; background: var(--surface); }
+
+.si-diff-bar {
+  display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12.5px;
+  background: var(--accent-soft); color: var(--accent-ink, var(--ink)); border-bottom: 0.5px solid var(--hair);
+  animation: pop-in var(--dur-2) var(--ease-out);
+}
+.si-diff-bar .grow { flex: 1; min-width: 0; }
+.tpl-dl > div.si-changed { margin: -4px -8px; padding: 4px 8px; border-radius: 8px; background: var(--accent-softer, var(--accent-soft)); }
+.tpl-dl li.si-added, .tpl-dl span.si-added { background: var(--ok-soft); border-radius: 4px; padding: 0 4px; margin-left: -4px; }
+.tpl-dl li.si-removed { text-decoration: line-through; color: var(--muted); }
+.si-flash { animation: si-flash 1.4s var(--ease-out); }
+@keyframes si-flash { 0% { box-shadow: inset 0 0 0 2px var(--ultramarine); } 100% { box-shadow: inset 0 0 0 2px transparent; } }
+
+/* --- шаг 4 ----------------------------------------------------------- */
+.si-publish { display: flex; flex-direction: column; gap: 14px; }
+.si-publish > .sub { margin: 0; }
+.si-publish > button { align-self: flex-start; }
+.si-publish-state { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--warn-soft); }
+.si-publish-state.reviewed { background: var(--ok-soft); }
+.si-publish-state.reviewed > svg { color: var(--pass); }
+.si-publish-state.review > svg { color: var(--signal); }
+.si-publish-state p { margin: 2px 0 0; }
+.si-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 10px; }
+.si-checks li { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-top: 1px solid var(--rule); font-size: 13px; }
+.si-checks li:first-child { border-top: 0; }
+.si-checks li > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.si-checks li.ok > svg { color: var(--pass); }
+.si-checks li.bad > svg { color: var(--fail); }
+.si-checks li.bad .sub { color: var(--fail-ink, var(--fail)); }
+.si-checks li.neutral > svg { color: var(--muted); }
+.si-checks svg { flex: 0 0 auto; margin-top: 2px; }
+.si-review { display: flex; flex-direction: column; gap: 14px; }
+.si-review .pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+@media (max-width: 760px) {
+  .si-page { padding: 2px 16px 24px; }
+  .si-docs-grid { grid-template-columns: 1fr; }
+  .si-new-head h2 { font-size: 20px; }
+  .si-row .pill { display: none; }
+  .si-row.review .pill, .si-row.draft .pill { display: inline-flex; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .si-new, .si-diff-bar, .si-flash { animation: none; }
+}

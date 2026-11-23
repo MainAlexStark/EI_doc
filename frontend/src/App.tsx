@@ -3,6 +3,9 @@ import { fetchMe, fetchRequests, fetchSiTypes, isAuthenticated, logout, type Me 
 import Login from "./components/Login";
 import { isControlRole } from "./dispatchApi";
 import { registerDefaultSources } from "./modes/commandSources";
+import { countProgramsForReview } from "./modes/att-templates/api";
+import { registerTemplateSources } from "./modes/si-templates/commands";
+import { countTemplatesForReview } from "./modes/si-templates/api";
 import { HASH_ALIASES, SECTIONS, SECTION_BY_KEY, SITE_URL, homeFor, isVisible, phoneTabs } from "./modes/registry";
 import type { Access, GoOptions, ModeProps, SectionDef, SectionKey } from "./modes/types";
 import { CommandPalette, openCommandPalette, useCommands, type CommandItem } from "./ui/CommandPalette";
@@ -131,6 +134,9 @@ export default function App() {
     }
     if (REVIEWER_ROLES.has(me.role)) {
       jobs.push(fetchSiTypes({ needs_review: true }).then((list) => (next["si-types"] = list.length)).catch(() => undefined));
+      // Шаблоны поверки и аттестации, ждущие метролога.
+      jobs.push(countTemplatesForReview().then((n) => (next["si-templates"] = n)).catch(() => undefined));
+      jobs.push(countProgramsForReview().then((n) => (next["att-templates"] = n)).catch(() => undefined));
     }
     void Promise.all(jobs).then(() => setCounts(next));
   }, [me]);
@@ -251,6 +257,11 @@ export default function App() {
   useEffect(() => {
     if (!me) return;
     return registerDefaultSources((key, options) => goRef.current(key, options), access);
+  }, [me, access]);
+  // Типы СИ, шаблоны поверки и аттестации — в палитре команд (modes/si-templates/commands.ts).
+  useEffect(() => {
+    if (!me) return;
+    return registerTemplateSources((key, options) => goRef.current(key, options), access);
   }, [me, access]);
 
   if (!authenticated) return <Login onSuccess={() => setAuthenticated(true)} />;
