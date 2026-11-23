@@ -11,7 +11,7 @@ import { comma, toleranceText, type Characteristic, type Condition, type Mode, t
 type Tab = "plan" | "check" | "json";
 
 export default function PlanEditor({
-  plan, onChange, readOnly, check, tolerances, extraTabs,
+  plan, onChange, readOnly, check, tolerances, extraTabs, checkActions,
 }: {
   plan: Plan;
   onChange: (plan: Plan) => void;
@@ -21,6 +21,8 @@ export default function PlanEditor({
   /** Допуски, как их посчитал сервер (у аттестации — plan_tolerances). */
   tolerances?: Record<string, string>;
   extraTabs?: { value: string; label: string; content: ReactNode }[];
+  /** Кнопки под отчётом сверки (у шаблона — «Сверить заново»). */
+  checkActions?: ReactNode;
 }) {
   const [tab, setTab] = useState<string>("plan");
   const checkBad = !!check && (check.ok === false || check.stale);
@@ -38,7 +40,7 @@ export default function PlanEditor({
         ]}
       />
       {tab === "plan" && <PlanTables plan={plan} onChange={onChange} readOnly={readOnly} tolerances={tolerances} />}
-      {tab === "check" && <PlanCheckReport check={check} />}
+      {tab === "check" && <PlanCheckReport check={check} actions={checkActions} />}
       {tab === "json" && <PlanJson plan={plan} onChange={onChange} readOnly={readOnly} />}
       {extraTabs?.map((t) => tab === t.value && <div key={t.value}>{t.content}</div>)}
     </div>
@@ -305,7 +307,8 @@ function PlanJson({ plan, onChange, readOnly }: { plan: Plan; onChange: (plan: P
 
 // ---------------------------------------------------------------------------
 /** Отчёт сверки формул с примером: «в примере / посчитано / сходится», расхождения красным. */
-export function PlanCheckReport({ check, compact }: { check?: PlanCheck | null; compact?: boolean }) {
+export function PlanCheckReport({ check, compact, actions }: { check?: PlanCheck | null; compact?: boolean; actions?: ReactNode }) {
+  const foot = actions ? <div className="att-check-actions">{actions}</div> : null;
   if (check === undefined) {
     return (
       <div className="att-check empty">
@@ -319,6 +322,7 @@ export function PlanCheckReport({ check, compact }: { check?: PlanCheck | null; 
       <div className="att-check empty">
         <Icon name="info" size={16} />
         <span>Сверки с примером нет — в документах не нашлось отсчётов с результатами. Метролог сверяет формулы с методикой.</span>
+        {foot}
       </div>
     );
   }
@@ -334,6 +338,7 @@ export function PlanCheckReport({ check, compact }: { check?: PlanCheck | null; 
           <span className="pill bad">расхождений: {bad} из {check.rows.length}</span>
         )}
         {check.source && <span className="sub">пример: {check.source}</span>}
+        {check.checked_at && <span className="sub">сверено {new Date(check.checked_at).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}{check.checked_by ? ` · ${check.checked_by}` : ""}</span>}
       </div>
       <div className="table-wrap">
         <table className="compact att-check-table">
@@ -353,6 +358,7 @@ export function PlanCheckReport({ check, compact }: { check?: PlanCheck | null; 
       </div>
       {(check.errors ?? []).length > 0 && <ul className="problems">{check.errors!.map((e) => <li key={e}>{e}</li>)}</ul>}
       {(check.unchecked ?? []).length > 0 && <p className="sub">Не с чем сверить: {check.unchecked!.join(", ")}</p>}
+      {foot}
     </div>
   );
 }

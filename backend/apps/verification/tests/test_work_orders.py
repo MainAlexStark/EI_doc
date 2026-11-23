@@ -66,3 +66,41 @@ class WorkOrderAutoCloseTestCase(TestCase):
         self.make_verification("SN001")
         self.work_order.refresh_from_db()
         assert self.work_order.status == WorkOrderStatus.CANCELLED
+
+
+class WorkOrderListScopeTestCase(TestCase):
+    """Менеджер видит все наряды, поверитель — свои и адреса своих командировок (docs/control.md)."""
+
+    def setUp(self) -> None:
+        import datetime as dt
+
+        from rest_framework.test import APIClient
+
+        from apps.core.models import Employee, Role, User
+        from apps.logistics.models import Trip, TripStop
+
+        self.client_obj = Client.objects.create(name="Частное лицо")
+        self.site = Site.objects.create(address="г. Киров, ул. Ленина, 1", client=self.client_obj)
+        user = User.objects.create_user(email="v@ei.test", password="x", role=Role.VERIFIER)
+        self.me = Employee.objects.create(tab_number="05", full_name="Петров Пётр", user=user)
+        other = Employee.objects.create(tab_number="06", full_name="Иванов Иван")
+        self.own = WorkOrder.objects.create(client=self.client_obj, site=self.site, assigned_employee=self.me)
+        self.foreign = WorkOrder.objects.create(client=self.client_obj, site=self.site, assigned_employee=other)
+        self.in_trip = WorkOrder.objects.create(client=self.client_obj, site=self.site, assigned_employee=other)
+        trip = Trip.objects.create(title="Слободской", lead=other, date_start=dt.date(2026, 12, 1))
+        trip.members.add(self.me)
+        TripStop.objects.create(trip=trip, site=self.site, client=self.client_obj, work_order=self.in_trip)
+        self.verifier = APIClient()
+        self.verifier.force_authenticate(user)
+        self.manager = APIClient()
+        self.manager.force_authenticate(User.objects.create_user(email="m@ei.test", password="x", role=Role.MANAGER))
+
+    def ids(self, api, **params):
+        r = api.get("/api/work-orders/", params)
+        assert r.status_code == 200, r.data
+        return {row["id"] for row in r.data}
+
+    def test_verifier_sees_only_own_and_trip_orders(self):
+        assert self.ids(self.verifier) == {self.own.pk, self.in_trip.pk}
+        assert self.ids(self.verifier, id=str(self.foreign.pk)) == set()
+        assert self.ids(self.manager) == {self.own.pk, self.foreign.pk, self.in_trip.pk}

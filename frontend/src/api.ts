@@ -78,7 +78,18 @@ const tokens = {
 export const isAuthenticated = () => Boolean(tokens.access());
 export const logout = () => tokens.clear();
 
-async function refreshTokens(): Promise<boolean> {
+// Обновление токена — одно на всех. Refresh-токен ротируется и старый сразу в чёрном списке
+// (ROTATE_REFRESH_TOKENS + BLACKLIST_AFTER_ROTATION), поэтому если экран после простоя шлёт
+// десяток запросов, каждый из которых получил 401, параллельные обновления с одним и тем же
+// токеном проигрывают первому — и раньше стирали уже новые токены (человека выкидывало из кабинета).
+let refreshing: Promise<boolean> | null = null;
+
+function refreshTokens(): Promise<boolean> {
+  if (!refreshing) refreshing = doRefresh().finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+async function doRefresh(): Promise<boolean> {
   const refresh = tokens.refresh();
   if (!refresh) return false;
 
@@ -88,6 +99,9 @@ async function refreshTokens(): Promise<boolean> {
     body: JSON.stringify({ refresh }),
   });
   if (!response.ok) {
+    // другая вкладка успела обновить токены — берём её, не выходим
+    const current = tokens.refresh();
+    if (current && current !== refresh) return true;
     tokens.clear();
     return false;
   }
@@ -345,6 +359,9 @@ export type HubRequest = {
   is_address_confirmed: boolean;
   consent_given: boolean;
   created_at: string;
+  /** Последнее изменение (simple-history): кто — ФИО/почта, пусто — заявитель с сайта. */
+  updated_at?: string | null;
+  updated_by?: string;
 };
 
 export type RequestFilters = { status?: string; district?: string; assigned_employee?: string };

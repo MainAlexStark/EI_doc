@@ -39,7 +39,7 @@ export default function VisitsTab({
         {canEdit && !closed && (
           <div className="pr-visits-actions">
             <button type="button" className="primary" onClick={() => setPlanning(true)}><Icon name="calendar" size={15} /> Спланировать заходы</button>
-            <button type="button" onClick={() => go("trips", { action: "new-trip" })}><Icon name="plus" size={15} /> Один заход</button>
+            <button type="button" onClick={() => go("trips", { action: "new-trip", payload: item.id })}><Icon name="plus" size={15} /> Один заход</button>
           </div>
         )}
       </div>

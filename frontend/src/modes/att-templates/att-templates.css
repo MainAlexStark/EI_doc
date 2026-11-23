@@ -85,3 +85,4 @@ input.att-missing { border-color: var(--fail); }
   .att-meta label input { width: 160px; }
 }
 @media (prefers-reduced-motion: reduce) { .att-new { animation: none; } }
+.att-check-actions { display: flex; gap: 8px; margin-top: 4px; }

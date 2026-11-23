@@ -6,7 +6,8 @@
 
 /* список */
 .pr-rows { display: flex; flex-direction: column; gap: 8px; }
-.pr-row {
+/* .pr-rows > .pr-row.tap — сильнее общего .card.tap (display: block), иначе сетка схлопывается в столбик */
+.pr-rows > .pr-row.tap {
   display: grid; grid-template-columns: minmax(0, 1fr) auto 170px; align-items: center; gap: 16px;
   text-align: left; width: 100%;
 }
@@ -22,13 +23,14 @@
 .pr-deadline.bad { color: var(--fail-ink); font-weight: 600; }
 .pr-plan { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .pr-plan-nums { font-size: 15px; }
+.pr-plan:not(:has(.pr-bar)) { flex-direction: row; align-items: baseline; gap: 6px; }
 .pr-plan-nums small, .pr-plan small { color: var(--graphite); font-size: 12px; }
 .pr-bar { position: relative; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; display: flex; }
 .pr-bar i { display: block; height: 100%; }
 .pr-bar i.done { background: var(--pass); }
 .pr-bar i.work { background: color-mix(in srgb, var(--ultramarine) 45%, transparent); }
 @media (max-width: 760px) {
-  .pr-row { grid-template-columns: 1fr; gap: 8px; }
+  .pr-rows > .pr-row.tap { grid-template-columns: 1fr; gap: 8px; }
   .pr-row-meta { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 8px; }
 }
 

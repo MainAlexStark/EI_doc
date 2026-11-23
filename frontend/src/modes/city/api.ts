@@ -3,7 +3,15 @@
 import { json, type TripBrief, type TripStop, type WorkOrder } from "../../api";
 
 /** Дни в городе, свежие сверху (сервер сортирует по дате убыванием). */
-export const fetchCityDays = () => json<TripBrief[]>("/api/trips/?kind=city&limit=200");
+export const fetchCityDays = (around: string) => {
+  // Окно ±14 дней вокруг выбранного дня: без него старые дни выпадали из лимита и показывались пустыми.
+  const shift = (days: number) => {
+    const d = new Date(`${around}T12:00:00`);
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  return json<TripBrief[]>(`/api/trips/?kind=city&limit=500&date_from=${shift(-14)}&date_to=${shift(14)}`);
+};
 
 export type PickupPayload = {
   client_id?: number | null;

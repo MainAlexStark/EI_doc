@@ -8,7 +8,9 @@ from django.urls import reverse
 
 from apps.equipment import service
 from apps.equipment.models import AttestationProgram, EquipmentAttestation
-from apps.equipment.tests.test_equipment import FRIDGE_PLAN, AttestationTestCase, card
+import json
+
+from apps.equipment.tests.test_equipment import FRIDGE_PLAN, GOLDEN, AttestationTestCase, card
 
 NEW_FRIDGE = {
     "name": "Холодильник фармацевтический ХФ-250 «ПОЗИС»", "serial_number": "NEW-001",
@@ -72,3 +74,42 @@ class ProgramTemplateTests(AttestationTestCase):
         EquipmentAttestation.objects.filter(pk=att.pk).update(plan={})
         r = self.as_(self.metrologist).post(reverse("attestation_save_as_program", args=[att.pk]), {}, format="json")
         assert r.status_code == 400
+
+    def test_check_endpoint_reports_without_storing_example_numbers(self):
+        program = service.save_program(self.metrologist, {"title": "Холодильники — сверка", "equipment_kind": "Холодильники",
+                                                          "plan": copy.deepcopy(FRIDGE_PLAN)}, via_assistant=False)
+        assert self.as_(self.verifier).get(reverse("attestation_program", args=[program.pk])).data["plan_check"] is None
+        example = {"source": "протокол 1886/2026", "modes": {"m1": {
+            "display": "5", "readings": copy.deepcopy(GOLDEN["readings"]),
+            "expected": {"t_reached": "5,69", "amplitude": "0,26"}}}}
+        url = reverse("attestation_program_check", args=[program.pk])
+        r = self.as_(self.verifier).post(url, {"example": example}, format="json")
+        assert r.status_code == 200, r.data
+        check = r.data["plan_check"]
+        assert check["ok"] is False and [x["key"] for x in check["rows"] if not x["ok"]] == ["amplitude"]
+        assert check["checked_by"] and check["source"] == "протокол 1886/2026"
+        program.refresh_from_db()
+        assert program.plan_check["rows"] and "readings" not in json.dumps(program.plan_check)
+        assert "6.031" not in json.dumps(program.plan_check)  # отсчёты примера не хранятся
+        assert not EquipmentAttestation.objects.exists()
+
+        assert self.as_(self.verifier).post(url, {}, format="json").status_code == 400
+        bad = {"modes": {"nope": {"readings": {}}}}
+        assert self.as_(self.verifier).post(url, {"example": bad}, format="json").status_code == 400
+
+        # Правка плана — сверка «устарела», правка примечания — нет.
+        r = self.as_(self.metrologist).patch(reverse("attestation_program", args=[program.pk]), {"note": "x"}, format="json")
+        assert r.data["plan_check"].get("stale") is None
+        plan = copy.deepcopy(program.plan)
+        plan["repeats"] = plan["repeats"] + 1
+        r = self.as_(self.metrologist).patch(reverse("attestation_program", args=[program.pk]), {"plan": plan}, format="json")
+        assert r.status_code == 200, r.data
+        assert r.data["plan_check"]["stale"] is True
+
+    def test_patch_keeps_disabled_template_disabled(self):
+        program = service.save_program(self.metrologist, {"title": "Печи", "equipment_kind": "Печи",
+                                                          "plan": copy.deepcopy(FRIDGE_PLAN)}, via_assistant=False)
+        url = reverse("attestation_program", args=[program.pk])
+        assert self.as_(self.metrologist).patch(url, {"is_active": False}, format="json").data["is_active"] is False
+        r = self.as_(self.metrologist).patch(url, {"note": "уточнить"}, format="json")
+        assert r.status_code == 200 and r.data["is_active"] is False

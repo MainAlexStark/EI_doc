@@ -19,13 +19,20 @@ class RequestActionError(Exception):
     pass
 
 
+class AlreadyConfirmed(RequestActionError):
+    """Заявку уже подтвердили (в т. ч. параллельно, пока этот запрос шёл)."""
+
+
 def confirm_request(
     obj: Request, *, employee, scheduled_date: dt.date | None = None, scheduled_time: dt.time | None = None,
     client: Client | None = None, site: Site | None = None, note: str = "",
 ) -> WorkOrder:
-    if obj.status == RequestStatus.CONFIRMED:
-        raise RequestActionError("Заявка уже подтверждена")
     with transaction.atomic():
+        # Блокировка строки: двойной клик / два диспетчера не заведут два наряда на одну заявку.
+        locked = Request.objects.select_for_update().get(pk=obj.pk)
+        if locked.status in (RequestStatus.CONFIRMED, RequestStatus.DONE, RequestStatus.CANCELLED):
+            obj.status = locked.status
+            raise AlreadyConfirmed("Заявка уже подтверждена")
         if client is None:
             client = Client.objects.create(
                 kind=ClientKind.PERSON, name=obj.contact_name, phone=obj.contact_phone, email=obj.contact_email,

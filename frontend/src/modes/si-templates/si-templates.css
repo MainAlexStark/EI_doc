@@ -70,11 +70,15 @@
 .si-list-head p { margin: 0; max-width: 720px; }
 .si-list-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .si-list-tools .grow { flex: 1; min-width: 220px; }
+.si-list-tools .grow > .search-field { width: 100%; }
 .si-review-banner {
   display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 14px; min-height: 0;
+  white-space: normal; width: 100%; justify-content: flex-start;
   border: 1px solid var(--signal); background: var(--warn-soft); border-radius: 10px; color: var(--ink);
 }
 .si-review-banner .sub { color: var(--graphite); }
+.si-review-banner .grow { flex: 1 1 auto; min-width: 0; }
+.si-review-banner > .icon { flex: 0 0 auto; }
 .si-rows { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); overflow: hidden; }
 .si-row {
   display: flex; align-items: center; gap: 12px; padding: 11px 14px; text-align: left; border: 0; border-radius: 0;

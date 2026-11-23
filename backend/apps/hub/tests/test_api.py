@@ -10,7 +10,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.catalog.models import District
-from apps.core.models import Employee, User
+from apps.core.models import Employee, Role, User
 from apps.hub.address import AddressSuggestion, AddressSuggestUnavailable
 from apps.hub.models import DistrictAssignment, Request, RequestStatus
 from apps.verification.models import WorkOrder
@@ -116,7 +116,7 @@ class AddressSuggestTestCase(TestCase):
 class DispatchTestCase(TestCase):
     def setUp(self) -> None:
         self.employee = Employee.objects.create(tab_number="05", full_name="Стариков А. А.")
-        self.user = User.objects.create_user("dispatch@ei.test", "pw")
+        self.user = User.objects.create_user("dispatch@ei.test", "pw", role=Role.MANAGER)
         self.district = District.objects.create(name="Ленинский район")
         DistrictAssignment.objects.create(district=self.district, employee=self.employee, priority=10)
 

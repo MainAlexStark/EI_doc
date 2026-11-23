@@ -12,7 +12,15 @@ export type Characteristic = {
 };
 export type Condition = { key: string; label: string; unit?: string; decimals?: number };
 export type PlanCheckRow = { mode: string; key: string; label: string; point: string; expected: string; computed: string; ok: boolean };
-export type PlanCheck = { source?: string; ok?: boolean; stale?: boolean; errors?: string[]; unchecked?: string[]; rows?: PlanCheckRow[] };
+export type PlanCheck = {
+  source?: string; ok?: boolean; stale?: boolean; errors?: string[]; unchecked?: string[]; rows?: PlanCheckRow[];
+  checked_at?: string; checked_by?: string;
+};
+/** Числа примера протокола для сверки (calc.check_example) — на сервере не сохраняются. */
+export type CheckExample = {
+  source: string;
+  modes: Record<string, { display?: string; readings: Record<string, string[]>; expected: Record<string, string | Record<string, string>> }>;
+};
 export type Plan = {
   equipment_kind: string; program: string; documents: string[]; quantity: string; unit: string;
   checked?: { label: string; value: string }[]; repeats: number; points: Point[]; modes: Mode[];
@@ -37,7 +45,7 @@ export type Program = {
   used: number | null;
   sources: string[];
   plan?: Plan;
-  /** Отчёт сверки формул с примером — если сервер его отдаёт (пока не во всех версиях API). */
+  /** Отчёт сверки формул с примером; null — сверки не было. */
   plan_check?: PlanCheck | null;
 };
 
@@ -64,6 +72,8 @@ export const updateProgram = (id: number, patch: Partial<Pick<Program, "title" |
   json<Program>(`${P}${id}/`, { method: "PATCH", body: JSON.stringify(patch) });
 export const createProgram = (body: { title: string; equipment_kind: string; plan: Plan; note?: string }) =>
   json<Program>(P, { method: "POST", body: JSON.stringify(body) });
+export const checkProgram = (id: number, example: CheckExample) =>
+  json<Program>(`${P}${id}/check/`, { method: "POST", body: JSON.stringify({ example }) });
 export const approveProgram = (id: number) => json<Program>(`${P}${id}/approve/`, { method: "POST" });
 export const applyProgram = (id: number, body: { equipment: Partial<EquipmentCard>; kind?: string }) =>
   json<{ id: number }>(`${P}${id}/apply/`, { method: "POST", body: JSON.stringify(body) });

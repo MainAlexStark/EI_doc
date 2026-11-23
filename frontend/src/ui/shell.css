@@ -119,6 +119,7 @@ a.side-item:hover { color: var(--ink); }
 .page-head.is-today .titles { display: none; }
 .page-head.is-today { min-height: 0; padding-top: 14px; padding-bottom: 0; }
 .page-head.is-today:has(.page-actions:empty) { padding: 0; }
+.page-head.is-today .head-search { margin-left: auto; }
 .head-search { color: var(--ink); }
 .flush-pad { padding: 4px 32px 48px; }
 .mode-loading { padding: 8px 0; max-width: 760px; }
@@ -207,7 +208,8 @@ main { view-transition-name: ei-main; }
 .sheet-layer.modeless .sheet { pointer-events: auto; }
 .sheet-scrim { position: absolute; inset: 0; background: var(--scrim); animation: fade-in var(--dur-2) ease both; }
 .sheet-layer.closing .sheet-scrim { animation: fade-out var(--dur-2) ease both; }
-.sheet {
+/* .sheet-layer — чтобы не задеть таблицу журнала (table.sheet в styles.css) */
+.sheet-layer .sheet {
   position: relative; display: flex; flex-direction: column; background: var(--surface); box-shadow: var(--shadow-lg); outline: none;
   max-height: 100dvh;
 }

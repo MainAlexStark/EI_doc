@@ -112,7 +112,8 @@ export default function Trips({
   }, [viewKey]);
 
   useModeAction(mode, {
-    "new-trip": () => { setForProcurement(null); setCreating("trip"); },
+    // payload — id закупки: «Один заход» из режима «Закупки» открывает командировку с предвыбранной закупкой.
+    "new-trip": (id) => { setForProcurement(typeof id === "number" ? id : null); setCreating("trip"); },
     "new-visit": () => setCreating("visit"),
     new: () => {
       setForProcurement(null);
@@ -397,6 +398,7 @@ export function NewTripModal({
   initialKind?: "city" | "classic" | "procurement";
   me: Me;
   isManager: boolean;
+  /** Начальная закупка: задана — вид «по закупке» и закупка предвыбраны («Один заход» из «Закупок»). */
   procurementId: number | null;
   onClose: () => void;
   onCreated: (id: number) => void;

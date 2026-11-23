@@ -105,17 +105,37 @@ def with_counts(qs):
     )
 
 
+def visible_work_orders(user, qs):
+    """Руководство и наблюдатель видят все наряды; поверитель — свои (назначенные ему) и адреса
+    командировок, где он старший или участник (открыть наряд адреса из «Командировок»)."""
+    from apps.core.models import Role
+    from apps.logistics.dispatch import can_control
+
+    if can_control(user) or getattr(user, "role", "") == Role.OBSERVER:
+        return qs
+    employee = getattr(user, "employee", None)
+    if employee is None:
+        return qs.none()
+    mine = WorkOrder.objects.filter(
+        Q(assigned_employee=employee)
+        | Q(trip_stop__trip__lead=employee) | Q(trip_stop__trip__members=employee)
+        | Q(logistic_stops__trip__lead=employee) | Q(logistic_stops__trip__members=employee)
+    ).values("pk")
+    return qs.filter(pk__in=mine)  # подзапрос, а не join: счётчики with_counts не размножаются
+
+
 class WorkOrderListView(APIView):
     """GET /api/work-orders/?status=&assigned_employee=&date_from=&date_to=&id=&trip=&kind=&issued=
 
     Массив до ``limit`` (200) или страница при ``?page_size=`` — см. apps.core.paging.
-    ``issued=0`` — приёмки, ещё не выданные заказчику.
+    ``issued=0`` — приёмки, ещё не выданные заказчику. Поверитель видит только свои (``visible_work_orders``).
     """
 
     def get(self, request):
         qs = with_counts(WorkOrder.objects.select_related(
             "client", "site", "assigned_employee", "trip_stop__trip", "procurement__customer"
         ).prefetch_related("logistic_stops__trip"))
+        qs = visible_work_orders(request.user, qs)
         kind = request.query_params.get("kind")
         if kind:
             qs = qs.filter(kind=kind)

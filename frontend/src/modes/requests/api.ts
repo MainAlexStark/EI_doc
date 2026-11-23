@@ -3,7 +3,8 @@
 import { json, type HubRequest } from "../../api";
 import { fetchOverview, type TeamCard } from "../../dispatchApi";
 
-export type BulkAction = "confirm" | "assign" | "reject" | "spam";
+/** reopen — вернуть во «Новые» («Отменить» после отправки); нельзя, если по заявке есть поверки. */
+export type BulkAction = "confirm" | "assign" | "reject" | "spam" | "reopen";
 export type BulkResult = {
   done: number[];
   skipped: { id: number; reason: string }[];

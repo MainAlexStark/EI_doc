@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from django.db import models
 from django.utils import timezone
+from simple_history.models import HistoricalRecords
 
 
 class RequestSource(models.TextChoices):
@@ -212,6 +213,9 @@ class Request(models.Model):
     created_at = models.DateTimeField("создана", auto_now_add=True, db_index=True)
     routed_at = models.DateTimeField("подобран исполнитель", null=True, blank=True)
     confirmed_at = models.DateTimeField("подтверждена", null=True, blank=True)
+
+    # Кто и когда последним менял заявку — «Последний изменил» в режиме «Заявки» (RequestSerializer).
+    history = HistoricalRecords()
 
     class Meta:
         verbose_name = "заявка"

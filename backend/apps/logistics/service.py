@@ -89,7 +89,11 @@ def _client_for(trip: Trip, data: StopInput) -> Client:
 
 def _site_for(client: Client, data: StopInput, hint: str = "") -> Site:
     if data.site_id:
-        return Site.objects.get(pk=data.site_id)
+        # Объект берём только из объектов этого же заказчика: чужой адрес не подставить по id.
+        site = Site.objects.filter(pk=data.site_id, client=client).first()
+        if site is None:
+            raise TripError("Объект не найден у этого заказчика — выберите адрес из его объектов или впишите адрес")
+        return site
     address = " ".join(data.address.split())
     if not address:
         raise TripError("Укажите адрес")
@@ -129,10 +133,12 @@ def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None,
     """
     if not trip.is_open:
         raise TripError("Командировка закрыта — адреса больше не добавляются")
-    # Один адрес — одна строка командировки, как бы его ни набрали (регистр, пробелы).
+    purpose = data.purpose if data.purpose in StopPurpose.values else StopPurpose.VISIT
+    # Один адрес — одна строка командировки на одну цель, как бы его ни набрали (регистр, пробелы).
+    # Забрать и вернуть приборы по одному адресу в один день — две разные строки.
     taken = {
         _address_key(stop.site.address): stop.site_id
-        for stop in trip.stops.exclude(status=StopStatus.REFUSED).select_related("site")
+        for stop in trip.stops.exclude(status=StopStatus.REFUSED).filter(purpose=purpose).select_related("site")
     }
     if data.site_id in taken.values() or (data.address and _address_key(data.address) in taken):
         raise TripError(f"Адрес уже есть в командировке: {' '.join(data.address.split()) or 'этот объект'}")
@@ -140,7 +146,6 @@ def add_stop(trip: Trip, data: StopInput, *, employee: Employee | None = None,
     site = _site_for(client, data, trip.destination)
 
     planned_date = data.planned_date or (timezone.localdate() if data.added_on_site else trip.date_start)
-    purpose = data.purpose if data.purpose in StopPurpose.values else StopPurpose.VISIT
     note = f"Командировка: {trip.title}"
     if purpose != StopPurpose.VISIT:
         note = f"{StopPurpose(purpose).label}: {trip.title}"
@@ -345,6 +350,10 @@ def set_stop_status(stop: TripStop, status: str) -> TripStop:
     """Отметка по адресу. Пустой наряд несостоявшегося визита не висит в «Приёмках» открытым."""
     if status not in StopStatus.values:
         raise TripError("Неизвестная отметка")
+    lab = stop.lab_order if stop.purpose == StopPurpose.DELIVERY and stop.lab_order_id else None
+    if lab is not None and status == StopStatus.DONE and not lab.verifications.exists():
+        raise TripError(f"В приёмке №{lab.pk} нет ни одного прибора — отдавать нечего. "
+                        "Внесите приборы в приёмку или поставьте другую отметку")
     stop.status = status
     stop.visited_at = None if status == StopStatus.PLANNED else timezone.now()
     stop.save(update_fields=["status", "visited_at"])
@@ -359,15 +368,20 @@ def set_stop_status(stop: TripStop, status: str) -> TripStop:
             order.status = wanted
             order.closed_at = timezone.now() if wanted == WorkOrderStatus.DONE else None
             order.save(update_fields=["status", "closed_at"])
-    if stop.purpose == StopPurpose.DELIVERY and stop.lab_order_id:
-        # Отвезли приборы обратно — приёмка выдана; вернули отметку — выдача снимается.
-        lab = stop.lab_order
+    if lab is not None:
+        # Отвезли приборы обратно — приёмка выдана. Сняли отметку «выполнен» (любой другой) —
+        # выдача снимается, но только та, что поставил этот адрес: ручную выдачу не трогаем.
         if status == StopStatus.DONE and lab.issued_at is None:
             lab.issued_at = timezone.now()
             lab.save(update_fields=["issued_at"])
-        elif status == StopStatus.PLANNED and lab.issued_at is not None:
-            lab.issued_at = None
-            lab.save(update_fields=["issued_at"])
+            stop.issued_lab = True
+            stop.save(update_fields=["issued_lab"])
+        elif status != StopStatus.DONE and stop.issued_lab:
+            if lab.issued_at is not None:
+                lab.issued_at = None
+                lab.save(update_fields=["issued_at"])
+            stop.issued_lab = False
+            stop.save(update_fields=["issued_lab"])
     trip = stop.trip
     if status != StopStatus.PLANNED and trip.status == TripStatus.PLANNED:
         trip.status = TripStatus.ACTIVE

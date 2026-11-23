@@ -89,15 +89,21 @@ export default function CityMode({ me, isManager, isControl, go }: ModeProps) {
     setOpenStop(null);
   }, []);
 
+  // Окно загрузки сдвигается неделями: листание дня внутри недели не перезапрашивает список.
+  const windowAnchor = useMemo(() => {
+    const d = new Date(`${date}T12:00:00`);
+    d.setDate(d.getDate() - d.getDay());
+    return d.toISOString().slice(0, 10);
+  }, [date]);
   const reloadDays = useCallback(() => {
     setDaysError("");
-    return fetchCityDays()
+    return fetchCityDays(windowAnchor)
       .then((list) => { setDays(list); return list; })
       .catch((exc) => {
         setDaysError(errorText(exc, "Не удалось загрузить выезды"));
         return null;
       });
-  }, []);
+  }, [windowAnchor]);
   useEffect(() => { void reloadDays(); }, [reloadDays]);
 
   // Дни этого числа: свой — первым, остальные (руководство) — по фамилии.

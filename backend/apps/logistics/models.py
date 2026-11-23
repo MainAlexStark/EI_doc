@@ -359,6 +359,10 @@ class TripStop(models.Model):
         related_name="logistic_stops", verbose_name="приёмка",
         help_text="Забор — приёмка, заведённая из этого адреса; возврат — приёмка, которую везём обратно",
     )
+    issued_lab = models.BooleanField(
+        "выдачу поставил этот адрес", default=False,
+        help_text="Возврат: отметка «выполнен» сама поставила приёмке «выдано» — её и снимет",
+    )
     planned_date = models.DateField("день", null=True, blank=True)
     planned_count = models.PositiveSmallIntegerField(
         "ожидается приборов", null=True, blank=True

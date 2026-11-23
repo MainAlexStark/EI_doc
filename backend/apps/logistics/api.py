@@ -339,6 +339,47 @@ class TripWriteSerializer(serializers.Serializer):
         return attrs
 
 
+def _date_param(request, name: str):
+    import datetime as dt
+
+    value = request.query_params.get(name)
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        raise ValidationError({name: "Дата в виде ГГГГ-ММ-ДД"}) from None
+
+
+def _own_site(stop: TripStop):
+    """Объект, который можно править из этого адреса, не задевая чужие наряды.
+
+    Объект общий (на нём другие адреса, наряды, приборы, пропуска) или чужого заказчика —
+    правка уходит в копию для этого адреса и его наряда; иначе — в сам объект.
+    """
+    site = stop.site
+    shared = (
+        site.client_id != stop.client_id
+        or site.trip_stops.exclude(pk=stop.pk).exists()
+        or site.work_orders.exclude(pk=stop.work_order_id or 0).exists()
+        or site.instruments.exists()
+        or Pass.objects.filter(site=site).exists()
+    )
+    if not shared:
+        return site
+    copy = Site.objects.create(
+        client=stop.client, address=site.address, postal_code=site.postal_code, fias_id=site.fias_id,
+        district=site.district, latitude=site.latitude, longitude=site.longitude,
+        is_restricted=site.is_restricted, access_note=site.access_note, contact=site.contact,
+    )
+    stop.site = copy
+    stop.save(update_fields=["site"])
+    if stop.work_order_id and not stop.work_order.verifications.exists():
+        stop.work_order.site = copy
+        stop.work_order.save(update_fields=["site"])
+    return copy
+
+
 class TripListView(APIView):
     def get(self, request):
         qs = visible_trips(request.user)
@@ -353,6 +394,12 @@ class TripListView(APIView):
         kind = request.query_params.get("kind")
         if kind:
             qs = qs.filter(kind=kind)
+        # Окно дат: командировка попадает, если её даты пересекают [date_from; date_to].
+        date_from, date_to = _date_param(request, "date_from"), _date_param(request, "date_to")
+        if date_from:
+            qs = qs.filter(Q(date_end__gte=date_from) | Q(date_end__isnull=True, date_start__gte=date_from))
+        if date_to:
+            qs = qs.filter(date_start__lte=date_to)
 
         def rows(trips):
             counts = service.trip_counts([trip.pk for trip in trips])
@@ -606,6 +653,11 @@ class TripStopDetailView(APIView):
             stop.save(update_fields=changed)
 
         site, site_changed = stop.site, []
+        renamed = bool(data.get("address")) and " ".join(data["address"].split()) != site.address
+        if renamed or site.client_id != stop.client_id and (
+            ("latitude" in data and "longitude" in data) or "is_restricted" in data or "access_note" in data
+        ):
+            site = _own_site(stop)
         if "latitude" in data and "longitude" in data:
             site.latitude = service._coord(data["latitude"])
             site.longitude = service._coord(data["longitude"])
@@ -614,7 +666,7 @@ class TripStopDetailView(APIView):
             if field in data:
                 setattr(site, field, data[field])
                 site_changed.append(field)
-        if data.get("address") and data["address"].strip() != site.address:
+        if renamed:
             site.address = " ".join(data["address"].split())
             site_changed.append("address")
         if site_changed:
@@ -1183,7 +1235,8 @@ class PickupCreateView(APIView):
                 client = get_object_or_404(Client, pk=data["client_id"])
             else:
                 inn = "".join(ch for ch in data.get("inn", "") if ch.isdigit())
-                client = _client({"inn": inn, "name": data.get("name", ""), "phone": data.get("contact_phone", "")})
+                # Найденного заказчика не правим: контакт забора — у адреса, а не в карточке клиента.
+                client = _client({"inn": inn, "name": data.get("name", "")}, edit="none")
             item = service.StopInput(
                 address=data.get("address", ""), site_id=data.get("site_id"),
                 latitude=data.get("latitude"), longitude=data.get("longitude"),

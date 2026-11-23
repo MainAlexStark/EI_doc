@@ -254,6 +254,10 @@ def summary_data(procurement: Procurement) -> dict:
 # План заходов по перечню СИ
 # ---------------------------------------------------------------------------
 NO_ADDRESS = "адрес не указан"
+#: Потолки плана заходов: план — предложение на экран, а не расчёт на годы вперёд.
+PLAN_MAX_ROWS = 5000          # строк перечня СИ
+PLAN_MAX_ROW_QUANTITY = 100_000
+PLAN_MAX_DAYS = 260           # рабочих дней (≈ год)
 
 
 def _workdays(start: dt.date):
@@ -277,13 +281,28 @@ def plan_visits(procurement: Procurement, *, per_day: int = 40, days_per_trip: i
         source = "items"
     if not rows:
         raise SummaryError("Нет перечня СИ: заполните выжимку (instruments) или объём по контракту")
+    if len(rows) > PLAN_MAX_ROWS:
+        raise SummaryError(f"В перечне СИ {len(rows)} строк — план строится не больше чем по {PLAN_MAX_ROWS}")
 
     groups: dict[str, dict] = {}
     for row in rows:
         address = _s(row.get("address"), 350) or NO_ADDRESS
+        try:
+            quantity = int(row.get("quantity") or 1)
+        except (TypeError, ValueError):
+            quantity = 1
+        quantity = min(max(quantity, 1), PLAN_MAX_ROW_QUANTITY)
         group = groups.setdefault(address.casefold(), {"address": address, "quantity": 0, "instruments": []})
-        group["quantity"] += int(row.get("quantity") or 1)
-        group["instruments"].append(f"{row.get('name')} × {int(row.get('quantity') or 1)}")
+        group["quantity"] += quantity
+        if len(group["instruments"]) < 20:
+            group["instruments"].append(f"{row.get('name')} × {quantity}")
+    total = sum(g["quantity"] for g in groups.values())
+    need_days = -(-total // per_day)
+    if need_days > PLAN_MAX_DAYS:
+        raise SummaryError(
+            f"{total} приборов по {per_day} в день — это {need_days} рабочих дней, больше {PLAN_MAX_DAYS}. "
+            "Увеличьте число приборов в день или проверьте количества в перечне СИ"
+        )
 
     begin = start or procurement.date_start or timezone.localdate() + dt.timedelta(days=1)
     days_iter = _workdays(begin)

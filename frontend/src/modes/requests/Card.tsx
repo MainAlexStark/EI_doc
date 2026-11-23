@@ -107,6 +107,9 @@ export default function RequestCard({ request, busy, onAction, showActions = tru
         </div>
         {request.reject_reason && <div><dt>Причина отказа</dt><dd>{request.reject_reason}</dd></div>}
         {!request.consent_given && <div><dt>Согласие на ПДн</dt><dd className="fail-text">нет</dd></div>}
+        {request.updated_by && request.updated_at && (
+          <div><dt>Последний изменил</dt><dd className="muted">{request.updated_by} · {new Date(request.updated_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</dd></div>
+        )}
       </dl>
 
       <h3 className="rq-h">Что поверить</h3>

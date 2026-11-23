@@ -114,6 +114,7 @@
     --pass: #2fb877;
     --fail: #f0604f;
     --sheet: #171a22;
+    --seg-active: #323846;
     --ultramarine-hover: #8193ff;
     --ultramarine-press: #5a70f0;
     --ultramarine-ink: #9aa9ff;
@@ -135,7 +136,40 @@
     --scrim: rgba(0, 0, 0, 0.55);
   }
 }
-:root[data-app="cabinet"][data-theme="dark"] { color-scheme: dark; }
+/* Ручной выбор «Тёмная тема» при светлой системе: те же токены, что в media-блоке выше
+   (раньше здесь был только color-scheme — палитра оставалась светлой). Меняете одно — меняйте и другое. */
+:root[data-app="cabinet"][data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0f1117;
+  --ink: #e8eaf0;
+  --graphite: #9aa1b2;
+  --rule: #262a35;
+  --ultramarine: #6d82ff;
+  --signal: #f0a823;
+  --pass: #2fb877;
+  --fail: #f0604f;
+  --sheet: #171a22;
+  --seg-active: #323846;
+  --ultramarine-hover: #8193ff;
+  --ultramarine-press: #5a70f0;
+  --ultramarine-ink: #9aa9ff;
+  --on-accent: #0b0d14;
+  --pass-ink: #5fd39b;
+  --signal-ink: #f5bd55;
+  --fail-ink: #ff8a7c;
+  --ground-grouped: #0c0e13;
+  --sidebar: #13161d;
+  --surface-2: #1e222b;
+  --surface-3: #262a35;
+  --ink-2: #c9cdd8;
+  --faint: #6b7182;
+  --purple: #c49cf0;
+  --teal: #5fc8d9;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  --scrim: rgba(0, 0, 0, 0.55);
+}
 
 /* Данные — моноширинным с табличными цифрами: заводские номера, номера протоколов, показания. */
 .mono, .data, code, kbd, samp {
@@ -402,7 +436,7 @@ input.big-input { padding: 10px 12px; font-size: 16px; border-radius: 10px; widt
   display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%;
   min-height: 32px; padding: 0 10px; border-radius: 7px; background: transparent; font-weight: 450; text-align: left;
 }
-.menu-item:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.menu-item:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 .menu-item:hover:not(:disabled) .icon { color: #fff; }
 .menu-item .icon { color: var(--muted); }
 .menu-item.danger { color: var(--crit); }
@@ -558,7 +592,7 @@ main.flush { padding: 0; display: flex; flex-direction: column; }
 .segmented button:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 4%, transparent); }
 .segmented button.active,
 .segmented button.active:hover:not(:disabled) {
-  background: var(--surface); color: var(--ink); font-weight: 600;
+  background: var(--seg-active, var(--surface)); color: var(--ink); font-weight: 600;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
 }
 .segmented.sm button { min-height: 24px; padding: 2px 10px; font-size: 12px; }
@@ -566,7 +600,7 @@ main.flush { padding: 0; display: flex; flex-direction: column; }
   font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;
   background: var(--fill); padding: 0 6px; border-radius: 999px; line-height: 17px;
 }
-.segmented button.active .seg-count { background: var(--accent); color: #fff; }
+.segmented button.active .seg-count { background: var(--accent); color: var(--on-accent); }
 
 /* =====================================================================
    Таблицы (как список в Finder/Почте)
@@ -801,8 +835,8 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
   padding: 8px 10px; border-radius: 6px; cursor: pointer;
   display: flex; justify-content: space-between; gap: 10px; font-size: 13px;
 }
-.suggestions li:hover, .suggestions li.active { background: var(--accent); color: #fff; }
-.suggestions li:hover .sub, .suggestions li.active .sub { color: rgba(255, 255, 255, 0.85); }
+.suggestions li:hover, .suggestions li.active { background: var(--accent); color: var(--on-accent); }
+.suggestions li:hover .sub, .suggestions li.active .sub { color: color-mix(in srgb, var(--on-accent) 85%, transparent); }
 .suggestions li .sub { white-space: nowrap; }
 .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .captcha-field { display: flex; justify-content: center; }
@@ -832,7 +866,7 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
 
 .slot-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .slot-chip { position: relative; padding: 6px 14px; font-size: 13px; border-radius: 999px; font-variant-numeric: tabular-nums; }
-.slot-chip.active, .slot-chip.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.slot-chip.active, .slot-chip.active:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 .slot-chip .dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: var(--warn-dot); }
 .slot-chip.active .dot { background: var(--surface); }
 .slot-chip.priority:not(.active) { box-shadow: inset 0 0 0 1px var(--warn-dot); }
@@ -862,7 +896,7 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
 .calendar-cell.today { color: var(--accent); font-weight: 700; }
 .calendar-cell.marked { background: var(--accent-softer); }
 .calendar-cell.in-range { background: var(--accent-soft); border-radius: 0; }
-.calendar-cell.selected, .calendar-cell.selected:hover:not(:disabled) { background: var(--accent); color: #fff; font-weight: 600; }
+.calendar-cell.selected, .calendar-cell.selected:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .calendar-cell.today.selected { color: #fff; }
 .calendar-cell.disabled { opacity: 0.3; cursor: default; }
 .calendar-dot {
@@ -944,7 +978,7 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
 }
 .gc-day-head .dnum:hover:not(:disabled) { background: var(--hover); }
 .gc-day-head.today .dow { color: var(--accent); }
-.gc-day-head.today .dnum, .gc-day-head.today .dnum:hover:not(:disabled) { background: var(--accent); color: #fff; font-weight: 600; }
+.gc-day-head.today .dnum, .gc-day-head.today .dnum:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .gc-day-head.weekend .dnum { color: var(--muted); }
 .gc-day-head.today.weekend .dnum { color: #fff; }
 .gc-allday { border-bottom: 0.5px solid var(--line); min-height: 26px; position: relative; }
@@ -1045,7 +1079,7 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
   font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; margin-bottom: 2px; min-height: 0; padding: 0; background: transparent;
 }
 .gc-mnum:hover:not(:disabled) { background: var(--hover); }
-.gc-mcell.today .gc-mnum, .gc-mcell.today .gc-mnum:hover:not(:disabled) { background: var(--accent); color: #fff; font-weight: 600; }
+.gc-mcell.today .gc-mnum, .gc-mcell.today .gc-mnum:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 
 /* расписание (список) */
 .gc-agenda { flex: 1; overflow-y: auto; padding: 8px 0 24px; }
@@ -1053,7 +1087,7 @@ details.more.card > summary { color: var(--ink); font-weight: 600; }
 .gc-agenda-date { display: flex; align-items: baseline; gap: 6px; padding-top: 2px; }
 .gc-agenda-date .dnum { font-size: 22px; font-weight: 500; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; font-variant-numeric: tabular-nums; margin-top: -6px; }
 .gc-agenda-date .dow { font-size: 11px; color: var(--muted); text-transform: uppercase; font-weight: 600; }
-.gc-agenda-day.today .dnum { background: var(--accent); color: #fff; }
+.gc-agenda-day.today .dnum { background: var(--accent); color: var(--on-accent); }
 .gc-agenda-day.today .dow { color: var(--accent); }
 .gc-agenda-events { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .gc-agenda-row {
@@ -1168,8 +1202,8 @@ tr.done .cell-main { text-decoration: line-through; color: var(--muted); }
 }
 .mail-item + .mail-item { margin-top: 1px; }
 .mail-item:hover:not(:disabled) { background: var(--hover); }
-.mail-item.active, .mail-item.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
-.mail-item.active .sub, .mail-item.active .mail-meta, .mail-item.active .mail-date { color: rgba(255, 255, 255, 0.85); }
+.mail-item.active, .mail-item.active:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.mail-item.active .sub, .mail-item.active .mail-meta, .mail-item.active .mail-date { color: color-mix(in srgb, var(--on-accent) 85%, transparent); }
 .mail-item .unread { position: absolute; left: 7px; top: 15px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .mail-item.active .unread { background: var(--surface); }
 .mail-top { display: flex; align-items: baseline; gap: 8px; }
@@ -1178,7 +1212,7 @@ tr.done .cell-main { text-decoration: line-through; color: var(--muted); }
 .mail-meta { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-item .sub { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .mail-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
-.mail-item.active .pill, .mail-item.active .tag { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.mail-item.active .pill, .mail-item.active .tag { background: color-mix(in srgb, var(--on-accent) 18%, transparent); color: var(--on-accent); }
 .mail-item.active .pill::before { background: var(--surface); }
 
 .detail-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
@@ -1207,29 +1241,29 @@ a.contact-chip:hover { background: var(--accent-soft); color: var(--accent-ink);
    ===================================================================== */
 /* Журнал — как лист Excel: сетка по всем ячейкам, одно значение в ячейке. */
 .sheet-wrap { border-radius: var(--radius); }
-.sheet { min-width: 1400px; }
-.sheet th, .sheet td {
+table.sheet { min-width: 1400px; }
+table.sheet th, table.sheet td {
   padding: 5px 8px; border: 0.5px solid var(--line); border-top: 0; border-left: 0;
   vertical-align: top; line-height: 1.35;
 }
-.sheet th:last-child, .sheet td:last-child { border-right: 0; }
-.sheet th {
+table.sheet th:last-child, table.sheet td:last-child { border-right: 0; }
+table.sheet th {
   font-size: 11.5px; color: var(--ink-2); background: var(--surface-2);
   border-bottom: 0.5px solid var(--hair); white-space: normal; vertical-align: bottom;
 }
-.sheet td { font-size: 12.5px; }
-.sheet .rn { width: 1%; text-align: right; color: var(--muted); background: var(--surface-2); }
-.sheet td.wide { min-width: 160px; max-width: 260px; }
-.sheet td.note { min-width: 180px; max-width: 280px; color: var(--ink-2); }
-.sheet td.files { width: 1%; }
-.sheet .st.warn { color: var(--warn); font-weight: 500; }
-.sheet .st.bad { color: var(--crit); }
-.sheet tbody tr:nth-child(even) { background: rgba(118, 118, 128, 0.035); }
+table.sheet td { font-size: 12.5px; }
+table.sheet .rn { width: 1%; text-align: right; color: var(--muted); background: var(--surface-2); }
+table.sheet td.wide { min-width: 160px; max-width: 260px; }
+table.sheet td.note { min-width: 180px; max-width: 280px; color: var(--ink-2); }
+table.sheet td.files { width: 1%; }
+table.sheet .st.warn { color: var(--warn); font-weight: 500; }
+table.sheet .st.bad { color: var(--crit); }
+table.sheet tbody tr:nth-child(even) { background: rgba(118, 118, 128, 0.035); }
 /* Непригодные — красной строкой, слово «непригодно» только у них. */
-.sheet tbody tr.unfit, .sheet tbody tr.unfit:nth-child(even) { background: var(--crit-soft); }
-.sheet tbody tr.unfit:hover { background: rgba(255, 59, 48, 0.16); }
-.sheet tbody tr.unfit td.rn { background: rgba(255, 59, 48, 0.14); color: var(--crit); }
-.sheet td.unfit-cell { color: var(--crit); font-weight: 600; }
+table.sheet tbody tr.unfit, table.sheet tbody tr.unfit:nth-child(even) { background: var(--crit-soft); }
+table.sheet tbody tr.unfit:hover { background: rgba(255, 59, 48, 0.16); }
+table.sheet tbody tr.unfit td.rn { background: rgba(255, 59, 48, 0.14); color: var(--crit); }
+table.sheet td.unfit-cell { color: var(--crit); font-weight: 600; }
 .m-row.unfit { background: var(--crit-soft); }
 
 /* Журналы по поверителям: общий — у каждого поверителя свой цвет. */
@@ -1240,9 +1274,12 @@ a.contact-chip:hover { background: var(--accent-soft); color: var(--accent-ink);
 .chip-count { font-size: 11.5px; font-variant-numeric: tabular-nums; opacity: 0.65; }
 .v-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .v-name { display: flex; align-items: center; gap: 7px; }
-.sheet.by-verifier tbody tr:not(.unfit) { background: color-mix(in srgb, var(--vc) 7%, transparent); }
-.sheet.by-verifier tbody tr:not(.unfit):hover { background: color-mix(in srgb, var(--vc) 13%, transparent); }
-.sheet.by-verifier tbody td.rn { box-shadow: inset 4px 0 0 var(--vc); }
+/* в ячейке таблицы flex ломает table-cell (рамка и высота строки) — там точка просто в строку */
+td.v-name { display: table-cell; }
+td.v-name .v-dot { display: inline-block; margin-right: 7px; vertical-align: 1px; }
+table.sheet.by-verifier tbody tr:not(.unfit) { background: color-mix(in srgb, var(--vc) 7%, transparent); }
+table.sheet.by-verifier tbody tr:not(.unfit):hover { background: color-mix(in srgb, var(--vc) 13%, transparent); }
+table.sheet.by-verifier tbody td.rn { box-shadow: inset 4px 0 0 var(--vc); }
 .m-row.by-verifier { box-shadow: inset 4px 0 0 var(--vc); }
 .m-row.by-verifier + .m-row.by-verifier { box-shadow: inset 4px 0 0 var(--vc), inset 0 0.5px 0 var(--hair); }
 .m-row.by-verifier:not(.unfit) { background: color-mix(in srgb, var(--vc) 6%, transparent); }
@@ -1319,7 +1356,7 @@ a.contact-chip:hover { background: var(--accent-soft); color: var(--accent-ink);
 .check-chip.on { background: var(--ok-soft); box-shadow: none; }
 .check-chip.off { background: var(--crit-soft); box-shadow: none; }
 .chip { border-radius: 999px; padding: 6px 13px; font-size: 13px; font-weight: 450; }
-.chip.active, .chip.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.chip.active, .chip.active:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 
 .unsuitable { background: var(--surface); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; box-shadow: 0 0 0 0.5px var(--hair); }
 .unsuitable.on { background: var(--crit-soft); box-shadow: none; }
@@ -1453,6 +1490,7 @@ tr.scan-row-unknown, tbody tr.scan-row-unknown:nth-child(even) { background: var
   main.flush { padding: 0 0 var(--tabbar-h); }
   .page-head { padding: 16px 20px 10px; min-height: 0; }
   .page-head h1 { font-size: 30px; }
+  .page-head .titles { min-width: 120px; }
   .page-head .page-actions { width: auto; }
   .page-head .page-actions .hide-phone { display: none; }
 
@@ -1689,7 +1727,7 @@ button.chip.active, button.chip.active:hover:not(:disabled) { background: var(--
 
 .trip-pin {
   display: inline-grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
-  background: var(--accent); color: #fff; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: var(--accent); color: var(--on-accent); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 2.5px #fff, 0 2px 6px rgba(0, 0, 0, 0.28);
 }
 .trip-pin.done { background: var(--ok-dot); }
@@ -1781,3 +1819,13 @@ button.trip-mark.active.refused { background: var(--crit-soft); color: var(--cri
   .order-actions .spacer { display: none; }
 }
 .plan-rows li.plan-day { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: capitalize; padding: 12px 0 4px; counter-increment: none; }
+
+/* Телефон и планшет пальцем: цели касания не меньше ~40 px (QA 23.11.2026).
+   Ссылки-кнопки растим «невидимо» — отступом с отрицательным полем, раскладка не двигается. */
+@media (pointer: coarse) {
+  .segmented button, .segmented.sm button { min-height: 40px; }
+  button.sm { min-height: 36px; }
+  .chip, button.chip { min-height: 36px; }
+  button.icon-btn { min-width: 40px; min-height: 40px; }
+  button.link { padding-block: 10px; margin-block: -10px; }
+}

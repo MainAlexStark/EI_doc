@@ -317,16 +317,16 @@ button.send.stop:hover:not(:disabled) { background: #000; }
   padding: 8px 10px; min-height: 48px; border-radius: 10px; background: transparent; font-weight: 400; white-space: normal;
 }
 .ctx-nav-item:hover:not(:disabled) { background: rgba(0, 0, 0, 0.045); }
-.ctx-nav-item.active, .ctx-nav-item.active:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.ctx-nav-item.active, .ctx-nav-item.active:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
 .ctx-nav-icon {
   width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: 0 0 auto;
   background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm);
 }
-.ctx-nav-item.active .ctx-nav-icon { background: rgba(255, 255, 255, 0.2); color: #fff; box-shadow: none; }
+.ctx-nav-item.active .ctx-nav-icon { background: color-mix(in srgb, var(--on-accent) 18%, transparent); color: var(--on-accent); box-shadow: none; }
 .ctx-nav-text { display: flex; flex-direction: column; min-width: 0; }
 .ctx-nav-text b { font-size: 13px; font-weight: 600; }
 .ctx-nav-text small { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctx-nav-item.active .ctx-nav-text small { color: rgba(255, 255, 255, 0.8); }
+.ctx-nav-item.active .ctx-nav-text small { color: color-mix(in srgb, var(--on-accent) 80%, transparent); }
 
 .ctx-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
 .ctx-main > .loading { flex: 1; }
@@ -372,7 +372,7 @@ button.send.stop:hover:not(:disabled) { background: #000; }
 .ctx-row.mcp .ctx-row-detail { padding-left: 52px; }
 .mode-seg { flex: 0 0 auto; background: var(--fill); }
 .mode-seg button { min-width: 58px; }
-.mode-seg button.active.m-always { background: var(--accent); color: #fff; }
+.mode-seg button.active.m-always { background: var(--accent); color: var(--on-accent); }
 .mode-seg button.active.m-search { background: var(--ok-dot); color: #fff; }
 .mode-seg button.active.m-off { background: #8e8e93; color: #fff; }
 .file-preview {

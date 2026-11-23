@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 
-from django.db.models import Q
+from django.db.models import CharField, F, OuterRef, Q, Subquery, Value
+from django.db.models.functions import Coalesce, NullIf
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -286,6 +287,46 @@ class RequestItemSerializer(serializers.Serializer):
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2)
 
 
+def _can_control(user) -> bool:
+    from apps.logistics.dispatch import can_control
+
+    return can_control(user)
+
+
+def _forbid_unless_control(request) -> Response | None:
+    if _can_control(request.user):
+        return None
+    return Response({"detail": "Разбирать заявки могут руководство, метролог и менеджер"},
+                    status=status.HTTP_403_FORBIDDEN)
+
+
+def visible_requests(user, qs):
+    """Заявки с ПДн заявителей: руководство и наблюдатель видят все, поверитель — только свои
+    (назначенные или подобранные ему), остальные — ни одной."""
+    from apps.core.models import Role
+
+    if _can_control(user) or getattr(user, "role", "") == Role.OBSERVER:
+        return qs
+    employee = getattr(user, "employee", None)
+    if employee is None:
+        return qs.none()
+    return qs.filter(Q(assigned_employee=employee) | Q(suggested_employee=employee))
+
+
+def with_last_change(qs):
+    """«Последний изменил»: время и автор последней записи simple-history — подзапросами, без N+1.
+
+    Автор — ФИО сотрудника, иначе почта учётной записи; пусто — изменение без входа (форма на сайте)."""
+    last = Request.history.model.objects.filter(id=OuterRef("pk")).order_by("-history_date", "-history_id")
+    return qs.annotate(
+        last_change_at=Subquery(last.values("history_date")[:1]),
+        last_change_by=Subquery(last.annotate(
+            who=Coalesce(NullIf(F("history_user__employee__full_name"), Value("")), F("history_user__email"),
+                         output_field=CharField()),
+        ).values("who")[:1], output_field=CharField()),
+    )
+
+
 class RequestSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     source = serializers.CharField()
@@ -312,6 +353,26 @@ class RequestSerializer(serializers.Serializer):
     is_address_confirmed = serializers.BooleanField()
     consent_given = serializers.BooleanField()
     created_at = serializers.DateTimeField()
+    updated_at = serializers.SerializerMethodField()
+    updated_by = serializers.SerializerMethodField()
+
+    @staticmethod
+    def _last(obj):
+        if hasattr(obj, "last_change_at"):  # with_last_change() — списки
+            return obj.last_change_at, obj.last_change_by or ""
+        row = obj.history.select_related("history_user__employee").order_by("-history_date", "-history_id").first()
+        if row is None:
+            return None, ""
+        user = row.history_user
+        employee = getattr(user, "employee", None) if user else None
+        return row.history_date, (employee.full_name if employee and employee.full_name else (user.email if user else ""))
+
+    def get_updated_at(self, obj):
+        at = self._last(obj)[0]
+        return serializers.DateTimeField().to_representation(at) if at else None
+
+    def get_updated_by(self, obj) -> str:
+        return self._last(obj)[1]
 
 
 class RequestListView(APIView):
@@ -321,9 +382,10 @@ class RequestListView(APIView):
     """
 
     def get(self, request):
-        qs = Request.objects.select_related(
+        qs = with_last_change(Request.objects.select_related(
             "district", "suggested_employee", "assigned_employee"
-        ).prefetch_related("items__family")
+        ).prefetch_related("items__family"))
+        qs = visible_requests(request.user, qs)
         status_param = request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
@@ -345,6 +407,8 @@ class RequestRouteView(APIView):
     """POST /api/hub/requests/{id}/route/ — пересчитать рекомендацию вручную."""
 
     def post(self, request, pk: int):
+        if (denied := _forbid_unless_control(request)) is not None:
+            return denied
         obj = get_object_or_404(Request, pk=pk)
         routing.route(obj)
         return Response(RequestSerializer(obj).data)
@@ -369,6 +433,8 @@ class RequestConfirmView(APIView):
 
     @extend_schema(request=RequestConfirmSerializer, responses={201: None})
     def post(self, request, pk: int):
+        if (denied := _forbid_unless_control(request)) is not None:
+            return denied
         obj = get_object_or_404(Request, pk=pk)
         if obj.status == RequestStatus.CONFIRMED:
             return Response({"detail": "Заявка уже подтверждена"}, status=status.HTTP_400_BAD_REQUEST)
@@ -379,10 +445,13 @@ class RequestConfirmView(APIView):
         employee = get_object_or_404(Employee, pk=data["employee_id"])
         client = get_object_or_404(Client, pk=data["client_id"]) if data.get("client_id") else None
         site = get_object_or_404(Site, pk=data["site_id"]) if data.get("site_id") else None
-        work_order = service.confirm_request(
-            obj, employee=employee, scheduled_date=data.get("scheduled_date"),
-            scheduled_time=data.get("scheduled_time"), client=client, site=site, note=data.get("note", ""),
-        )
+        try:
+            work_order = service.confirm_request(
+                obj, employee=employee, scheduled_date=data.get("scheduled_date"),
+                scheduled_time=data.get("scheduled_time"), client=client, site=site, note=data.get("note", ""),
+            )
+        except service.RequestActionError as exc:  # подтвердили параллельно — проверка под блокировкой
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"work_order_id": work_order.id}, status=status.HTTP_201_CREATED)
 
 
@@ -396,6 +465,8 @@ class RequestRejectView(APIView):
 
     @extend_schema(request=RequestRejectSerializer, responses={200: None})
     def post(self, request, pk: int):
+        if (denied := _forbid_unless_control(request)) is not None:
+            return denied
         obj = get_object_or_404(Request, pk=pk)
         payload = RequestRejectSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
@@ -405,7 +476,7 @@ class RequestRejectView(APIView):
         return Response(RequestSerializer(obj).data)
 
 
-BULK_ACTIONS = ("confirm", "assign", "reject", "spam")
+BULK_ACTIONS = ("confirm", "assign", "reject", "spam", "reopen")
 BULK_MAX = 100
 
 
@@ -421,12 +492,14 @@ class RequestBulkSerializer(serializers.Serializer):
 class RequestBulkView(APIView):
     """POST /api/hub/requests/bulk/ — разбор входящих пачкой (режим «Заявки»).
 
-    {"action": "confirm"|"assign"|"reject"|"spam", "ids": [..], "employee_id"?, "scheduled_date"?,
+    {"action": "confirm"|"assign"|"reject"|"spam"|"reopen", "ids": [..], "employee_id"?, "scheduled_date"?,
      "scheduled_time"?, "reason"?}
 
     * confirm — наряд по каждой заявке; исполнитель — employee_id, иначе подобранный роутингом;
     * assign  — только назначить исполнителя (заявка «Подобран исполнитель»), наряд не заводится;
-    * reject / spam — отклонить с причиной / пометить спамом.
+    * reject / spam — отклонить с причиной / пометить спамом;
+    * reopen  — вернуть во «Новые» («Отменить» в тосте): снять подбор, назначение и отклонение;
+      наряды заявки без поверок отменяются. Нельзя, если по заявке уже есть поверки или сканы.
 
     Каждая заявка — своя транзакция: одна неудачная не откатывает остальные. Повтор того же
     действия безопасен — уже подтверждённая/отклонённая заявка просто попадает в ``skipped``.
@@ -434,9 +507,7 @@ class RequestBulkView(APIView):
     """
 
     def post(self, request):
-        from apps.logistics.dispatch import can_control
-
-        if not can_control(request.user):
+        if not _can_control(request.user):
             return Response({"detail": "Разбирать заявки пачкой могут руководство, метролог и менеджер"},
                             status=status.HTTP_403_FORBIDDEN)
         payload = RequestBulkSerializer(data=request.data)
@@ -449,16 +520,22 @@ class RequestBulkView(APIView):
         if action == "assign" and employee is None:
             raise serializers.ValidationError({"employee_id": "Кому назначить?"})
 
+        from django.db import transaction
+
         ids = list(dict.fromkeys(data["ids"]))
-        found = {obj.pk: obj for obj in Request.objects.select_related("suggested_employee").filter(pk__in=ids)}
         done, skipped, errors = [], [], []
         for pk in ids:
-            obj = found.get(pk)
-            if obj is None:
-                errors.append({"id": pk, "error": "Заявки нет"})
-                continue
             try:
-                outcome = self._apply(obj, action, employee, data)
+                # Своя транзакция и блокировка строки на каждую заявку: статус проверяется под замком,
+                # двойной клик или два диспетчера не подтвердят одну заявку дважды.
+                with transaction.atomic():
+                    obj = Request.objects.select_for_update().filter(pk=pk).first()
+                    if obj is None:
+                        errors.append({"id": pk, "error": "Заявки нет"})
+                        continue
+                    outcome = self._apply(obj, action, employee, data)
+            except service.AlreadyConfirmed:
+                outcome = "уже подтверждена"
             except (service.RequestActionError, ValueError) as exc:
                 errors.append({"id": pk, "error": str(exc)})
                 continue
@@ -466,9 +543,9 @@ class RequestBulkView(APIView):
                 skipped.append({"id": pk, "reason": outcome})
             else:
                 done.append(pk)
-        items = Request.objects.filter(pk__in=ids).select_related(
+        items = with_last_change(Request.objects.filter(pk__in=ids).select_related(
             "district", "suggested_employee", "assigned_employee"
-        ).prefetch_related("items__family")
+        ).prefetch_related("items__family"))
         return Response({
             "done": done, "skipped": skipped, "errors": errors,
             "items": RequestSerializer(items, many=True).data,
@@ -502,6 +579,8 @@ class RequestBulkView(APIView):
             obj.routed_at = timezone.now()
             obj.save(update_fields=["suggested_employee", "status", "routed_at"])
             return ""
+        if action == "reopen":
+            return RequestBulkView._reopen(obj)
         spam = action == "spam"
         target = RequestStatus.SPAM if spam else RequestStatus.REJECTED
         if obj.status == target:
@@ -509,6 +588,29 @@ class RequestBulkView(APIView):
         if obj.status in closed:
             raise ValueError("По заявке уже есть наряд — отмените наряд, а не заявку")
         service.reject_request(obj, reason=data.get("reason", ""), spam=spam)
+        return ""
+
+
+    @staticmethod
+    def _reopen(obj: Request) -> str:
+        from django.db import transaction
+
+        from apps.verification.models import ScanUpload, Verification, WorkOrderStatus
+
+        if obj.status == RequestStatus.NEW and not obj.suggested_employee_id and not obj.assigned_employee_id:
+            return "уже во «Новых»"
+        orders = obj.work_orders.all()
+        if Verification.objects.filter(work_order__in=orders).exists() or ScanUpload.objects.filter(work_order__in=orders).exists():
+            raise ValueError("По заявке уже есть поверки — вернуть во «Новые» нельзя")
+        with transaction.atomic():
+            # update(), не save(): sync_request_status() не должен перетереть возврат во «Новые».
+            orders.exclude(status=WorkOrderStatus.CANCELLED).update(status=WorkOrderStatus.CANCELLED)
+            obj.status = RequestStatus.NEW
+            obj.suggested_employee = obj.assigned_employee = None
+            obj.reject_reason = ""
+            obj.routed_at = obj.confirmed_at = None
+            obj.save(update_fields=["status", "suggested_employee", "assigned_employee", "reject_reason",
+                                    "routed_at", "confirmed_at"])
         return ""
 
 

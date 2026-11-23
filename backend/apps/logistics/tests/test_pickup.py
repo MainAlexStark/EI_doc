@@ -89,8 +89,14 @@ class PickupTests(TestCase):
         listed = self.boss_api.get("/api/work-orders/", {"kind": "lab"}).data
         assert listed[0]["delivery"]["stop_id"] == r.data["id"] and listed[0]["pickup"]["stop_id"] == stop_id
 
+        empty = self.api.patch(f"/api/trip-stops/{r.data['id']}/", {"status": "done"}, format="json")
+        assert empty.status_code == 400  # нечего выдавать — приборов в приёмке нет
+        from apps.verification.tests.factories import make_family, make_verification
+        v = make_verification(make_family(), self.verifier, day=1)
+        v.work_order_id = order_id
+        v.save(update_fields=["work_order"])
         done = self.api.patch(f"/api/trip-stops/{r.data['id']}/", {"status": "done"}, format="json")
-        assert done.status_code == 200
+        assert done.status_code == 200, done.data
         assert WorkOrder.objects.get(pk=order_id).issued_at is not None
         again = self.boss_api.post(f"/api/orders/{order_id}/delivery/", {"date": later}, format="json")
         assert again.status_code == 400  # уже выдано

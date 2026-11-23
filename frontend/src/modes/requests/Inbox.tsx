@@ -4,7 +4,8 @@
  * J/K (↓/↑) — следующая/предыдущая, Shift — расширить выделение, Enter — открыть,
  * A — назначить, C — подтвердить, X — отклонить, S — спам, / — поиск, Esc — снять выделение.
  * После действия — сразу следующая заявка и тост; отклонение и спам уходят на сервер
- * через несколько секунд, поэтому «Отменить» в тосте честно отменяет. */
+ * через несколько секунд, поэтому «Отменить» в тосте честно отменяет; уже отправленное
+ * «Отменить» возвращает во «Новые» (bulk action=reopen). */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { fetchEmployees, fetchRequests, type Employee, type HubRequest } from "../../api";
@@ -263,16 +264,18 @@ export default function Inbox({ onChanged, go, onNew }: { onChanged?: () => void
       reportProblems(result);
       if (result.done.length) {
         const who = nameOf(employeeId);
-        // Вернуть можно тем, у кого кто-то был подобран раньше (снять подбор API не умеет).
+        // У кого кто-то был подобран раньше — вернуть его; остальных — во «Новые» (reopen).
         const restorable = result.done.filter((id) => prev.get(id));
+        const fresh = result.done.filter((id) => !prev.get(id));
         toast.success(result.done.length === 1 ? `Заявка №${result.done[0]} → ${who}` : `${nRequests(result.done.length)} → ${who}`, {
-          undo: restorable.length ? async () => {
+          undo: async () => {
             const groups = new Map<number, number[]>();
             restorable.forEach((id) => groups.set(prev.get(id)!, [...(groups.get(prev.get(id)!) ?? []), id]));
             for (const [emp, group] of groups) applyResult(await bulkRequests("assign", group, { employee_id: emp }));
+            if (fresh.length) applyResult(await bulkRequests("reopen", fresh));
             toast.info("Назначение отменено");
             onChanged?.();
-          } : undefined,
+          },
         });
       }
       finish(ids, false);
@@ -305,6 +308,7 @@ export default function Inbox({ onChanged, go, onNew }: { onChanged?: () => void
           {
             description: result.done.length === 1 ? `Наряд создан — выезд у ${one?.assigned_employee || "исполнителя"} в «Городе» и графике` : "Наряды созданы — выезды у исполнителей",
             action: go ? { label: "К выездам", onClick: () => go("city") } : undefined,
+            undo: () => void reopen(result.done, "Подтверждение отменено — наряд снят"),
           },
         );
       }
@@ -313,6 +317,22 @@ export default function Inbox({ onChanged, go, onNew }: { onChanged?: () => void
       toast.error("Не удалось подтвердить", { id: tid, description: errorText(exc, "Повторите позже") });
     } finally {
       setBusy(false);
+    }
+  };
+
+  /** «Отменить» после фактической отправки: вернуть во «Новые» на сервере. */
+  const reopen = async (ids: number[], done: string) => {
+    try {
+      const result = await bulkRequests("reopen", ids);
+      applyResult(result);
+      reportProblems(result);
+      if (result.done.length) {
+        toast.info(done);
+        setCurrentId(result.done[0]);
+      }
+      onChanged?.();
+    } catch (exc) {
+      toast.error("Не удалось вернуть", { description: errorText(exc, "Повторите позже") });
     }
   };
 
@@ -341,7 +361,7 @@ export default function Inbox({ onChanged, go, onNew }: { onChanged?: () => void
       duration: DEFER_MS - 300,
       undo: () => {
         const d = deferred.current.get(key);
-        if (!d) return; // уже отправлено
+        if (!d) return void reopen(ids, "Заявки вернулись во «Новые»"); // уже отправлено — вернуть на сервере
         window.clearTimeout(d.timer);
         deferred.current.delete(key);
         setRequests((rows) => rows.map((r) => (prev.has(r.id) ? { ...r, status: prev.get(r.id)! } : r)));

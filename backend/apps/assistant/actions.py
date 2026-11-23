@@ -181,6 +181,16 @@ def _registry() -> tuple[dict, dict]:
 
 
 def decide(action: PendingAction, user, *, confirm: bool) -> PendingAction:
+    """Решение по действию. Строка действия блокируется до конца: двойное «Подтвердить»
+    (два запроса подряд) не выполнит действие дважды — второй увидит, что решение уже принято."""
+    with transaction.atomic():
+        locked = PendingAction.objects.select_for_update().select_related("conversation").get(pk=action.pk)
+        _decide_locked(locked, user, confirm=confirm)
+    action.refresh_from_db()
+    return action
+
+
+def _decide_locked(action: PendingAction, user, *, confirm: bool) -> PendingAction:
     if action.status != PendingAction.Status.PENDING:
         raise ActionError("Решение по этому действию уже принято")
     if action.conversation.user_id != user.pk:

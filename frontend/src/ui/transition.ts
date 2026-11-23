@@ -6,7 +6,10 @@
 
 import { flushSync } from "react-dom";
 
-type DocWithVT = Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
+type ViewTransitionLike = { finished: Promise<void>; ready: Promise<void>; updateCallbackDone: Promise<void> };
+type DocWithVT = Document & { startViewTransition?: (cb: () => void) => ViewTransitionLike };
+
+const ignore = () => {};
 
 export const prefersReducedMotion = () =>
   typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -18,9 +21,14 @@ export function withViewTransition(update: () => void): void {
     return;
   }
   try {
-    doc.startViewTransition(() => {
+    const vt = doc.startViewTransition(() => {
       flushSync(update);
     });
+    // Новый переход до конца прошлого «пропускает» прошлый: его промисы отклоняются с AbortError.
+    // Это штатно (быстрое переключение режимов), а не ошибка — гасим, чтобы не было unhandled rejection.
+    vt.ready?.catch(ignore);
+    vt.finished?.catch(ignore);
+    vt.updateCallbackDone?.catch(ignore);
   } catch {
     update();
   }

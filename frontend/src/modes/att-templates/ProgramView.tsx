@@ -22,6 +22,7 @@ import {
   type Plan,
   type Program,
 } from "./api";
+import ExampleCheckSheet from "./ExampleCheckSheet";
 import PlanEditor from "./PlanEditor";
 
 export const ATT_STEPS = [
@@ -52,6 +53,7 @@ export default function ProgramView({
   const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [applyOpen, setApplyOpen] = useState(false);
+  const [checkOpen, setCheckOpen] = useState(false);
 
   const reset = (p: Program) => {
     setProgram(p);
@@ -122,7 +124,7 @@ export default function ProgramView({
     }
   };
 
-  useHotkey("mod+s", () => void save(), { allowInInputs: true, enabled: canEdit && !applyOpen, description: "Сохранить шаблон аттестации", group: "Шаблоны аттестации" });
+  useHotkey("mod+s", () => void save(), { allowInInputs: true, enabled: canEdit && !applyOpen && !checkOpen, description: "Сохранить шаблон аттестации", group: "Шаблоны аттестации" });
 
   if (!program || !plan) {
     return (
@@ -198,6 +200,15 @@ export default function ProgramView({
           onChange={setPlan}
           readOnly={!canEdit}
           check={check}
+          checkActions={canEdit ? (
+            <button
+              type="button" className="sm" disabled={dirty}
+              title={dirty ? "Сначала сохраните план — сверяется сохранённый" : undefined}
+              onClick={() => setCheckOpen(true)}
+            >
+              <Icon name="target" size={14} /> Сверить заново
+            </button>
+          ) : undefined}
           extraTabs={[
             {
               value: "sources",
@@ -228,6 +239,17 @@ export default function ProgramView({
           </button>
         )}
       </div>
+
+      <ExampleCheckSheet
+        open={checkOpen}
+        program={program}
+        onClose={() => setCheckOpen(false)}
+        onChecked={(p) => {
+          setCheckOpen(false);
+          reset(p);
+          onChanged();
+        }}
+      />
 
       <ApplySheet
         open={applyOpen}

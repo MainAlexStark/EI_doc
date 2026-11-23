@@ -239,7 +239,8 @@ def save_program(user, data: dict, *, sources=None, plan_check: dict | None = No
         program.created_via_assistant = via_assistant
         program.needs_review = not reviewer
         program.reviewed_by, program.reviewed_at = (user, timezone.now()) if reviewer else (None, None)
-        program.is_active = True
+        if program.pk is None:
+            program.is_active = True  # правка существующего шаблона не включает выключенный
         program.save()
     return program
 
@@ -264,6 +265,25 @@ def program_from_attestation(att: EquipmentAttestation, user, *, title: str = ""
         program.needs_review = False
     program.source_attestation = att
     program.save(update_fields=["source_attestation", "needs_review"])
+    return program
+
+
+def check_program(program: AttestationProgram, user, example) -> AttestationProgram:
+    """Пересверить формулы плана шаблона на числах примера (calc.check_example).
+
+    Числа примера только прогоняются через план — в шаблон ложится лишь отчёт сверки
+    («в примере / посчитано / сходится»), как у аттестации ИО."""
+    if not can_edit(user):
+        raise PermissionDenied("Нет права сверять шаблоны аттестации (наблюдатель)")
+    try:
+        report = calc.check_example(program.plan, example)
+    except calc.PlanError as exc:
+        raise AttestationError(str(exc)) from exc
+    report["checked_at"] = timezone.now().isoformat(timespec="seconds")
+    employee = getattr(user, "employee", None)
+    report["checked_by"] = employee.full_name if employee else user.email
+    program.plan_check = report
+    program.save(update_fields=["plan_check"])
     return program
 
 

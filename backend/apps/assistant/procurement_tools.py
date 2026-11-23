@@ -144,6 +144,18 @@ def _date_arg(value, name: str) -> dt.date | None:
         raise ToolFailure(f"{name} — дата YYYY-MM-DD") from exc
 
 
+def _int_arg(value, name: str, default: int, low: int, high: int) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ToolFailure(f"{name} — целое число от {low} до {high}") from None
+    if not low <= number <= high:
+        raise ToolFailure(f"{name} — целое число от {low} до {high}, а не {number}")
+    return number
+
+
 def ei_procurement_visits_propose(ctx: ToolContext, args: dict) -> ToolResult:
     from apps.core.models import Employee
 
@@ -152,9 +164,11 @@ def ei_procurement_visits_propose(ctx: ToolContext, args: dict) -> ToolResult:
     lead = Employee.objects.filter(pk=args.get("lead_id"), is_active=True).first() if args.get("lead_id") else None
     if args.get("lead_id") and lead is None:
         raise ToolFailure(f"Сотрудника {args['lead_id']} нет — посмотри ei_team или ei_staff")
+    per_day = _int_arg(args.get("per_day"), "per_day", 40, 1, 1000)
+    days_per_trip = _int_arg(args.get("days_per_trip"), "days_per_trip", 5, 1, 30)
     try:
         plan = procurement_docs.plan_visits(
-            item, per_day=int(args.get("per_day") or 40), days_per_trip=int(args.get("days_per_trip") or 5),
+            item, per_day=per_day, days_per_trip=days_per_trip,
             start=_date_arg(args.get("start"), "start"),
         )
     except procurement_docs.SummaryError as exc:

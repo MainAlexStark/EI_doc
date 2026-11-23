@@ -148,7 +148,7 @@ td.row-actions button + button { margin-left: 4px; }
   position: sticky; top: 0; background: var(--surface); z-index: 2;
 }
 .team-grid-table thead th b { display: block; font-size: 17px; color: var(--ink); font-weight: 600; }
-.team-grid-table thead th.today b { color: #fff; background: var(--crit-dot); border-radius: 999px; width: 30px; margin: 2px auto 0; }
+.team-grid-table thead th.today b { color: var(--on-accent); background: var(--accent); border-radius: 999px; width: 30px; margin: 2px auto 0; }
 .team-grid-table th.who { width: 200px; text-align: left; position: sticky; left: 0; z-index: 3; background: var(--surface); }
 .team-grid-table tbody th.who { display: flex; align-items: center; gap: 8px; padding: 8px 10px; box-shadow: inset 3px 0 0 var(--vc); min-height: 64px; }
 .team-grid-table tbody th.who b { display: block; font-size: 13px; font-weight: 600; }

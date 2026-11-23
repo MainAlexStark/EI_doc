@@ -68,6 +68,7 @@ def program_data(program: AttestationProgram, *, with_plan: bool = True) -> dict
         "created_by": _user_name(program.created_by), "created_via_assistant": program.created_via_assistant,
         "source_attestation_id": program.source_attestation_id, "is_active": program.is_active,
         "used": getattr(program, "used", None), "sources": program.sources,
+        "plan_check": program.plan_check or None,
     }
     if with_plan:
         data["plan"] = program.plan
@@ -122,9 +123,17 @@ class ProgramDetailView(APIView):
             return Response(program_data(program))
         merged = {"title": program.title, "equipment_kind": program.equipment_kind, "plan": program.plan,
                   "note": program.note, **{k: v for k, v in request.data.items() if k in ("title", "equipment_kind", "plan", "note")}}
+        check = program.plan_check or None
+        if check:
+            try:
+                same_plan = calc.clean_plan(merged["plan"]) == program.plan
+            except calc.PlanError:
+                same_plan = False
+            if not same_plan:
+                check = {**check, "stale": True}  # сверка была для прежнего плана
         try:
             program = service.save_program(request.user, merged, sources=program.sources, program_id=program.pk,
-                                           via_assistant=program.created_via_assistant)
+                                           via_assistant=program.created_via_assistant, plan_check=check)
         except service.AttestationError as exc:
             return _fail(exc)
         return Response(program_data(program))
@@ -137,6 +146,27 @@ class ProgramApproveView(APIView):
 
     def post(self, request, pk):
         program = service.approve_program(get_object_or_404(AttestationProgram, pk=pk), request.user)
+        return Response(program_data(program))
+
+
+class ProgramCheckView(APIView):
+    """POST /api/attestations/programs/{id}/check/ — пересверить формулы плана на числах примера.
+
+    {"example": {source, modes: {режим: {display?, readings: {точка: [..]}, expected: {характеристика: "5,69"
+    | {точка: "…"}}}}}} → шаблон с новым plan_check. Числа примера не сохраняются — только отчёт.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        program = get_object_or_404(AttestationProgram, pk=pk)
+        example = request.data.get("example")
+        if not example:
+            return _fail(ValueError("нужны числа примера: example{source, modes{режим: {readings, expected}}}"))
+        try:
+            program = service.check_program(program, request.user, example)
+        except service.AttestationError as exc:
+            return _fail(exc)
         return Response(program_data(program))
 
 

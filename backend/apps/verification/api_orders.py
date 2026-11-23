@@ -95,7 +95,13 @@ class OrderWriteSerializer(serializers.Serializer):
         return value
 
 
-def _client(data: dict, current: Client | None = None) -> Client:
+def _client(data: dict, current: Client | None = None, *, edit: str = "all") -> Client:
+    """Заказчик по ИНН / названию; новый — заводится с присланными реквизитами.
+
+    ``edit`` — что можно менять у уже существующего: ``all`` — всё (руководство, менеджер),
+    ``blank`` — только пустые поля (поверитель дописывает, но не перезаписывает),
+    ``none`` — ничего (забор приборов: контакт — у адреса, не у клиента).
+    """
     inn, name = data.get("inn", ""), (data.get("name") or "").strip()
     client = current
     if inn and (client is None or client.inn != inn):
@@ -106,12 +112,23 @@ def _client(data: dict, current: Client | None = None) -> Client:
         if not name:
             raise ValidationError({"detail": "Укажите ИНН или название заказчика"})
         client = Client(kind=ClientKind.ORG if len(inn) != 12 else ClientKind.PERSON, name=name, inn=inn)
+        edit = "all"
+    if edit == "none":
+        return client
+    changed = False
     for field, key in (("name", "name"), ("kpp", "kpp"), ("ogrn", "ogrn"), ("legal_address", "address"), ("phone", "phone")):
         value = (data.get(key) or "").strip()
-        if value:
+        if value and getattr(client, field) != value and (edit == "all" or not getattr(client, field)):
             setattr(client, field, value)
-    client.save()
+            changed = True
+    if changed or client.pk is None:
+        client.save()
     return client
+
+
+def _client_edit(request) -> str:
+    """Реквизиты существующего заказчика правят руководство и менеджер; поверитель — только дописывает."""
+    return "all" if request.user.is_superuser or request.user.role in MANAGERS else "blank"
 
 
 def _site(client: Client) -> Site:
@@ -138,7 +155,7 @@ class OrderCreateView(APIView):
         if data.get("assigned_employee_id") and request.user.role in MANAGERS:
             assignee = get_object_or_404(Employee, pk=data["assigned_employee_id"], is_active=True)
         with transaction.atomic():
-            client = _client(data)
+            client = _client(data, edit=_client_edit(request))
             order = WorkOrder.objects.create(
                 kind=WorkOrderKind.LAB, client=client, site=_site(client), assigned_employee=assignee,
                 status=WorkOrderStatus.IN_PROGRESS, scheduled_date=timezone.localdate(),
@@ -156,7 +173,7 @@ class OrderDetailView(APIView):
         data = payload.validated_data
         with transaction.atomic():
             if any(key in data for key in ("inn", "name", "kpp", "ogrn", "address", "phone")):
-                client = _client(data, order.client)
+                client = _client(data, order.client, edit=_client_edit(request))
                 if client.pk != order.client_id or order.site.address != (client.legal_address or client.name):
                     order.client, order.site = client, _site(client)
             for field in ("contact", "note"):
@@ -178,6 +195,8 @@ class OrderIssueView(APIView):
             raise ValidationError({"detail": "В заказе нет ни одного прибора"})
         order.issued_at = timezone.now() if issued else None
         order.save(update_fields=["issued_at"])
+        # Выдачу теперь ведут руками: адрес возврата её больше не снимет.
+        order.logistic_stops.filter(issued_lab=True).update(issued_lab=False)
         return Response(WorkOrderSerializer(order).data)
 
 

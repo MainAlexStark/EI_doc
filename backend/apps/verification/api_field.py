@@ -169,7 +169,11 @@ class OrderInstrumentsBulkView(APIView):
 
         types = {t.pk: t for t in SiType.objects.select_related("family").filter(pk__in={r["si_type_id"] for r in rows})}
         known = {v.client_id: v for v in Verification.objects.filter(
-            client_id__in=[r["client_id"] for r in rows if r.get("client_id")]).select_related("instrument__si_type")}
+            work_order=order, client_id__in=[r["client_id"] for r in rows if r.get("client_id")]).select_related("instrument__si_type")}
+        # client_id чужой приёмки: не отдаём чужую поверку, а говорим, что идентификатор занят.
+        foreign = set(Verification.objects.filter(
+            client_id__in=[r["client_id"] for r in rows if r.get("client_id") and r["client_id"] not in known]
+        ).values_list("client_id", flat=True))
         in_order = {
             (v.instrument.si_type_id, v.instrument.serial_number.casefold()): v
             for v in order.verifications.select_related("instrument__si_type")
@@ -180,6 +184,10 @@ class OrderInstrumentsBulkView(APIView):
             serial = " ".join(row["serial_number"].split())
             if row.get("client_id") in known:
                 existing.append(known[row["client_id"]])
+                continue
+            if row.get("client_id") in foreign:
+                errors.append({"index": index, "serial_number": serial,
+                               "error": "Идентификатор строки (client_id) уже занят другой приёмкой — нужен новый"})
                 continue
             si_type = types.get(row["si_type_id"])
             if si_type is None:

@@ -16,3 +16,4 @@ dist/
 *.tsbuildinfo
 local.sqlite3
 frontend_dist/
+.qa/
