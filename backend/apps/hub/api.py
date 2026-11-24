@@ -27,7 +27,7 @@ from apps.hub import captcha, routing, service
 from apps.hub.address import AddressSuggestUnavailable, DaDataClient
 from apps.hub.models import Request, RequestItem, RequestStatus
 from apps.hub.pricing import estimate
-from apps.verification.models import Client, Site, WorkOrder
+from apps.verification.models import Client, Site
 
 
 class PublicRequestThrottle(AnonRateThrottle):
@@ -612,8 +612,3 @@ class RequestBulkView(APIView):
             obj.save(update_fields=["status", "suggested_employee", "assigned_employee", "reject_reason",
                                     "routed_at", "confirmed_at"])
         return ""
-
-
-def _notify_work_order_assigned(work_order: WorkOrder) -> None:
-    """Совместимость: уведомление теперь живёт в apps.hub.service."""
-    service.notify_work_order_assigned(work_order)

@@ -192,8 +192,16 @@ def reset_password(actor, employee: Employee) -> str:
         raise StaffError("У сотрудника нет учётной записи — сначала укажите почту для входа")
     if user.role == Role.OWNER and user.pk != actor.pk and not (actor.is_superuser or actor.role == Role.OWNER):
         raise StaffError("Пароль владельца сбрасывает только владелец")
+    from apps.notify import outbox, passwords
+    from apps.notify.render import absolute
+
     secret = temp_password()
-    user.set_password(secret)
-    user.save(update_fields=["password"])
+    # Как смена пароля: прежние входы сотрудника закрываются, а ему — письмо, что пароль сбросили.
+    passwords.set_password(user, secret)
+    if user.pk != actor.pk:
+        outbox.enqueue("password_reset_by_admin", user.email, {
+            "name": employee.full_name, "actor": getattr(getattr(actor, "employee", None), "full_name", "") or actor.email,
+            "login_url": absolute("/"),
+        }, user=user)
     return secret
 

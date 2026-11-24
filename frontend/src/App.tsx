@@ -1,6 +1,7 @@
 import { Component, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fetchMe, fetchRequests, fetchSiTypes, isAuthenticated, logout, type Me } from "./api";
-import Login from "./components/Login";
+import Login, { hasResetToken } from "./components/Login";
+import Profile from "./components/Profile";
 import { isControlRole } from "./dispatchApi";
 import { registerDefaultSources } from "./modes/commandSources";
 import { countProgramsForReview } from "./modes/att-templates/api";
@@ -61,13 +62,20 @@ function readHash(): Route {
 }
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(isAuthenticated());
+  // Ссылка «Сброс пароля» при уже открытом кабинете: выходим на этом устройстве
+  // и показываем форму нового пароля — иначе токен из письма молча пропал бы.
+  const [authenticated, setAuthenticated] = useState(() => {
+    if (hasResetToken() && isAuthenticated()) logout();
+    return isAuthenticated();
+  });
   const [route, setRoute] = useState<Route>(readHash);
   const [me, setMe] = useState<Me | null>(null);
   const [counts, setCounts] = useState<Partial<Record<SectionKey, number>>>({});
   const [menuOpen, setMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  // «Профиль и пароль»; #/profile — ссылка из писем («какие письма приходят — в профиле»).
+  const [profileOpen, setProfileOpen] = useState(() => window.location.hash.replace(/^#\/?/, "") === "profile");
   const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
   const [sidebar, setSidebar] = usePersistent<"full" | "mini">("ei_doc_sidebar", "full", ["full", "mini"]);
   const [theme, setTheme] = usePersistent<"auto" | "light" | "dark">("ei_doc_theme", "auto", ["auto", "light", "dark"]);
@@ -91,7 +99,10 @@ export default function App() {
   }, [authenticated]);
 
   useEffect(() => {
-    const onHash = () => withViewTransition(() => setRoute(readHash()));
+    const onHash = () => {
+      if (window.location.hash.replace(/^#\/?/, "") === "profile") setProfileOpen(true);
+      withViewTransition(() => setRoute(readHash()));
+    };
     window.addEventListener("hashchange", onHash);
     window.addEventListener("popstate", onHash);
     return () => {
@@ -246,6 +257,7 @@ export default function App() {
         id: "act:theme", title: theme === "dark" ? "Светлая тема" : "Тёмная тема", icon: theme === "dark" ? "sun" : "moon", group: "Действия",
         keywords: "тема оформление ночь", run: () => setTheme(theme === "dark" ? "light" : "dark"),
       },
+      { id: "act:profile", title: "Профиль и пароль", subtitle: "Сменить пароль, какие письма приходят", icon: "lock", group: "Действия", keywords: "пароль сменить почта уведомления письма профиль", run: () => setProfileOpen(true) },
       { id: "act:logout", title: "Выйти", icon: "logout", group: "Действия", keywords: "выход сменить пользователя", run: signOut },
     ];
     return [...nav, ...actions];
@@ -384,6 +396,10 @@ export default function App() {
                     setMenuOpen(false);
                     setHelpOpen(true);
                   }}
+                  onProfile={() => {
+                    setMenuOpen(false);
+                    setProfileOpen(true);
+                  }}
                   onClose={() => setMenuOpen(false)}
                   onSignOut={signOut}
                 />
@@ -429,6 +445,12 @@ export default function App() {
               <span className="label">Найти или сделать</span>
             </button>
             {displayName && (
+              <button type="button" className="side-item" onClick={() => { setMoreOpen(false); setProfileOpen(true); }}>
+                <Icon name="lock" />
+                <span className="label">Профиль и пароль</span>
+              </button>
+            )}
+            {displayName && (
               <button type="button" className="side-item" onClick={signOut}>
                 <Icon name="logout" />
                 <span className="label">Выйти · {shortName(displayName)}</span>
@@ -471,6 +493,15 @@ export default function App() {
 
         <CommandPalette />
         <HotkeyHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+        <Profile
+          open={profileOpen}
+          onClose={() => {
+            setProfileOpen(false);
+            if (window.location.hash.replace(/^#\/?/, "") === "profile") window.history.replaceState(null, "", "#/");
+          }}
+          name={displayName}
+          email={me?.email ?? ""}
+        />
         <Toaster />
         <DialogHost />
       </div>
@@ -503,13 +534,14 @@ class ModeBoundary extends Component<{ children: ReactNode; onHome: () => void }
 }
 
 function AccountMenu({
-  name, email, theme, onTheme, onHelp, onClose, onSignOut,
+  name, email, theme, onTheme, onHelp, onProfile, onClose, onSignOut,
 }: {
   name: string;
   email: string;
   theme: "auto" | "light" | "dark";
   onTheme: (theme: "auto" | "light" | "dark") => void;
   onHelp: () => void;
+  onProfile: () => void;
   onClose: () => void;
   onSignOut: () => void;
 }) {
@@ -553,6 +585,10 @@ function AccountMenu({
         ))}
       </div>
       <div className="menu-sep" />
+      <button type="button" className="menu-item" role="menuitem" onClick={onProfile}>
+        <Icon name="lock" size={16} />
+        Профиль и пароль
+      </button>
       <button type="button" className="menu-item" role="menuitem" onClick={onHelp}>
         <Icon name="keyboard" size={16} />
         Клавиши

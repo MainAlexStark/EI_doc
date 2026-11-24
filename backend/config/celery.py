@@ -17,4 +17,13 @@ app.conf.beat_schedule = {
         "task": "apps.tasks.tasks.generate_recurring_tasks",
         "schedule": crontab(hour=6, minute=0),
     },
+    # Почта и уведомления (apps.notify): подстраховка очереди — если в момент события
+    # Redis был недоступен, письма и сводки всё равно уйдут.
+    "notify-sweep": {"task": "apps.notify.tasks.sweep", "schedule": crontab(minute="*/2")},
+    # Сроки задач — каждому его задачи на сегодня и просроченные.
+    "notify-tasks-due": {"task": "apps.notify.tasks.remind_tasks_due", "schedule": crontab(hour=7, minute=40)},
+    # Метрологам — сколько поверок ждёт нормоконтроля (по будням).
+    "notify-review-queue": {
+        "task": "apps.notify.tasks.remind_review_queue", "schedule": crontab(hour=8, minute=10, day_of_week="1-5"),
+    },
 }

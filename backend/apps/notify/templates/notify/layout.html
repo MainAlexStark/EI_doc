@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="light dark"><title>{{ brand }}</title></head>
+<body style="margin:0;padding:0;background:#f1f2f6;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#151821">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f2f6;padding:32px 12px">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:14px;border:1px solid #e1e3ea">
+<tr><td style="padding:24px 32px 4px">
+  <span style="display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:8px;background:#2b45e0;color:#fff;font-weight:700;font-size:13px;vertical-align:middle">ЕИ</span>
+  <span style="font-size:16px;font-weight:700;color:#151821;vertical-align:middle;margin-left:8px">{{ brand }}</span>
+  <span style="font-size:13px;color:#6b6f7b;vertical-align:middle;margin-left:6px">ООО «Единица Измерения»</span>
+</td></tr>
+<tr><td style="padding:12px 32px 28px;font-size:15px;line-height:1.55">{% block body %}{% endblock %}</td></tr>
+</table>
+<p style="font-size:12px;color:#8a8e99;margin:16px 0 0;max-width:560px">Письмо отправлено автоматически — отвечать на него не нужно.{% block foot %}{% endblock %}</p>
+</td></tr></table></body></html>

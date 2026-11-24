@@ -47,3 +47,32 @@ class FrontendRootFileTestCase(TestCase):
             with override_settings(FRONTEND_DIST_DIR=dist):
                 response = self.client.get("/secret.env")
         self.assertEqual(response.status_code, 404)
+
+
+class PublicPathsWithoutSlashTestCase(TestCase):
+    """«/o-nas» и «/zayavka» без слэша — 301 на версию со слэшем, а не 404.
+
+    Раньше корневой catch-all "<str:filename>" перехватывал любой
+    односегментный путь, и APPEND_SLASH не срабатывал.
+    """
+
+    def test_landing_without_slash_redirects(self):
+        response = self.client.get("/o-nas")
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/o-nas/")
+
+    def test_request_form_without_slash_redirects(self):
+        response = self.client.get("/zayavka?utm=1")
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/zayavka/?utm=1")
+
+    def test_unknown_single_segment_is_404(self):
+        self.assertEqual(self.client.get("/nothing-here").status_code, 404)
+
+    def test_landing_with_slash_served(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            (dist / "index.html").write_text("<html>сайт</html>", encoding="utf-8")
+            with override_settings(FRONTEND_DIST_DIR=dist):
+                response = self.client.get("/o-nas/")
+        self.assertEqual(response.status_code, 200)

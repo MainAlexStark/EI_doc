@@ -2,7 +2,7 @@
 
 Вынесено из RequestConfirmView/RequestRejectView, чтобы карточка
 ассистента («подтвердить заявку №12 на Иванова») делала ровно то же, что
-кнопка на экране «Заявки», включая уведомление исполнителя в Telegram.
+кнопка на экране «Заявки», включая уведомление исполнителя (apps.notify).
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def confirm_request(
         from apps.logistics.service import attach_to_city_day
 
         attach_to_city_day(work_order)
-    notify_work_order_assigned(work_order)
+    # Исполнителю напишет apps.notify.signals (назначение наряда) — после коммита.
     return work_order
 
 
@@ -63,14 +63,3 @@ def reject_request(obj: Request, *, reason: str = "", spam: bool = False) -> Req
     obj.save(update_fields=["status", "reject_reason"])
     return obj
 
-
-def notify_work_order_assigned(work_order: WorkOrder) -> None:
-    from apps.core.telegram import send_message
-
-    employee = work_order.assigned_employee
-    if not employee.telegram_chat_id:
-        return
-    when = work_order.scheduled_date.strftime("%d.%m.%Y") if work_order.scheduled_date else "дата не указана"
-    if work_order.scheduled_time:
-        when += f", {work_order.scheduled_time:%H:%M}"
-    send_message(employee.telegram_chat_id, f"Новый наряд №{work_order.id}: {work_order.site.address}, {when}")

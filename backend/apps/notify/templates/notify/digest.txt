@@ -1,0 +1,10 @@
+{% autoescape off %}{{ title }}
+{% if intro %}{{ intro }}
+{% endif %}{% for line in lines %}
+• {{ line.text }}{% if line.note %}
+  {{ line.note }}{% endif %}{% if line.url %}
+  {{ line.url }}{% endif %}{% endfor %}
+
+Открыть EI_doc: {{ button_url }}
+{% if optional %}Какие письма приходят — в профиле: {{ prefs_url }}{% endif %}
+{% endautoescape %}

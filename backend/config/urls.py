@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -26,9 +26,15 @@ from apps.catalog.api_types import (
     SiTypePresetsView,
 )
 from apps.core.api import EmployeeListView, MeView, TelegramLinkCodeView
+from apps.notify import api as notify_api
 from apps.core.today import TodayView
 from apps.core.telegram_views import TelegramWebhookView
-from apps.core.views import frontend_index, frontend_root_file, healthz
+from apps.core.views import (
+    FRONTEND_ROOT_FILE_URL_RE,
+    frontend_index,
+    frontend_root_file,
+    healthz,
+)
 from apps.logistics.tiles import TileView
 from apps.logistics import api_dispatch
 from apps.hub.api import (
@@ -117,6 +123,13 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # Смена и сброс пароля, настройки уведомлений (apps.notify, как в openseller)
+    path("api/auth/password/change/", notify_api.PasswordChangeView.as_view(), name="password_change"),
+    path("api/auth/password/forgot/", notify_api.PasswordForgotView.as_view(), name="password_forgot"),
+    path("api/auth/password/reset/check/", notify_api.PasswordResetCheckView.as_view(), name="password_reset_check"),
+    path("api/auth/password/reset/", notify_api.PasswordResetView.as_view(), name="password_reset"),
+    path("api/notify/prefs/", notify_api.PrefsView.as_view(), name="notify_prefs"),
+    path("api/notify/test/", notify_api.TestMailView.as_view(), name="notify_test"),
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
     path("api/catalog/si-types/", SiTypeListCreateView.as_view(), name="si_type_list"),
     path("api/catalog/standard-kits/", StandardKitsView.as_view(), name="standard_kits"),
@@ -279,7 +292,9 @@ urlpatterns = [
     # Одностраничник фирмы с той же формой заявки внутри.
     path("o-nas/", frontend_index, name="public_landing"),
     # service worker/манифест PWA — обязаны быть в корне, см. frontend_root_file.
-    # Последний в списке: односегментный catch-all, не должен перехватывать
-    # ничего из путей выше.
-    path("<str:filename>", frontend_root_file, name="frontend_root_file"),
+    # Последний в списке и только по allowlist (тот же, что FRONTEND_ROOT_FILE_RE):
+    # раньше здесь был односегментный catch-all "<str:filename>", и "/o-nas"
+    # без слэша попадал в него и получал 404 вместо 301 на "/o-nas/" —
+    # APPEND_SLASH срабатывает, только если путь не совпал ни с одним шаблоном.
+    re_path(FRONTEND_ROOT_FILE_URL_RE, frontend_root_file, name="frontend_root_file"),
 ]

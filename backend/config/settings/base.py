@@ -57,6 +57,7 @@ LOCAL_APPS = [
     "apps.arshin",
     "apps.assistant",
     "apps.equipment",
+    "apps.notify",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -75,6 +76,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "simple_history.middleware.HistoryRequestMiddleware",
+    "apps.notify.actor.ActorResetMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -124,7 +126,9 @@ AUTH_USER_MODEL = "core.User"
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.core.exceptions.exception_handler",
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        # Тот же JWT, плюс запоминает, кто действует, — чтобы не слать человеку
+        # письмо о том, что он сделал сам (apps.notify.actor).
+        "apps.notify.actor.ActorJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend",),
@@ -139,6 +143,13 @@ REST_FRAMEWORK = {
         "public_request_burst": env("THROTTLE_PUBLIC_REQUEST_BURST", default="5/min"),
         "address_suggest": "120/min",
         "map_tiles": "3000/min",
+        # Смена и сброс пароля (apps.notify.api_password): перебор текущего пароля
+        # и рассылка писем «сбросить пароль» по чужим адресам.
+        "password_change": env("THROTTLE_PASSWORD_CHANGE", default="10/hour"),
+        "password_forgot": env("THROTTLE_PASSWORD_FORGOT", default="5/hour"),
+        # Проверка ссылки и сам сброс — своя корзина: ошибка в новом пароле и
+        # повтор не съедают лимит «Забыли пароль?».
+        "password_reset": env("THROTTLE_PASSWORD_RESET", default="30/hour"),
     },
     # За Caddy REMOTE_ADDR — адрес прокси, и без этого все посетители сайта делили бы
     # один анонимный лимит на всех. 1 — один доверенный прокси перед gunicorn (prod).
@@ -152,6 +163,10 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
+    # Метка пароля в токене: сменили пароль — старые входы перестают работать
+    # (проверка — apps.notify.actor, мягкая к токенам, выданным до этой версии).
+    "CHECK_REVOKE_TOKEN": True,
+    "TOKEN_REFRESH_SERIALIZER": "apps.notify.actor.StampedTokenRefreshSerializer",
 }
 
 # Полевые устройства: поверитель в недельной командировке не должен разлогиниться
@@ -335,6 +350,47 @@ AGENT_LOGIN_SECRET = env("AGENT_LOGIN_SECRET", default="")
 AGENT_HOST_TOKEN = env("AGENT_HOST_TOKEN", default="")
 AGENT_INTERNAL_URL = env("AGENT_INTERNAL_URL", default="http://ei-agent:8080")
 AGENT_SERVICE_TOKEN = env("AGENT_SERVICE_TOKEN", default="")
+
+# --------------------------------------------------------------------------
+# Почта и уведомления (apps.notify, как в openseller — решение 069)
+# --------------------------------------------------------------------------
+# Пустой SMTP_HOST — письма только пишутся в журнал (apps.notify.backends.LogBackend),
+# «Забыли пароль?» честно отвечает, что почта не настроена.
+# Порт 465 — сразу TLS (Яндекс 360, Mail.ru), 587 — STARTTLS. SMTP_TLS: implicit | starttls;
+# пусто — по порту. Открытым текстом пароль на SMTP не отправляется никогда.
+from apps.notify.tlsmode import implicit_tls as _implicit_tls  # noqa: E402 — без Django, только логика порта
+
+SMTP_HOST = env("SMTP_HOST", default="")
+SMTP_PORT = env.int("SMTP_PORT", default=465)
+SMTP_TLS = env("SMTP_TLS", default="")
+SMTP_USERNAME = env("SMTP_USERNAME", default="")
+SMTP_PASSWORD = env("SMTP_PASSWORD", default="")
+MAIL_FROM = env("MAIL_FROM", default="") or SMTP_USERNAME or "EI_doc <noreply@localhost>"
+
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend" if SMTP_HOST else "apps.notify.backends.LogBackend"
+)
+EMAIL_HOST = SMTP_HOST
+EMAIL_PORT = SMTP_PORT
+EMAIL_HOST_USER = SMTP_USERNAME
+EMAIL_HOST_PASSWORD = SMTP_PASSWORD
+EMAIL_USE_SSL = bool(SMTP_HOST) and _implicit_tls(SMTP_PORT, SMTP_TLS)
+EMAIL_USE_TLS = bool(SMTP_HOST) and not EMAIL_USE_SSL
+EMAIL_TIMEOUT = env.int("SMTP_TIMEOUT", default=30)
+DEFAULT_FROM_EMAIL = MAIL_FROM
+SERVER_EMAIL = MAIL_FROM
+
+# Адрес кабинета для ссылок в письмах («https://ei-doc.eicounters.ru»). Пусто — первый
+# из CSRF_TRUSTED_ORIGINS.
+APP_PUBLIC_URL = (env("APP_PUBLIC_URL", default="") or (CSRF_TRUSTED_ORIGINS[:1] or [""])[0]).rstrip("/")
+# Ссылка «задать новый пароль» живёт час и срабатывает один раз (как в openseller).
+PASSWORD_RESET_TIMEOUT = 60 * 60
+# Писем сброса на один адрес в час (сверх — молча, ответ тот же).
+PASSWORD_FORGOT_PER_ADDRESS = env.int("PASSWORD_FORGOT_PER_ADDRESS", default=3)
+# Через сколько секунд после события собирать письмо: назначения пачкой — одним письмом.
+NOTIFY_FLUSH_DELAY = env.int("NOTIFY_FLUSH_DELAY", default=20)
+# False — собирать и отправлять сразу в процессе (тесты, локальный запуск без Celery).
+NOTIFY_ASYNC = env.bool("NOTIFY_ASYNC", default=True)
 
 # --------------------------------------------------------------------------
 # Celery

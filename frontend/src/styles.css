@@ -1829,3 +1829,16 @@ button.trip-mark.active.refused { background: var(--crit-soft); color: var(--cri
   button.icon-btn { min-width: 40px; min-height: 40px; }
   button.link { padding-block: 10px; margin-block: -10px; }
 }
+
+/* Профиль и пароль (components/Profile.tsx), «Забыли пароль?» (Login.tsx) */
+.profile-stack { gap: 22px; }
+.profile-section { display: flex; flex-direction: column; gap: 12px; }
+.profile-section + .profile-section { border-top: 1px solid var(--hair); padding-top: 18px; }
+.profile-section h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; }
+.profile-grid { margin-bottom: 0; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.profile-actions { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.profile-switches { gap: 6px; }
+.hint.warn { color: var(--warn, #b26b00); }
+.login .link-btn { background: none; border: 0; padding: 0; min-height: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.login .link-btn:hover { color: var(--accent-hover); }
+.login .login-back { align-self: flex-start; }

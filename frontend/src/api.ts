@@ -1757,3 +1757,60 @@ export type VisitResult = {
 export const fetchVisitDefaults = () => json<VisitDefaults>("/api/visits/");
 export const createVisit = (payload: VisitPayload) =>
   json<VisitResult>("/api/visits/", { method: "POST", body: JSON.stringify(payload) });
+
+// ---------------------------------------------------------------------------
+// Пароль и уведомления (backend: apps.notify.api)
+// ---------------------------------------------------------------------------
+
+/** POST без токена (вход, «Забыли пароль?», сброс по ссылке) — ошибки DRF словами. */
+async function publicJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let data: unknown = null;
+  try {
+    data = await response.json();
+  } catch {
+    /* пустой ответ или HTML-страница прокси */
+  }
+  if (!response.ok) throw new ApiError(humanError(data) || statusText(response.status), response.status);
+  return data as T;
+}
+
+/** Сменить свой пароль. Остальные входы закрываются, этот получает новые токены. */
+export async function changePassword(current: string, password: string, password2: string): Promise<string> {
+  const data = await json<{ access: string; refresh: string; detail: string }>("/api/auth/password/change/", {
+    method: "POST",
+    body: JSON.stringify({ current, password, password2 }),
+  });
+  tokens.set(data.access, data.refresh);
+  return data.detail;
+}
+
+export type ForgotResult = { mail_configured: boolean; detail: string };
+export const forgotPassword = (email: string) => publicJson<ForgotResult>("/api/auth/password/forgot/", { email });
+
+export const checkResetToken = (token: string) =>
+  publicJson<{ ok: boolean; email?: string; detail?: string }>("/api/auth/password/reset/check/", { token });
+
+export const resetPassword = (token: string, password: string, password2: string) =>
+  publicJson<{ email: string; detail: string }>("/api/auth/password/reset/", { token, password, password2 });
+
+export type NotifyCategory = { key: string; label: string; enabled: boolean };
+export type NotifyPrefs = {
+  email: string;
+  mail_configured: boolean;
+  telegram_linked: boolean;
+  can_test: boolean;
+  categories: NotifyCategory[];
+};
+
+export const fetchNotifyPrefs = () => json<NotifyPrefs>("/api/notify/prefs/");
+
+export const saveNotifyPrefs = (categories: Record<string, boolean>) =>
+  json<NotifyPrefs>("/api/notify/prefs/", { method: "PUT", body: JSON.stringify({ categories }) });
+
+export const sendTestMail = () =>
+  json<{ detail: string; mail_configured: boolean }>("/api/notify/test/", { method: "POST" });

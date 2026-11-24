@@ -1,0 +1,5 @@
+{% extends "notify/layout.html" %}{% block body %}
+<p>Здравствуйте{% if name %}, {{ name }}{% endif %}!</p>
+<p>Это пробное письмо: почта {{ brand }} настроена и отправляет. Уведомления о заявках, выездах и задачах будут приходить с этого адреса.</p>
+{% include "notify/_button.html" with url=app_url text="Открыть EI_doc" %}
+{% endblock %}

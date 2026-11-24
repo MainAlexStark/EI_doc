@@ -59,10 +59,14 @@ def frontend_index(request):
 # иконки. Список закрытый: это не общая раздача статики (та идёт через
 # whitenoise из /static/frontend/), а узкий обход именно для scope service
 # worker'а, которому обязательно быть в корне, а не под префиксом.
-FRONTEND_ROOT_FILE_RE = re.compile(
-    r"^(sw\.js|registerSW\.js|manifest\.webmanifest|workbox-[\w-]+\.js|"
+# Один и тот же список и для маршрута (config/urls.py, re_path), и для
+# проверки внутри вью: маршрут не должен ловить ничего, кроме этих файлов,
+# иначе он перехватывает "/o-nas" и "/zayavka" у APPEND_SLASH.
+FRONTEND_ROOT_FILE_URL_RE = (
+    r"^(?P<filename>sw\.js|registerSW\.js|manifest\.webmanifest|workbox-[\w-]+\.js|"
     r"favicon\.ico|apple-touch-icon\.png|icon-\d+\.png|index\.html)$"
 )
+FRONTEND_ROOT_FILE_RE = re.compile(FRONTEND_ROOT_FILE_URL_RE)
 
 _ROOT_FILE_CONTENT_TYPES = {
     ".js": "text/javascript",

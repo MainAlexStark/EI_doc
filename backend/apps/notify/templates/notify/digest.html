@@ -1,0 +1,12 @@
+{% extends "notify/layout.html" %}{% block body %}
+<p style="margin:0 0 4px;font-size:19px;font-weight:700">{{ title }}</p>
+{% if intro %}<p style="color:#5d616c;margin:0 0 8px">{{ intro }}</p>{% endif %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0 0;border-top:1px solid #e9ebf0">
+{% for line in lines %}<tr><td style="padding:10px 0;border-bottom:1px solid #e9ebf0">
+  {% if line.url %}<a href="{{ line.url }}" style="color:#151821;text-decoration:none;font-weight:600">{{ line.text }}</a>{% else %}<span style="font-weight:600">{{ line.text }}</span>{% endif %}
+  {% if line.note %}<div style="font-size:13px;color:#5d616c;margin-top:2px">{{ line.note }}</div>{% endif %}
+</td></tr>{% endfor %}
+</table>
+{% include "notify/_button.html" with url=button_url text=button_text %}
+{% endblock %}
+{% block foot %}{% if optional %} Какие письма приходят — <a href="{{ prefs_url }}" style="color:#8a8e99">в профиле</a>.{% endif %}{% endblock %}

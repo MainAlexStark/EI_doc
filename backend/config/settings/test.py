@@ -31,3 +31,9 @@ YANDEX_SEARCH_API_KEY = ""
 TELEGRAM_BOT_TOKEN = ""
 AGENT_URL = ""
 EXTERNAL_CACHE_ENABLED = False
+
+# Почта: письма — в память (django.core.mail.outbox), уведомления — сразу, без Celery.
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+SMTP_HOST = ""
+NOTIFY_ASYNC = False
+APP_PUBLIC_URL = "https://ei-doc.test"

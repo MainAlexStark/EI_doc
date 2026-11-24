@@ -462,7 +462,6 @@ def ei_work_order_propose(ctx: ToolContext, args: dict) -> ToolResult:
 
 
 def _work_order_change(action: PendingAction, user) -> dict:
-    from apps.hub.service import notify_work_order_assigned
     from apps.verification.models import WorkOrder, WorkOrderStatus
 
     if _role(user) == Role.OBSERVER:
@@ -475,7 +474,6 @@ def _work_order_change(action: PendingAction, user) -> dict:
     ch = action.payload["changes"]
     if "assigned_employee_id" in ch and not _is_manager(user):
         raise PermissionDenied("Переназначить наряд может только владелец, руководитель или менеджер")
-    reassigned = "assigned_employee_id" in ch and ch["assigned_employee_id"] != w.assigned_employee_id
     if "scheduled_date" in ch:
         w.scheduled_date = dt.date.fromisoformat(ch["scheduled_date"]) if ch["scheduled_date"] else None
     if "scheduled_time" in ch:
@@ -492,8 +490,6 @@ def _work_order_change(action: PendingAction, user) -> dict:
         w.sync_request_status()
         if w.status == WorkOrderStatus.PLANNED:
             w.refresh_status()  # вернули из отмены — пусть статус снова посчитают поверки
-    if reassigned:
-        notify_work_order_assigned(w)
     w.refresh_from_db()
     return {"id": w.pk, "status": w.get_status_display()}
 
