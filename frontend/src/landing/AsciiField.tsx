@@ -27,9 +27,11 @@ const CURSOR_FOLLOW = 0.12; // инерция пятна: доля пути до
 const LEVELS = 12; // ступени яркости/затухания для кэша цветов
 
 // Бело-чёрная тема: весы — бледно-серые на белом, у курсора темнеют.
-const BASE: [number, number, number, number] = [0, 0, 0, 0.13];
-const BRIGHT: [number, number, number, number] = [0, 0, 0, 0.55];
+const BASE: [number, number, number, number] = [0, 0, 0, 0.34];
+const BRIGHT: [number, number, number, number] = [0, 0, 0, 0.8];
 const GLITCH_RGB = "0, 0, 0";
+// «перезапись» — чуть ярче самих весов, но не настолько, чтобы были видны только переходы
+const GLITCH_ALPHA = 0.45;
 
 const mod = (a: number, n: number) => ((a % n) + n) % n;
 const smooth = (t: number) => t * t * (3 - 2 * t);
@@ -237,7 +239,7 @@ export default function AsciiField() {
           light[i] = lvl;
           drawCell(i, ch, settled
             ? colorFor(lvl, fade[i])
-            : `rgba(${GLITCH_RGB}, ${(0.85 * fade[i] / LEVELS).toFixed(3)})`);
+            : `rgba(${GLITCH_RGB}, ${(GLITCH_ALPHA * fade[i] / LEVELS).toFixed(3)})`);
         } else if (hasGlyph && (shown[i] !== target[i] || light[i] !== lvl)) {
           shown[i] = target[i];
           light[i] = lvl;
