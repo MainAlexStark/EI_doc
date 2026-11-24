@@ -48,6 +48,11 @@
 
 .public-card .suggestions li.active { background: var(--accent-soft); }
 
+/* свой прибор, которого нет в списке (сайт для бизнеса, /zayavka/) */
+.rf-custom { display: flex; gap: 8px; }
+.rf-custom input { flex: 1; min-width: 0; }
+.rf-custom button { flex: none; min-height: 40px; padding: 0 16px; }
+
 .rf-more { display: flex; gap: 16px; margin-top: -2px; }
 .rf-more .link { padding: 0; min-height: 0; font-size: 13px; }
 .rf-or { text-align: center; margin: -4px 0 0; }

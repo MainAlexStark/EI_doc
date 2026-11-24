@@ -19,6 +19,9 @@ import { loadSmartCaptcha, type SmartCaptchaApi } from "../smartCaptcha";
 import { FIRM, telHref } from "../landing/firm";
 import "../landing/form.css";
 
+/** Прибор, которого нет в справочнике: название как написал заявитель + количество. */
+type CustomItem = { name: string; quantity: number };
+
 type ContactState = {
   contact_name: string;
   contact_phone: string;
@@ -113,12 +116,15 @@ function callbackText(now = new Date()): string {
  *  Обязательно — минимум: прибор, адрес, имя, телефон (или email), согласие. */
 export default function PublicRequestForm({
   embedded = false,
-  focus = "meters",
+  focus = "all",
 }: {
   embedded?: boolean;
-  /** Какие приборы показать первыми: счётчики (сайт для жителей) или остальные СИ (сайт для бизнеса). */
-  focus?: "meters" | "business";
+  /** Какие приборы предлагать: только счётчики (сайт для жителей), сначала приборы
+   *  предприятий и свои приборы (сайт для бизнеса) или всё (/zayavka/). */
+  focus?: "meters" | "business" | "all";
 } = {}) {
+  // Свой прибор, которого нет в справочнике, — текстом (уходит в si_description).
+  const allowCustom = focus !== "meters";
   const pageClass = embedded ? "public-embed" : "public-page";
   const brand = embedded ? null : (
     <a className="public-brand" href="/schetchiki/">
@@ -146,6 +152,8 @@ export default function PublicRequestForm({
   const [families, setFamilies] = useState<Family[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [items, setItems] = useState<RequestItemPayload[]>([]);
+  const [custom, setCustom] = useState<CustomItem[]>([]);
+  const [customDraft, setCustomDraft] = useState("");
 
   // --- дата/время выезда: слоты из графика сотрудников по району ---
   const [slots, setSlots] = useState<PublicSlot[]>([]);
@@ -229,9 +237,13 @@ export default function PublicRequestForm({
 
   // Счётчики (им нужно время визита) — первыми, дальше как в справочнике;
   // на сайте для бизнеса — наоборот, сначала приборы предприятий.
+  // На сайте для жителей — только счётчики (им нужно время визита); если в справочнике
+  // их не отметили, показываем всё, чтобы форма не осталась пустой.
   const ordered = useMemo(() => {
+    const meters = families.filter((f) => f.requires_time_slot);
+    const pool = focus === "meters" && meters.length > 0 ? meters : families;
     const sign = focus === "business" ? -1 : 1;
-    return [...families].sort((a, b) => sign * (Number(b.requires_time_slot) - Number(a.requires_time_slot)));
+    return [...pool].sort((a, b) => sign * (Number(b.requires_time_slot) - Number(a.requires_time_slot)));
   }, [families, focus]);
   const quick = ordered.slice(0, QUICK);
   const rest = ordered.slice(QUICK);
@@ -315,6 +327,21 @@ export default function PublicRequestForm({
     setItems((current) => current.filter((item) => item.family_id !== familyId));
   };
 
+  const addCustom = () => {
+    const name = customDraft.trim().replace(/\s+/g, " ").slice(0, 120);
+    if (!name) return;
+    clearError("items");
+    setCustom((current) =>
+      current.some((c) => c.name.toLowerCase() === name.toLowerCase()) ? current : [...current, { name, quantity: 1 }],
+    );
+    setCustomDraft("");
+  };
+  const setCustomQuantity = (index: number, quantity: number) => {
+    const safe = Number.isFinite(quantity) ? Math.max(1, Math.min(999, quantity)) : 1;
+    setCustom((current) => current.map((c, i) => (i === index ? { ...c, quantity: safe } : c)));
+  };
+  const removeCustom = (index: number) => setCustom((current) => current.filter((_, i) => i !== index));
+
   const pick = (item: AddressSuggestion) => {
     setForm((current) => ({
       ...current,
@@ -367,7 +394,11 @@ export default function PublicRequestForm({
 
   const validate = (): Errors => {
     const found: Errors = {};
-    if (items.length === 0) found.items = "Выберите, что поверить — хотя бы один прибор";
+    if (items.length === 0 && custom.length === 0 && !customDraft.trim()) {
+      found.items = allowCustom
+        ? "Выберите или впишите, что поверить — хотя бы один прибор"
+        : "Выберите, что поверить — хотя бы один счётчик";
+    }
     if (!form.address.trim()) found.address = "Укажите адрес, где стоят приборы";
     if (needsTime && !chosenDate) found.date = "Для счётчиков выберите день визита";
     else if (needsTime && !chosenTime) found.time = "Выберите удобное окно — поверитель приедет в эти 2 часа";
@@ -398,9 +429,15 @@ export default function PublicRequestForm({
     const desiredDate = chosenDate || null;
     const desiredTime = needsTime && chosenDate ? chosenTime || null : null;
 
+    // свои приборы — строкой в описание заявки; недописанное поле тоже не теряем
+    const draft = customDraft.trim();
+    const customAll = draft && !custom.some((c) => c.name.toLowerCase() === draft.toLowerCase())
+      ? [...custom, { name: draft, quantity: 1 }]
+      : custom;
     const payload: RequestPayload = {
       ...form,
       items,
+      si_description: customAll.map((c) => `${c.name} — ${c.quantity} шт.`).join("; "),
       desired_date: desiredDate,
       desired_time: desiredTime,
       is_priority_slot: chosenPriority && Boolean(desiredDate),
@@ -431,6 +468,8 @@ export default function PublicRequestForm({
   const reset = () => {
     setForm(EMPTY);
     setItems([]);
+    setCustom([]);
+    setCustomDraft("");
     setChosenDate("");
     setChosenTime("");
     setChosenPriority(false);
@@ -525,7 +564,7 @@ export default function PublicRequestForm({
               onChange={(event) => addItem(event.target.value)}
               disabled={rest.every((family) => items.some((item) => item.family_id === family.id))}
             >
-              <option value="">+ другой прибор: манометр, весы, термометр…</option>
+              <option value="">{focus === "meters" ? "+ другой счётчик" : "+ из списка: манометр, весы, термометр…"}</option>
               {rest
                 .filter((family) => !items.some((item) => item.family_id === family.id))
                 .map((family) => (
@@ -536,9 +575,25 @@ export default function PublicRequestForm({
                 ))}
             </select>
           )}
+          {allowCustom && (
+            <div className="rf-custom">
+              <input
+                id="rf-custom"
+                value={customDraft}
+                maxLength={120}
+                placeholder="Нет в списке? Впишите прибор или оборудование"
+                aria-label="Свой прибор или оборудование"
+                onChange={(event) => setCustomDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") { event.preventDefault(); addCustom(); }
+                }}
+              />
+              <button type="button" onClick={addCustom} disabled={!customDraft.trim()}>Добавить</button>
+            </div>
+          )}
           {fieldError("items")}
 
-          {items.length > 0 && (
+          {(items.length > 0 || custom.length > 0) && (
             <ul className="item-list" aria-label="Выбранные приборы">
               {items.map((item) => {
                 const family = familyById.get(item.family_id);
@@ -559,13 +614,35 @@ export default function PublicRequestForm({
                       />
                       <button type="button" aria-label="Больше" onClick={() => setQuantity(item.family_id, Math.min(99, item.quantity + 1))}>+</button>
                     </span>
-                    <span className="sub price">{money(Number(family.price) * item.quantity)} ₽</span>
+                    <span className="sub price">{Number(family.price) > 0 ? `${money(Number(family.price) * item.quantity)} ₽` : "по запросу"}</span>
                     <button type="button" className="icon-btn sm danger" aria-label={`Убрать: ${family.name}`} title="Убрать" onClick={() => removeItem(item.family_id)}>
                       <Icon name="x" size={14} />
                     </button>
                   </li>
                 );
               })}
+              {custom.map((c, index) => (
+                <li key={`custom-${c.name}`}>
+                  <span className="name">{c.name}</span>
+                  <span className="qty" role="group" aria-label={`Количество: ${c.name}`}>
+                    <button type="button" aria-label="Меньше" onClick={() => setCustomQuantity(index, c.quantity - 1)}>−</button>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={999}
+                      value={c.quantity}
+                      aria-label="Количество, шт."
+                      onChange={(event) => setCustomQuantity(index, Number(event.target.value))}
+                    />
+                    <button type="button" aria-label="Больше" onClick={() => setCustomQuantity(index, c.quantity + 1)}>+</button>
+                  </span>
+                  <span className="sub price">по запросу</span>
+                  <button type="button" className="icon-btn sm danger" aria-label={`Убрать: ${c.name}`} title="Убрать" onClick={() => removeCustom(index)}>
+                    <Icon name="x" size={14} />
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
           {items.length > 0 && pricing.total > 0 && (
