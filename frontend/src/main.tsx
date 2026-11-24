@@ -109,9 +109,15 @@ import "./ui/shell.css";
 // Публичная форма заявки живёт на отдельном пути того же бандла — своего
 // клиентского роутера в проекте нет (см. App.tsx), поэтому выбор экрана
 // здесь один раз, по window.location, а не внутри дерева компонентов.
-// Одностраничник фирмы (/o-nas/) — тоже публичный, со встроенной формой заявки.
+// Сайт фирмы — тоже публичный, со встроенной формой заявки, в двух версиях:
+// счётчики (/schetchiki/, /schetchiki/yaransk/, старый /o-nas/) и бизнес (/biznes/).
 const path = window.location.pathname;
-const isLanding = path.startsWith("/o-nas");
+const siteVariant = path.startsWith("/biznes")
+  ? "business"
+  : path.startsWith("/schetchiki") || path.startsWith("/o-nas")
+    ? "meters"
+    : null;
+const isLanding = siteVariant !== null;
 const isPublicRequestForm = isLanding || path.startsWith("/zayavka");
 
 if (!isPublicRequestForm) {
@@ -127,7 +133,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <LoadErrorBoundary>
       <Suspense fallback={null}>
-        {isLanding ? <Landing /> : isPublicRequestForm ? <PublicRequestForm /> : <App />}
+        {isLanding ? <Landing variant={siteVariant ?? "meters"} /> : isPublicRequestForm ? <PublicRequestForm /> : <App />}
       </Suspense>
     </LoadErrorBoundary>
   </StrictMode>,

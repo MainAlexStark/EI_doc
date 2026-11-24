@@ -1,9 +1,10 @@
-/** Реквизиты фирмы для публичных страниц (/o-nas/, /zayavka/) и schema.org в index.html.
- *  Поменяли телефон или часы — поправьте и JSON-LD в frontend/index.html. */
+/** Реквизиты фирмы для публичных страниц (/schetchiki/, /biznes/, /zayavka/).
+ *  Поменяли телефон, адрес или часы — поправьте и backend/apps/core/seo.py
+ *  (title, description, schema.org для поисковиков). */
 export const FIRM = {
   name: "ООО «Единица Измерения»",
   short: "Единица Измерения",
-  phone: "+7 953 137-00-83",
+  phone: "+7 953 697-00-83",
   email: "",
   address: "г. Киров, ул. Горького, 4",
   hours: "пн–пт, 8:00–17:00",

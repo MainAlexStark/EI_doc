@@ -10,6 +10,8 @@ from django.conf import settings
 from django.db import DatabaseError, connection
 from django.http import Http404, HttpResponse, JsonResponse
 
+from apps.core import seo
+
 
 def healthz(request):
     """Проверка для deploy.sh: 200 значит «база отвечает, приложение живо».
@@ -52,7 +54,17 @@ def frontend_index(request):
             "Фронтенд не собран в этом образе. Локально: cd frontend && npm run dev",
             status=501,
         )
-    return HttpResponse(index_path.read_bytes(), content_type="text/html")
+    # свой title/description/schema.org и текст страницы под каждый адрес сайта — apps.core.seo
+    html = seo.render_index(index_path.read_text(encoding="utf-8"), request.path, seo.base_url(request))
+    return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+
+def robots_txt(request):
+    return HttpResponse(seo.robots_txt(seo.base_url(request)), content_type="text/plain; charset=utf-8")
+
+
+def sitemap_xml(request):
+    return HttpResponse(seo.sitemap_xml(seo.base_url(request)), content_type="application/xml; charset=utf-8")
 
 
 # Разрешённые файлы PWA-оболочки в корне "/" — service worker, манифест,

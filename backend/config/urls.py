@@ -32,6 +32,8 @@ from apps.core.telegram_views import TelegramWebhookView
 from apps.core.views import (
     FRONTEND_ROOT_FILE_URL_RE,
     frontend_index,
+    robots_txt,
+    sitemap_xml,
     frontend_root_file,
     healthz,
 )
@@ -39,6 +41,7 @@ from apps.logistics.tiles import TileView
 from apps.logistics import api_dispatch
 from apps.hub.api import (
     AddressSuggestView,
+    VisitorCityView,
     CaptchaConfigView,
     RequestBulkView,
     RequestConfirmView,
@@ -229,6 +232,7 @@ urlpatterns = [
     ),
     # Заявки (EI_Hub)
     path("api/hub/address-suggest/", AddressSuggestView.as_view(), name="address_suggest"),
+    path("api/hub/visitor-city/", VisitorCityView.as_view(), name="visitor_city"),
     path("api/hub/captcha-config/", CaptchaConfigView.as_view(), name="captcha_config"),
     path("api/hub/requests/", RequestCreateView.as_view(), name="request_create"),
     path("api/hub/requests/list/", RequestListView.as_view(), name="request_list"),
@@ -289,8 +293,15 @@ urlpatterns = [
     # Публичная форма заявки — тот же SPA-бандл, main.tsx решает по пути,
     # какой экран показать (см. apps.core.views.frontend_index).
     path("zayavka/", frontend_index, name="public_request_form"),
-    # Одностраничник фирмы с той же формой заявки внутри.
+    # Сайт фирмы — две версии с той же формой заявки внутри (main.tsx выбирает по пути):
+    # счётчики для населения (/schetchiki/, старый адрес /o-nas/ — та же страница)
+    # и метрология для бизнеса (/biznes/).
     path("o-nas/", frontend_index, name="public_landing"),
+    path("schetchiki/", frontend_index, name="public_site_meters"),
+    path("schetchiki/yaransk/", frontend_index, name="public_site_meters_yaransk"),
+    path("biznes/", frontend_index, name="public_site_business"),
+    path("robots.txt", robots_txt, name="robots_txt"),
+    path("sitemap.xml", sitemap_xml, name="sitemap_xml"),
     # service worker/манифест PWA — обязаны быть в корне, см. frontend_root_file.
     # Последний в списке и только по allowlist (тот же, что FRONTEND_ROOT_FILE_RE):
     # раньше здесь был односегментный catch-all "<str:filename>", и "/o-nas"

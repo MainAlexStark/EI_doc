@@ -11,8 +11,8 @@ const all = () => true;
 const manager = (a: Access) => a.isManager;
 const control = (a: Access) => a.isControl;
 
-/** Публичный одностраничник фирмы (urls.py: path("o-nas/") — Landing). */
-export const SITE_URL = "/o-nas/";
+/** Публичный сайт фирмы (urls.py: "schetchiki/" и "biznes/" — Landing). */
+export const SITE_URL = "/schetchiki/";
 
 export const SECTIONS: SectionDef[] = [
   {

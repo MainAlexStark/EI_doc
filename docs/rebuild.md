@@ -145,7 +145,7 @@ useHotkey("mod+enter", save, { allowInInputs: true });
 
 ## Режимы «Сайт» и «Заявки»
 
-**Сайт** (`/o-nas/`, `frontend/src/landing/`; форма — `components/PublicRequestForm.tsx`, также `/zayavka/`).
+**Сайт** (две версии: `/schetchiki/` + `/schetchiki/yaransk/` — счётчики, `/biznes/` — бизнес; старый `/o-nas/` = счётчики; `frontend/src/landing/`, SEO — `backend/apps/core/seo.py`, robots.txt и sitemap.xml; форма — `components/PublicRequestForm.tsx`, также `/zayavka/`).
 Одностраничник на тёмном ультрамарине: первый экран — посыл («законная работа начинается с поверки») и форма;
 дальше услуги (5 плиток), «без поверки — нельзя», как это работает (заявка → звонок → поверка → ФГИС «Аршин»),
 цены из справочника, 5 вопросов, контакты. Реквизиты — `landing/firm.ts` (и JSON-LD в `index.html`).

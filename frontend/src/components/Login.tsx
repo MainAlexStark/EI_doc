@@ -162,7 +162,7 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
         </button>
         <div className="login-foot">
           <button type="button" className="link-btn" onClick={() => setScreen("forgot")}>Забыли пароль?</button>
-          <a href="/o-nas/" target="_blank" rel="noopener">Сайт фирмы</a>
+          <a href="/schetchiki/" target="_blank" rel="noopener">Сайт фирмы</a>
         </div>
       </form>
     </div>

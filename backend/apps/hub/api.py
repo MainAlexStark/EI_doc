@@ -106,6 +106,29 @@ class AddressSuggestView(APIView):
 
 
 # ---------------------------------------------------------------------------
+# Город посетителя — заголовок сайта «Поверка счётчиков Киров/Яранск»
+# ---------------------------------------------------------------------------
+# Города, у которых на сайте своя версия заголовка; ключ — как в ?gorod= на фронте.
+SITE_CITIES = {"киров": "kirov", "яранск": "yaransk"}
+
+
+class VisitorCityView(APIView):
+    """GET /api/hub/visitor-city/ → {"city": "kirov" | "yaransk" | ""}
+
+    По IP через DaData iplocate. Пусто — город не наш или неизвестен, сайт
+    тогда показывает Киров. Явный выбор посетителя (?gorod=, переключатель)
+    фронт хранит сам и сюда не ходит.
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [AddressSuggestThrottle]
+
+    def get(self, request):
+        city = DaDataClient(timeout=2.0).iplocate_city(client_ip(request))
+        return Response({"city": SITE_CITIES.get(city.casefold(), "")})
+
+
+# ---------------------------------------------------------------------------
 # Конфиг капчи (Yandex SmartCaptcha) — публичный ключ для виджета
 # ---------------------------------------------------------------------------
 class CaptchaConfigSerializer(serializers.Serializer):

@@ -108,13 +108,20 @@ function callbackText(now = new Date()): string {
   return `Позвоним ${next} утром, после 8:00`;
 }
 
-/** Публичная форма заявки — /zayavka/ и встроенная в одностраничник (/o-nas/).
+/** Публичная форма заявки — /zayavka/ и встроенная в сайт (/schetchiki/, /biznes/).
  *  Порядок: что поверить (счётчики первыми) → адрес → когда (окна по 2 часа) → кто вы.
  *  Обязательно — минимум: прибор, адрес, имя, телефон (или email), согласие. */
-export default function PublicRequestForm({ embedded = false }: { embedded?: boolean } = {}) {
+export default function PublicRequestForm({
+  embedded = false,
+  focus = "meters",
+}: {
+  embedded?: boolean;
+  /** Какие приборы показать первыми: счётчики (сайт для жителей) или остальные СИ (сайт для бизнеса). */
+  focus?: "meters" | "business";
+} = {}) {
   const pageClass = embedded ? "public-embed" : "public-page";
   const brand = embedded ? null : (
-    <a className="public-brand" href="/o-nas/">
+    <a className="public-brand" href="/schetchiki/">
       <div className="brand-mark">ЕИ</div>
       <div className="brand-name">Единица Измерения<small>метрологическая служба, г. Киров</small></div>
     </a>
@@ -220,11 +227,12 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
     if (doneId !== null) doneRef.current?.focus();
   }, [doneId]);
 
-  // Счётчики (им нужно время визита) — первыми, дальше как в справочнике.
-  const ordered = useMemo(
-    () => [...families].sort((a, b) => Number(b.requires_time_slot) - Number(a.requires_time_slot)),
-    [families],
-  );
+  // Счётчики (им нужно время визита) — первыми, дальше как в справочнике;
+  // на сайте для бизнеса — наоборот, сначала приборы предприятий.
+  const ordered = useMemo(() => {
+    const sign = focus === "business" ? -1 : 1;
+    return [...families].sort((a, b) => sign * (Number(b.requires_time_slot) - Number(a.requires_time_slot)));
+  }, [families, focus]);
   const quick = ordered.slice(0, QUICK);
   const rest = ordered.slice(QUICK);
 
@@ -803,7 +811,7 @@ export default function PublicRequestForm({ embedded = false }: { embedded?: boo
       </form>
       {!embedded && (
         <div className="public-foot">
-          <a href="/o-nas/">ООО «Единица Измерения»</a> · поверка средств измерений в Кирове и области
+          <a href="/schetchiki/">ООО «Единица Измерения»</a> · поверка средств измерений в Кирове и области
         </div>
       )}
     </div>

@@ -23,6 +23,7 @@ from apps.core import cache
 logger = logging.getLogger(__name__)
 
 SUGGEST_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address"
+IPLOCATE_URL = "https://suggestions.dadata.ru/suggestions/api/4_1/rs/iplocate/address"
 
 
 @dataclass
@@ -80,6 +81,34 @@ class DaDataClient:
             raise AddressSuggestUnavailable("Подсказка адресов вернула не JSON") from exc
 
         return [item for item in payload.get("suggestions", []) if isinstance(item, dict)]
+
+    def iplocate_city(self, ip: str) -> str:
+        """Город посетителя по IP (DaData iplocate) — для заголовка сайта.
+
+        Пусто, если ключа нет, IP частный или DaData не знает адрес. Ошибки
+        не поднимает: город на сайте — подсказка, а не данные заявки.
+        """
+        ip = (ip or "").strip()
+        if not self.is_configured or not ip:
+            return ""
+
+        def fetch() -> str:
+            response = requests.get(
+                IPLOCATE_URL,
+                params={"ip": ip},
+                headers={"Accept": "application/json", "Authorization": f"Token {self.api_key}"},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            location = (response.json() or {}).get("location") or {}
+            data = location.get("data") or {}
+            return data.get("city") or data.get("settlement") or ""
+
+        try:
+            return cache.remember(cache.key("dadata:iplocate", ip), 24 * 3600, fetch)
+        except (requests.RequestException, ValueError) as exc:
+            logger.info("iplocate недоступен: %s", exc)
+            return ""
 
     @staticmethod
     def _parse(item: dict) -> AddressSuggestion:
