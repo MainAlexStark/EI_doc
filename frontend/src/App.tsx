@@ -143,6 +143,15 @@ export default function App() {
     if (isManagerRole(me.role)) {
       jobs.push(fetchRequests({ status: "new" }).then((list) => (next.requests = list.length)).catch(() => undefined));
     }
+    if (["owner", "head", "manager"].includes(me.role)) {
+      // Непрочитанные во «Входящих» почты фирмы (apps.mailbox); почта не подключена — счётчика нет.
+      jobs.push(
+        import("./modes/mail/api")
+          .then(({ fetchMailStatus }) => fetchMailStatus())
+          .then((s) => (next.mail = s.enabled ? s.unread : 0))
+          .catch(() => undefined),
+      );
+    }
     if (REVIEWER_ROLES.has(me.role)) {
       jobs.push(fetchSiTypes({ needs_review: true }).then((list) => (next["si-types"] = list.length)).catch(() => undefined));
       // Шаблоны поверки и аттестации, ждущие метролога.

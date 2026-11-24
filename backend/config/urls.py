@@ -133,6 +133,8 @@ urlpatterns = [
     path("api/auth/password/reset/", notify_api.PasswordResetView.as_view(), name="password_reset"),
     path("api/notify/prefs/", notify_api.PrefsView.as_view(), name="notify_prefs"),
     path("api/notify/test/", notify_api.TestMailView.as_view(), name="notify_test"),
+    # Почта фирмы: ящики Timeweb по IMAP/SMTP (apps.mailbox, как «Почта» в openseller)
+    path("api/mail/", include("apps.mailbox.urls")),
     path("api/catalog/si-types/suggest/", SiTypeSuggestView.as_view(), name="si_type_suggest"),
     path("api/catalog/si-types/", SiTypeListCreateView.as_view(), name="si_type_list"),
     path("api/catalog/standard-kits/", StandardKitsView.as_view(), name="standard_kits"),

@@ -221,6 +221,10 @@ def available_categories(user) -> list[str]:
     for category in OPTIONAL_CATEGORIES:
         if category == Category.REQUESTS:
             ok = user.is_superuser or user.role in REQUEST_RECIPIENTS
+        elif category == Category.MAIL:
+            from apps.mailbox.access import can_mail
+
+            ok = can_mail(user)
         elif category == Category.REVIEW:
             ok = has_employee or user.role == Role.METROLOGIST
         else:

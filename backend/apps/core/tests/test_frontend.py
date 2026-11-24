@@ -23,5 +23,5 @@ class FrontendIndexTestCase(TestCase):
             with override_settings(FRONTEND_DIST_DIR=dist):
                 response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "text/html")
+        self.assertEqual(response["Content-Type"], "text/html; charset=utf-8")
         self.assertIn("журнал", response.content.decode("utf-8"))

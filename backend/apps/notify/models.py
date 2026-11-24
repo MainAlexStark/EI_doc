@@ -13,6 +13,7 @@ class Category(models.TextChoices):
     ASSIGNMENTS = "assignments", "Мне назначили выезд, заявку, приёмку или задачу"
     REVIEW = "review", "Нормоконтроль: возвраты на доработку и очередь на проверку"
     REMINDERS = "reminders", "Напоминания о сроках задач"
+    MAIL = "mail", "Новые письма в почте фирмы"
     SECURITY = "security", "Пароль и вход"
 
 
@@ -30,6 +31,7 @@ class NotifyPrefs(models.Model):
     assignments = models.BooleanField(Category.ASSIGNMENTS.label, default=True)
     review = models.BooleanField(Category.REVIEW.label, default=True)
     reminders = models.BooleanField(Category.REMINDERS.label, default=True)
+    mail = models.BooleanField(Category.MAIL.label, default=True)
 
     class Meta:
         verbose_name = "настройки уведомлений"
@@ -90,6 +92,9 @@ class NotifyEvent(models.Model):
 
 class OutboxStatus(models.TextChoices):
     PENDING = "pending", "В очереди"
+    # Письмо из ящика ушло на SMTP, ответа ещё нет. Повтора из этого состояния нет:
+    # лучше «не отправлено, проверьте Отправленные», чем письмо клиенту дважды.
+    SENDING = "sending", "Отправляется"
     SENT = "sent", "Отправлено"
     FAILED = "failed", "Не отправлено"
 
@@ -102,6 +107,8 @@ class OutboxMail(models.Model):
     text = models.TextField("текст")
     html = models.TextField("HTML", blank=True)
     template = models.CharField("шаблон", max_length=40, blank=True)
+    # Письмо из ящика фирмы (apps.mailbox): уходит SMTP этого ящика, исходник — у mailbox.Message.
+    sender = models.CharField("ящик-отправитель", max_length=32, blank=True)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="outbox_mails", verbose_name="пользователь",

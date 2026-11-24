@@ -20,6 +20,8 @@ app.conf.beat_schedule = {
     # Почта и уведомления (apps.notify): подстраховка очереди — если в момент события
     # Redis был недоступен, письма и сводки всё равно уйдут.
     "notify-sweep": {"task": "apps.notify.tasks.sweep", "schedule": crontab(minute="*/2")},
+    # Почта фирмы: забрать новое из ящиков Timeweb по IMAP.
+    "mailbox-sync": {"task": "apps.mailbox.tasks.sync_mailboxes", "schedule": crontab(minute="*")},
     # Сроки задач — каждому его задачи на сегодня и просроченные.
     "notify-tasks-due": {"task": "apps.notify.tasks.remind_tasks_due", "schedule": crontab(hour=7, minute=40)},
     # Метрологам — сколько поверок ждёт нормоконтроля (по будням).

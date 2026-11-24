@@ -1295,8 +1295,9 @@ def builtin_tools() -> list[Tool]:
     from apps.assistant.admin_tools import TOOLS as admin_tools
     from apps.assistant.cabinet import TOOLS as cabinet_tools
     from apps.assistant.procurement_tools import TOOLS as procurement_tools
+    from apps.mailbox.assistant_tools import TOOLS as mailbox_tools
 
-    return [*BUILTIN, *cabinet_tools, *admin_tools, *procurement_tools]
+    return [*BUILTIN, *cabinet_tools, *admin_tools, *procurement_tools, *mailbox_tools]
 
 
 def all_tools(*, with_mcp: bool = True) -> tuple[dict[str, Tool], list[str]]:

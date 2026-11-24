@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from celery import shared_task
+from django.utils import timezone
 
 
 @shared_task(ignore_result=True)
@@ -30,11 +31,16 @@ def sweep() -> None:
     from django.conf import settings
 
     from apps.notify.events import flush
-    from apps.notify.outbox import deliver
+    from apps.notify.models import OutboxMail, OutboxStatus
+    from apps.notify.outbox import deliver, fail_stale_sending, kick_mailbox
 
     flush(older_than=getattr(settings, "NOTIFY_FLUSH_DELAY", 20) * 2)
     while deliver():
         pass
+    fail_stale_sending()
+    # Письма из ящиков фирмы — в своей очереди «mail»; здесь только будим её.
+    if OutboxMail.objects.filter(status=OutboxStatus.PENDING, next_attempt_at__lte=timezone.now()).exclude(sender="").exists():
+        kick_mailbox()
 
 
 @shared_task(ignore_result=True)

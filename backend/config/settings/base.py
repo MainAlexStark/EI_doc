@@ -58,6 +58,7 @@ LOCAL_APPS = [
     "apps.assistant",
     "apps.equipment",
     "apps.notify",
+    "apps.mailbox",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

@@ -7,7 +7,7 @@ import type { IconName } from "../ui/Icon";
 export type ModeKey = "city" | "trips" | "procurements" | "intake" | "site" | "requests" | "si-templates" | "att-templates";
 export type SectionKey =
   | Exclude<ModeKey, "site">
-  | "today" | "control" | "journal" | "availability" | "tasks" | "assistant" | "si-types" | "staff";
+  | "today" | "control" | "mail" | "journal" | "availability" | "tasks" | "assistant" | "si-types" | "staff";
 
 export type GoOptions = {
   /** Открыть командировку в «Командировках». */

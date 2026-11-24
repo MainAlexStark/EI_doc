@@ -44,6 +44,10 @@ AI Studio (те же YANDEX_VISION_*). RST_MCP_URL/RST_MCP_TOKEN — RSTMetrolog
 сервисный аккаунт, роль search-api.webSearch.user). Прогоны агента выполняет
 отдельный контейнер assistant-worker (очередь Celery «assistant»).
 
+Почта фирмы (вкладка «Почта», ящики Timeweb по IMAP/SMTP): MAILBOXES и
+MAILBOX_PASSWORD_<ИМЯ>; синхронизацию и отправку из ящиков выполняет
+контейнер mail-worker (очередь Celery «mail»).
+
 Ассистент на agentkit (папка agent/, отдельный сервис со своим доменом):
   cd agent && ./deploy.sh agent.example.com
 Он сам возьмёт из .env EI_doc общие секреты и ключи и впишет сюда AGENT_URL —

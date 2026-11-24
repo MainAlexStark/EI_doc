@@ -10,6 +10,8 @@ import type { Access, SectionDef, SectionKey } from "./types";
 const all = () => true;
 const manager = (a: Access) => a.isManager;
 const control = (a: Access) => a.isControl;
+/** Почта фирмы — владелец, руководитель, менеджер (apps.mailbox.access.MAIL_ROLES). */
+const mail = (a: Access) => ["owner", "head", "manager"].includes(a.role ?? "");
 
 /** Публичный сайт фирмы (urls.py: "schetchiki/" и "biznes/" — Landing). */
 export const SITE_URL = "/schetchiki/";
@@ -82,6 +84,13 @@ export const SECTIONS: SectionDef[] = [
     key: "control", title: "Панель", short: "Панель", icon: "chart", group: "work",
     description: "Работа всех сотрудников за день", visible: control,
     component: lazy(() => import("./work/control")), keywords: "дашборд руководство сводка",
+  },
+  {
+    key: "mail", title: "Почта", short: "Почта", icon: "mail", group: "work",
+    description: "Ящики фирмы на Timeweb: входящие, ответы, пересылка", visible: mail,
+    component: lazy(() => import("./mail")), flush: true,
+    primary: { label: "Написать", icon: "pen", action: "new" },
+    keywords: "почта письмо ящик email info ответить переслать timeweb входящие",
   },
   {
     key: "journal", title: "Журнал", short: "Журнал", icon: "doc", group: "work",

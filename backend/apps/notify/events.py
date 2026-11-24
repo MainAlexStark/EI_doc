@@ -182,6 +182,18 @@ def _line_review_queue(ev: NotifyEvent) -> Line | None:
     return Line(text=f"Ждут нормоконтроля: {count}", url=absolute("/#/journal"))
 
 
+def _line_mail_new(ev: NotifyEvent) -> Line | None:
+    from apps.mailbox.access import can_mail
+    from apps.mailbox.models import Folder
+
+    msg = getattr(ev, "mail", None)  # подгружены пачкой в _lines — без запроса на строку
+    if msg is None or msg.seen or msg.folder != Folder.INBOX or not can_mail(ev.user):
+        return None  # уже прочитали в кабинете или убрали из входящих
+    who = msg.from_name or msg.from_addr
+    return Line(text=f"{who}: {msg.subject or '(без темы)'}", note=msg.preview[:140],
+                url=absolute(f"/#/mail/{msg.pk}"))
+
+
 RENDERERS = {
     "request_new": _line_request_new,
     "work_order": _line_work_order,
@@ -190,6 +202,7 @@ RENDERERS = {
     "task_due": _line_task_due,
     "verification_rejected": _line_verification_rejected,
     "review_queue": _line_review_queue,
+    "mail_new": _line_mail_new,
 }
 
 TITLES = {
@@ -197,6 +210,7 @@ TITLES = {
     Category.ASSIGNMENTS: ("Вам назначено", "Вам назначено: {n}"),
     Category.REVIEW: ("Нормоконтроль", "Нормоконтроль: {n}"),
     Category.REMINDERS: ("Сроки задач", "Сроки задач: {n}"),
+    Category.MAIL: ("Новое письмо", "Новые письма: {n}"),
 }
 
 
@@ -265,7 +279,19 @@ def flush(limit: int = 500, older_than: int = 0) -> int:
     return queued
 
 
+def _prefetch(group: list[NotifyEvent]) -> None:
+    mail_ids = [ev.object_id for ev in group if ev.kind == "mail_new" and ev.object_id]
+    if mail_ids:
+        from apps.mailbox.models import Message
+
+        found = Message.objects.only("id", "seen", "folder", "from_name", "from_addr", "subject", "preview").in_bulk(mail_ids)
+        for ev in group:
+            if ev.kind == "mail_new":
+                ev.mail = found.get(ev.object_id)
+
+
 def _lines(group: list[NotifyEvent]) -> list[Line]:
+    _prefetch(group)
     lines: list[Line] = []
     seen: set[tuple[str, int | None]] = set()
     for ev in group:
@@ -302,6 +328,8 @@ def _send_telegram(chat_id: str, text: str) -> None:
 def _email(user, category: str, title: str, lines: list[Line], intro: str = "") -> int:
     if not (user.email and NotifyPrefs.wants_email(user, category)):
         return 0
+    if _is_company_box(user.email):
+        return 0  # адрес — ящик фирмы: уведомление само стало бы новым письмом в нём (петля)
     employee = getattr(user, "employee", None)
     name = (employee.full_name.split()[1] if employee and len(employee.full_name.split()) > 1
             else (employee.full_name if employee else ""))
@@ -312,6 +340,14 @@ def _email(user, category: str, title: str, lines: list[Line], intro: str = "") 
         "prefs_url": absolute("/#/profile"), "optional": category != Category.SECURITY,
     }, user=user)
     return 1
+
+
+def _is_company_box(address: str) -> bool:
+    try:
+        from apps.mailbox.conf import addresses
+    except ImportError:  # pragma: no cover
+        return False
+    return address.strip().lower() in addresses()
 
 
 def deliver_to(user, category: str, title: str, lines: list[Line], intro: str = "") -> int:

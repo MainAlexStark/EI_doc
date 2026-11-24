@@ -1,0 +1,107 @@
+/* Режим «Почта». Основа — .split/.mail-item из styles.css (как «Заявки»). */
+
+.mx-pad { padding: 24px; max-width: 720px; }
+.mx-env {
+  margin: 12px 0; padding: 12px 14px; border-radius: var(--radius); background: var(--surface-2);
+  border: 0.5px solid var(--hair); font: 12.5px/1.6 var(--mono, ui-monospace, monospace); white-space: pre-wrap;
+}
+
+.mx-toolbar { display: flex; align-items: center; gap: 6px; }
+.mx-box { flex: 1; min-width: 0; min-height: 32px; font-size: 13px; }
+.mx-box-one { flex: 1; min-width: 0; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-toolbar .icon .spin, .mx-toolbar .spin { animation: spin 0.9s linear infinite; }
+
+.mx-folders { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin: 0 -4px; padding: 0 4px; }
+.mx-folders::-webkit-scrollbar { display: none; }
+.mx-folders button {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 3px 9px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--graphite); font-size: 12.5px;
+}
+.mx-folders button:hover { background: var(--hover); color: var(--ink); }
+.mx-folders button.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+
+.mx-item { padding-left: 22px; text-align: left; width: 100%; }
+.mx-item.is-unread .mail-top b, .mx-item.is-unread .sub { font-weight: 650; color: var(--ink); }
+.mx-item.active.is-unread .mail-top b, .mx-item.active.is-unread .sub { color: var(--on-accent); }
+.mx-item .mail-top .icon { flex: none; color: var(--muted); }
+.mx-item.active .mail-top .icon { color: var(--on-accent); }
+.mx-flag { color: var(--warn) !important; }
+.mx-more { width: 100%; margin-top: 6px; }
+
+/* переписка */
+.mx-detail { display: flex; flex-direction: column; gap: 12px; }
+.mx-thread { display: flex; flex-direction: column; gap: 12px; }
+.mx-thread-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 2;
+  margin: -24px -32px 0; padding: 12px 32px; background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(10px); border-bottom: 0.5px solid var(--hair); }
+.mx-back { display: none; }
+.mx-actions { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+.mx-sep { width: 1px; height: 18px; background: var(--hair); margin: 0 4px; }
+.mx-subject { margin: 4px 0 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+
+.mx-card { border: 0.5px solid var(--hair); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+.mx-card.out { background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.mx-card > :not(.mx-card-head) { margin: 0 16px 14px; }
+.mx-card-head { display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; cursor: pointer; }
+.mx-card.collapsed .mx-card-head { padding-bottom: 12px; }
+.mx-avatar {
+  flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent-ink); font-weight: 650; font-size: 14px;
+}
+.mx-card-who { flex: 1; min-width: 0; font-size: 14px; }
+.mx-card-to { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mx-card .mail-date { flex: none; }
+
+.mx-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.55 inherit; font-family: inherit; color: var(--ink); }
+/* Рамка письма всегда светлая — у чужого HTML свои цвета, тёмная тема их сломала бы. */
+.mx-frame-wrap { width: calc(100% - 32px); resize: vertical; overflow: hidden; min-height: 160px; border-radius: var(--radius); background: #fff; }
+.mx-frame { display: block; width: 100%; height: 100%; border: 0; border-radius: var(--radius); background: #fff; }
+.mx-images {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: var(--radius);
+  background: var(--surface-2); font-size: 12.5px; color: var(--graphite);
+}
+.mx-images .btn { margin-left: auto; }
+
+.mx-atts { display: flex; flex-wrap: wrap; gap: 6px; }
+.mx-att {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 30px; padding: 4px 10px;
+  border: 0.5px solid var(--hair); border-radius: 8px; background: var(--surface-2); color: var(--ink); font-size: 12.5px;
+}
+button.mx-att:hover { background: var(--accent-softer); color: var(--accent-ink); }
+.mx-att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.mx-att .icon-btn { min-height: 0; padding: 2px; }
+.mx-attach { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+
+/* форма */
+.mx-compose { display: flex; flex-direction: column; gap: 10px; }
+.mx-compose > label { display: grid; grid-template-columns: 64px 1fr; align-items: center; gap: 10px; font-size: 13px; }
+.mx-compose > label > span:first-child { color: var(--graphite); }
+.mx-row { display: flex; gap: 6px; align-items: center; }
+.mx-row input { flex: 1; }
+.mx-body { width: 100%; min-height: 260px; resize: vertical; font: 14px/1.55 inherit; font-family: inherit; }
+.mx-total { margin-right: auto; font-size: 12.5px; }
+
+/* DNS */
+.mx-dns + .mx-dns { margin-top: 18px; }
+.mx-dns h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 15px; }
+.mx-dns-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mx-dns-table td { padding: 8px 6px; border-top: 0.5px solid var(--hair); vertical-align: top; overflow-wrap: anywhere; }
+.mx-dns-table code { font-size: 12px; }
+.mx-ok { color: var(--ok); }
+.mx-bad { color: var(--warn); }
+
+@media (max-width: 1100px) {
+  .mx-thread-bar { margin: -20px -22px 0; padding: 10px 22px; }
+}
+@media (max-width: 760px) {
+  .mx-back { display: inline-flex; align-items: center; gap: 4px; }
+  .mx-thread-bar { margin: 0 -16px; padding: 8px 16px; }
+  .mx-actions { margin-left: 0; width: 100%; }
+  .mx-compose > label { grid-template-columns: 1fr; gap: 4px; }
+  .mx-card > :not(.mx-card-head) { margin: 0 12px 12px; }
+  .mx-frame-wrap { width: calc(100% - 24px); }
+  .mx-card-head { padding: 12px; flex-wrap: wrap; }
+  .mx-card .mail-date { order: 3; width: 100%; padding-left: 42px; }
+  .mx-compose-btn { display: none; }  /* на телефоне — большая кнопка «Написать» оболочки */
+  .mx-subject { font-size: 19px; }
+}
