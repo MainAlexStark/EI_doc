@@ -2,6 +2,7 @@
  *  «Проверен» (метролог) и «Применить к новому ИО». ⌘S — сохранить правки. */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { deleteAttestationProgram } from "../../api";
 import { confirmDialog } from "../../ui/Modal";
 import { useHotkey } from "../../ui/Hotkeys";
 import Icon from "../../ui/Icon";
@@ -124,6 +125,24 @@ export default function ProgramView({
     }
   };
 
+  const remove = async () => {
+    if (!program) return;
+    const ok = await confirmDialog({
+      title: `Удалить шаблон «${program.title}»?`,
+      text: "Проведённые по нему аттестации хранят свой план и не изменятся. Если шаблон может ещё понадобиться — лучше выключите его.",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteAttestationProgram(program.id);
+      toast.success("Шаблон аттестации удалён");
+      onChanged();
+      onBack();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   useHotkey("mod+s", () => void save(), { allowInInputs: true, enabled: canEdit && !applyOpen && !checkOpen, description: "Сохранить шаблон аттестации", group: "Шаблоны аттестации" });
 
   if (!program || !plan) {
@@ -236,6 +255,11 @@ export default function ProgramView({
         {canEdit && (
           <button type="button" className="sm link" onClick={() => void toggleActive()}>
             {program.is_active ? "Выключить шаблон" : "Включить шаблон"}
+          </button>
+        )}
+        {canEdit && (
+          <button type="button" className="sm link danger" onClick={() => void remove()}>
+            Удалить шаблон
           </button>
         )}
       </div>

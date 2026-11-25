@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   approveVerificationTemplate,
+  deleteVerificationTemplate,
   downloadTemplatePreview,
   fetchVerificationTemplate,
   fetchVerificationTemplates,
   type VerificationTemplate,
 } from "../api";
 import Icon from "../ui/Icon";
+import { confirmDialog } from "../ui/Modal";
+import toast from "../ui/Toast";
 import { Alert, EmptyState, Spinner } from "../ui/controls";
 
 /**
@@ -59,6 +62,28 @@ export default function VerificationTemplates({ canReview }: { canReview: boolea
       await load();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось подтвердить");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (item: VerificationTemplate) => {
+    const ok = await confirmDialog({
+      title: `Удалить шаблон «${item.title}»?`,
+      text: "Проведённые поверки хранят свой снимок шаблона и не изменятся. Если по шаблону уже вносили " +
+        "измерения, он не сотрётся, а выключится — история останется.",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError("");
+    try {
+      const reply = await deleteVerificationTemplate(item.id);
+      toast.success(reply?.archived ? "Шаблон выключен" : "Шаблон удалён", reply?.detail ? { description: reply.detail } : undefined);
+      setOpen(null);
+      await load();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось удалить шаблон");
     } finally {
       setBusy(false);
     }
@@ -157,6 +182,11 @@ export default function VerificationTemplates({ canReview }: { canReview: boolea
                 <div className="actions">
                   <button type="button" className="sm" onClick={() => void preview(item, "pdf")}><Icon name="download" size={14} /> Пустой протокол PDF</button>
                   <button type="button" className="sm" onClick={() => void preview(item, "docx")}><Icon name="download" size={14} /> Word</button>
+                  {canReview && (
+                    <button type="button" className="sm ghost danger" disabled={busy} onClick={() => void remove(item)}>
+                      <Icon name="trash" size={14} /> Удалить
+                    </button>
+                  )}
                 </div>
               </div>
             )}

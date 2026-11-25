@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ApiError, call, json, type Me } from "../api";
+import { ApiError, call, deleteAttestation, json, type Me } from "../api";
 import Icon from "../ui/Icon";
-import { Modal } from "../ui/Modal";
+import { confirmDialog, Modal } from "../ui/Modal";
 import { Alert, EmptyState, PageActions, SearchField, Spinner } from "../ui/controls";
 import { toast } from "../ui/Toast";
 import { programFromAttestation, type Plan, type PlanCheck } from "../modes/att-templates/api";
@@ -295,6 +295,26 @@ function AttestationView({ id, onBack, onProgramCreated }: { id: number; onBack:
               toast.success("Шаблон сделан по аттестации", { description: program.title, action: { label: "Открыть", onClick: () => onProgramCreated(program.id) } });
             })}>
             <Icon name="layers" size={16} /> Сделать шаблоном
+          </button>
+        )}
+        {data.status === "draft" && data.can_edit && (
+          <button type="button" className="ghost danger" disabled={busy}
+            onClick={() => void (async () => {
+              const ok = await confirmDialog({
+                title: "Удалить черновик аттестации?",
+                text: `${data.equipment.name} № ${data.equipment.serial_number} — с планом и измерениями. Номер ещё не выдан, дыры в нумерации не будет.`,
+                danger: true,
+              });
+              if (!ok) return;
+              try {
+                await deleteAttestation(id);
+                toast.success("Черновик аттестации удалён");
+                onBack();
+              } catch (e) {
+                setError(errText(e));
+              }
+            })()}>
+            <Icon name="trash" size={16} /> Удалить
           </button>
         )}
       </PageActions>

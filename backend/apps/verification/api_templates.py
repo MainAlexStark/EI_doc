@@ -89,6 +89,30 @@ class TemplateDetailView(APIView):
         template = get_object_or_404(VerificationTemplate.objects.select_related("family", "si_type"), pk=pk)
         return Response(template_json(template, full=True))
 
+    def delete(self, request, pk: int):
+        """Удалить шаблон поверки. Метролог или руководитель.
+
+        Поверки хранят снимок плана, поэтому проведённые по шаблону поверки не пострадают.
+        Шаблон, по которому уже вносили измерения, не стирается, а выключается: так в
+        истории видно, по какому шаблону считали.
+        """
+        from rest_framework.exceptions import PermissionDenied
+
+        from apps.catalog.api_types import is_reviewer
+        from apps.verification.models import Verification
+
+        if not is_reviewer(request.user):
+            raise PermissionDenied("Удалить шаблон поверки может метролог или руководитель")
+        template = get_object_or_404(VerificationTemplate, pk=pk)
+        used = Verification.objects.filter(measurements__template__id=template.pk).count()
+        if used:
+            template.is_active = False
+            template.save(update_fields=["is_active", "updated_at"])
+            return Response({"archived": True, "used": used,
+                             "detail": f"По шаблону уже внесено поверок: {used} — он выключен, история осталась"})
+        template.delete()
+        return Response(status=204)
+
 
 class TemplateApproveView(APIView):
     """POST /api/verification-templates/{id}/approve/ — метролог проверил шаблон."""

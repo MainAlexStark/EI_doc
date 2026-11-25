@@ -47,6 +47,7 @@ from apps.hub.api import (
     RequestConfirmView,
     RequestCreateView,
     RequestListView,
+    RequestDetailView,
     RequestRejectView,
     RequestRouteView,
 )
@@ -77,7 +78,7 @@ from apps.verification.api_journal import (
     NumberingPreviewView,
     SignProtocolsView,
 )
-from apps.verification.api_field import OrderInstrumentsBulkView, WorkOrderVerificationsView
+from apps.verification.api_field import OrderInstrumentsBulkView, VerificationDetailView, WorkOrderVerificationsView
 from apps.verification.api_orders import (
     ClientLookupView,
     ClientSuggestView,
@@ -110,6 +111,7 @@ from apps.verification.api_scan import (
 from apps.verification.api_workorders import (
     WorkOrderCreateView,
     WorkOrderListView,
+    WorkOrderDetailView,
     WorkOrderStatusView,
 )
 
@@ -192,6 +194,7 @@ urlpatterns = [
     ),
     path("api/normocontrol/sign/", SignProtocolsView.as_view(), name="sign_protocols"),
     path("api/verifications/layouts/", LayoutsView.as_view(), name="measurement_layouts"),
+    path("api/verifications/<int:pk>/", VerificationDetailView.as_view(), name="verification_detail"),
     path(
         "api/verifications/<int:pk>/measurements/",
         VerificationMeasurementsView.as_view(), name="verification_measurements",
@@ -239,6 +242,7 @@ urlpatterns = [
     path("api/hub/requests/", RequestCreateView.as_view(), name="request_create"),
     path("api/hub/requests/list/", RequestListView.as_view(), name="request_list"),
     path("api/hub/requests/bulk/", RequestBulkView.as_view(), name="request_bulk"),
+    path("api/hub/requests/<int:pk>/", RequestDetailView.as_view(), name="request_detail"),
     path("api/hub/requests/<int:pk>/route/", RequestRouteView.as_view(), name="request_route"),
     path("api/hub/requests/<int:pk>/confirm/", RequestConfirmView.as_view(), name="request_confirm"),
     path("api/hub/requests/<int:pk>/reject/", RequestRejectView.as_view(), name="request_reject"),
@@ -253,6 +257,7 @@ urlpatterns = [
     # Наряды
     path("api/work-orders/", WorkOrderListView.as_view(), name="work_order_list"),
     path("api/work-orders/create/", WorkOrderCreateView.as_view(), name="work_order_create"),
+    path("api/work-orders/<int:pk>/", WorkOrderDetailView.as_view(), name="work_order_detail"),
     path("api/work-orders/<int:pk>/status/", WorkOrderStatusView.as_view(), name="work_order_status"),
     path(
         "api/work-orders/<int:pk>/verifications/",

@@ -483,6 +483,27 @@ class RequestRejectSerializer(serializers.Serializer):
     spam = serializers.BooleanField(default=False)
 
 
+class RequestDetailView(APIView):
+    """DELETE /api/hub/requests/{id}/ — стереть заявку насовсем (тест, явный мусор).
+
+    Обычный путь — «Отклонить» или «Спам»: заявка остаётся в истории. Стирать можно
+    только заявку без нарядов — по нарядам уже работали.
+    """
+
+    @extend_schema(request=None, responses={204: None})
+    def delete(self, request, pk: int):
+        if (denied := _forbid_unless_control(request)) is not None:
+            return denied
+        obj = get_object_or_404(Request, pk=pk)
+        if obj.work_orders.exists():
+            return Response(
+                {"detail": "По заявке уже заведены наряды — её можно только отклонить или отменить"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class RequestRejectView(APIView):
     """POST /api/hub/requests/{id}/reject/"""
 

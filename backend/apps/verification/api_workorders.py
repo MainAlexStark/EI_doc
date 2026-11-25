@@ -10,7 +10,8 @@ from __future__ import annotations
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
-from rest_framework import serializers
+from rest_framework import serializers, status
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -207,7 +208,12 @@ class WorkOrderStatusView(APIView):
 
     @extend_schema(request=WorkOrderStatusSerializer, responses={200: WorkOrderSerializer})
     def post(self, request, pk: int):
+        from apps.verification.deletion import is_manager
+
         obj = get_object_or_404(WorkOrder, pk=pk)
+        employee = getattr(request.user, "employee", None)
+        if not is_manager(request.user) and (employee is None or obj.assigned_employee_id != employee.pk):
+            raise PermissionDenied("Менять статус чужого наряда может только руководство или менеджер")
         payload = WorkOrderStatusSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
         obj.status = payload.validated_data["status"]
@@ -215,3 +221,25 @@ class WorkOrderStatusView(APIView):
         obj.save(update_fields=["status", "closed_at"])
         obj.sync_request_status()
         return Response(WorkOrderSerializer(obj).data)
+
+
+class WorkOrderDetailView(APIView):
+    """DELETE /api/work-orders/{id}/ — удалить наряд целиком (ошибочно заведённый выезд или приёмку).
+
+    Правила — apps.verification.deletion: подписанные протоколы не трогаем, адрес
+    командировки удаляется в самой командировке.
+    """
+
+    @extend_schema(request=None, responses={204: None})
+    def delete(self, request, pk: int):
+        from apps.verification.deletion import DeleteRefused, delete_order, is_manager
+
+        obj = get_object_or_404(WorkOrder, pk=pk)
+        employee = getattr(request.user, "employee", None)
+        if not is_manager(request.user) and (employee is None or obj.assigned_employee_id != employee.pk):
+            raise NotFound("Наряд не найден")
+        try:
+            delete_order(obj, request.user)
+        except DeleteRefused as exc:
+            raise PermissionDenied(str(exc)) from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)

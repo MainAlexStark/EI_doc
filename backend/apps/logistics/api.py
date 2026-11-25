@@ -813,6 +813,25 @@ class ProcurementDetailView(APIView):
                 _set_items(item, data["items"])
         return Response(procurement_detail(item, request.user))
 
+    def delete(self, request, pk: int):
+        """Удалить закупку (ошибочно заведённую или дубль). Руководство и менеджер.
+
+        Командировки по закупке держат её (PROTECT): сначала их удаляют или отвязывают.
+        Приёмки в счёт контракта остаются — просто перестают считаться в план-факт.
+        """
+        require_manager(request)
+        item = get_object_or_404(Procurement, pk=pk)
+        trips = item.trips.count()
+        if trips:
+            raise ValidationError({"detail": f"По закупке есть командировки ({trips}) — сначала удалите их "
+                                             "или уберите в них привязку к закупке"})
+        with transaction.atomic():
+            for doc in item.documents.all():
+                if doc.file:
+                    doc.file.delete(save=False)
+            item.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class DocumentUploadSerializer(serializers.Serializer):
     file = serializers.FileField()

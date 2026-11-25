@@ -15,6 +15,7 @@
  */
 import {
   createVerification,
+  deleteVerification,
   fetchLayouts,
   fetchSiTypes,
   fetchTemplateForVerification,
@@ -22,6 +23,7 @@ import {
   fetchWorkOrderVerifications,
   suggestSiTypes,
   submitMeasurements,
+  updateVerification,
   type FieldVerification,
   type FieldVerificationPayload,
   type LayoutsResponse,
@@ -31,6 +33,7 @@ import {
   type SiTypeSuggestion,
   type TemplateForVerification,
   type TemplateMeasurementsPayload,
+  type VerificationFix,
   type VerificationTemplate,
 } from "../api";
 import { db, type CachedVerification } from "./db";
@@ -101,6 +104,13 @@ export async function listVerifications(workOrderId: number): Promise<CachedVeri
       const fresh = await fetchWorkOrderVerifications(workOrderId);
       await db.transaction("rw", db.verifications, async () => {
         for (const v of fresh) await db.verifications.put(fromServer(v));
+        // Удалённые на сервере (с другого устройства, руководством) — убрать и из кэша.
+        // Неотправленные (pending) не трогаем: сервер о них ещё не знает.
+        const alive = new Set(fresh.map((v) => v.client_id));
+        await db.verifications
+          .where("work_order_id").equals(workOrderId)
+          .filter((v) => v.sync_state === "synced" && !alive.has(v.client_id))
+          .delete();
       });
     } catch {
       // связь есть, а запрос не прошёл (сервер недоступен и т.п.) —
@@ -160,6 +170,30 @@ export async function addVerification(
   notify();
   void flush();
   return optimistic;
+}
+
+/** Убрать прибор. Не отправленный ещё — просто из телефона вместе с очередью;
+ * отправленный — на сервере (нужна связь: удаление офлайн не копим, это необратимо). */
+export async function removeVerification(v: CachedVerification): Promise<void> {
+  if (v.server_id != null) await deleteVerification(v.server_id);
+  await db.transaction("rw", db.verifications, db.outbox, async () => {
+    await db.outbox.where("kind").anyOf("create_verification", "submit_measurements")
+      .filter((item) => item.verification_client_id === v.client_id).delete();
+    await db.verifications.delete(v.client_id);
+  });
+  notify();
+}
+
+/** Исправить тип, заводской номер или год. Только отправленный прибор и при связи. */
+export async function fixVerification(v: CachedVerification, fix: VerificationFix): Promise<CachedVerification> {
+  if (v.server_id == null) {
+    throw new Error("Прибор ещё не отправлен на сервер — дождитесь связи или удалите его и заведите заново");
+  }
+  const saved = fromServer(await updateVerification(v.server_id, fix));
+  const record = { ...saved, manufacture_year: fix.manufacture_year !== undefined ? fix.manufacture_year : v.manufacture_year };
+  await db.verifications.put(record);
+  notify();
+  return record;
 }
 
 // ---------------------------------------------------------------------------

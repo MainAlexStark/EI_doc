@@ -342,7 +342,10 @@ class SiTypeListCreateView(APIView):
 
 
 class SiTypeDetailView(APIView):
-    """PATCH — поправить тип. Метролог — любой; автор — свой, пока он не проверен."""
+    """PATCH — поправить тип, DELETE — убрать из справочника.
+
+    Метролог — любой тип; автор — свой, пока он не проверен.
+    """
 
     @extend_schema(request=SiTypeWriteSerializer, responses=SiTypeSerializer)
     def patch(self, request, pk: int):
@@ -367,6 +370,42 @@ class SiTypeDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(SiTypeSerializer(si_type).data)
+
+    @extend_schema(request=None, responses={200: dict, 204: None})
+    def delete(self, request, pk: int):
+        """Убрать тип из справочника.
+
+        Тип, по которому уже есть приборы (а значит, поверки и протоколы), удалить насовсем
+        нельзя — журнал и прошлые протоколы на него ссылаются. Такой тип скрывается
+        (``is_active=False``): из поиска и справочника он пропадает, история остаётся;
+        заведёте его снова из Госреестра — он вернётся. Тип без приборов удаляется
+        вместе со своими шаблонами поверки и работами ассистента.
+        """
+        from django.db.models import ProtectedError
+
+        si_type = get_object_or_404(SiType, pk=pk)
+        own_unreviewed = si_type.needs_review and si_type.created_by_id == request.user.pk
+        if not (is_reviewer(request.user) or own_unreviewed):
+            raise PermissionDenied("Удалить проверенный тип может только метролог или руководитель")
+        instruments = si_type.instruments.count()
+        if not instruments:
+            try:
+                with transaction.atomic():
+                    si_type.verification_templates.all().delete()
+                    si_type.delete()
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            except ProtectedError:
+                pass  # на тип ссылается что-то ещё — скрываем, как тип с приборами
+        si_type.is_active = False
+        si_type.save(update_fields=["is_active"])
+        return Response({
+            "archived": True,
+            "instruments": instruments,
+            "detail": (
+                f"По типу уже есть приборы ({instruments}) — он скрыт из справочника, "
+                "прошлые поверки и протоколы остались как были"
+            ),
+        })
 
 
 class SiTypeConfirmView(APIView):

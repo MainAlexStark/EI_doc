@@ -8,7 +8,7 @@
  * «Отменить» возвращает во «Новые» (bulk action=reopen). */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { fetchEmployees, fetchRequests, type Employee, type HubRequest } from "../../api";
+import { deleteHubRequest, fetchEmployees, fetchRequests, type Employee, type HubRequest } from "../../api";
 import type { TeamCard } from "../../dispatchApi";
 import AssignPicker, { type PickPerson } from "../../components/control/AssignPicker";
 import { useCommands } from "../../ui/CommandPalette";
@@ -16,7 +16,7 @@ import { EmptyState } from "../../ui/EmptyState";
 import { useHotkey } from "../../ui/Hotkeys";
 import Icon from "../../ui/Icon";
 import Kbd from "../../ui/Kbd";
-import { promptDialog } from "../../ui/Modal";
+import { confirmDialog, promptDialog } from "../../ui/Modal";
 import { Sheet } from "../../ui/Sheet";
 import { SkeletonList } from "../../ui/Skeleton";
 import toast from "../../ui/Toast";
@@ -373,8 +373,34 @@ export default function Inbox({ onChanged, go, onNew }: { onChanged?: () => void
     if (phone) setSheetOpen(false);
   };
 
+  const removeForever = async () => {
+    const list = targets().filter((r) => r.status === "rejected" || r.status === "spam");
+    if (!list.length) return;
+    const ok = await confirmDialog({
+      title: list.length === 1 ? `Удалить заявку №${list[0].id} насовсем?` : `Удалить насовсем ${nRequests(list.length)}?`,
+      text: "Заявка пропадёт и из архива. Обычно хватает «Отклонить» или «Спам» — тогда история остаётся.",
+      danger: true,
+    });
+    if (!ok) return;
+    const gone: number[] = [];
+    for (const r of list) {
+      try {
+        await deleteHubRequest(r.id);
+        gone.push(r.id);
+      } catch (exc) {
+        toast.error(`Заявка №${r.id} не удалена`, { description: errorText(exc, "Повторите позже") });
+      }
+    }
+    if (gone.length) {
+      setRequests((rows) => rows.filter((r) => !gone.includes(r.id)));
+      setSelected(new Set());
+      toast.success(gone.length === 1 ? "Заявка удалена" : `Удалено: ${gone.length}`);
+    }
+  };
+
   const act = async (action: CardAction) => {
     if (busy) return;
+    if (action === "delete") return void removeForever();
     const list = targets().filter((r) => r.status === "new" || r.status === "routed");
     if (!list.length) {
       toast.info("Эта заявка уже разобрана", { description: "Действия — только для новых заявок" });

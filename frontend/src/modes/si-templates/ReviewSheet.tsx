@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   approveVerificationTemplate,
+  deleteVerificationTemplate,
   downloadTemplatePreview,
   fetchVerificationTemplate,
   type VerificationTemplate,
@@ -10,6 +11,7 @@ import {
 import { useHotkey } from "../../ui/Hotkeys";
 import Icon from "../../ui/Icon";
 import Kbd from "../../ui/Kbd";
+import { confirmDialog } from "../../ui/Modal";
 import { Sheet } from "../../ui/Sheet";
 import { SkeletonText } from "../../ui/Skeleton";
 import { toast } from "../../ui/Toast";
@@ -57,6 +59,27 @@ export default function ReviewSheet({
       setBusy(false);
     }
   };
+  const remove = async () => {
+    if (!item || busy) return;
+    const ok = await confirmDialog({
+      title: `Удалить шаблон «${item.title}»?`,
+      text: "Проведённые поверки хранят свой снимок шаблона и не изменятся. Если по шаблону уже вносили " +
+        "измерения, он не сотрётся, а выключится.",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const reply = await deleteVerificationTemplate(item.id);
+      toast.success(reply?.archived ? "Шаблон выключен" : "Шаблон удалён", reply?.detail ? { description: reply.detail } : undefined);
+      onChanged();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   useHotkey("mod+enter", () => void approve(), { allowInInputs: true, enabled: !!templateId && isReviewer, global: true });
 
   const preview = (fmt: "pdf" | "docx") =>
@@ -78,6 +101,11 @@ export default function ReviewSheet({
             <button type="button" onClick={() => void preview("docx")}><Icon name="download" size={14} /> Word</button>
             {onOpenStudio && item.si_type && (
               <button type="button" onClick={() => onOpenStudio(item.si_type!)}><Icon name="sparkle" size={14} /> Править с ассистентом</button>
+            )}
+            {isReviewer && (
+              <button type="button" className="ghost danger" disabled={busy} onClick={() => void remove()}>
+                <Icon name="trash" size={14} /> Удалить
+              </button>
             )}
             {isReviewer && item.needs_review && (
               <button type="button" className="primary" disabled={busy} onClick={() => void approve()}>

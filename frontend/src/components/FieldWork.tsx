@@ -10,6 +10,7 @@ import {
   fetchVerificationPhotos,
   fetchWorkOrderScans,
   fetchWorkOrders,
+  deleteWorkOrder,
   setWorkOrderStatus,
   uploadScan,
   uploadVerificationPhoto,
@@ -40,6 +41,7 @@ import type { SiTypeDraft } from "./SiTypeForm";
 import SiTypePicker, { type PickedType } from "./SiTypePicker";
 import {
   addVerification,
+  fixVerification,
   flush,
   isOnline,
   listVerifications,
@@ -50,6 +52,7 @@ import {
   refreshSiTypeCache,
   refreshTemplateCache,
   removeOutboxItem,
+  removeVerification,
   saveMeasurements,
   subscribe,
 } from "../offline/sync";
@@ -400,6 +403,81 @@ function AddInstrumentForm({
           <button type="button" onClick={onCancel} disabled={busy}>
             Отмена
           </button>
+        </div>
+      )}
+      {error && <div className="error">{error}</div>}
+    </form>
+  );
+}
+
+/** Исправить прибор: ошиблись типом (одинаковые названия у разных изготовителей), номером или годом. */
+function EditInstrumentForm({
+  verification,
+  onSaved,
+  onCancel,
+}: {
+  verification: CachedVerification;
+  onSaved: (v: CachedVerification) => void;
+  onCancel: () => void;
+}) {
+  const [siType, setSiType] = useState<PickedType | null>({ id: verification.si_type_id, label: verification.si_type_name });
+  const [serial, setSerial] = useState(verification.serial_number);
+  const [year, setYear] = useState(verification.manufacture_year ? String(verification.manufacture_year) : "");
+  const [drafting, setDrafting] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const typeChanged = siType != null && siType.id !== verification.si_type_id;
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!serial.trim()) return setError("Впишите заводской номер");
+    if (!siType) return setError("Выберите тип");
+    if (typeChanged && verification.status !== "draft") {
+      const ok = await confirmDialog({
+        title: "Сменить тип прибора?",
+        text: "У другого типа своя форма и свой расчёт — введённые измерения сбросятся, их нужно будет внести заново.",
+        ok: "Сменить тип",
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      onSaved(await fixVerification(verification, {
+        ...(typeChanged ? { si_type_id: siType.id } : {}),
+        serial_number: serial.trim(),
+        manufacture_year: year ? Number(year) : null,
+      }));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось сохранить");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="card" onSubmit={submit}>
+      <h3>Исправить прибор</h3>
+      <div className="field-row">
+        <div className="field">
+          <label htmlFor="fx-serial">Заводской номер<span className="req">*</span></label>
+          <input id="fx-serial" className="big-input" value={serial} autoComplete="off" autoFocus
+                 onChange={(event) => setSerial(event.target.value)} />
+        </div>
+        <div className="field" style={{ maxWidth: 160 }}>
+          <label htmlFor="fx-year">Год выпуска</label>
+          <input id="fx-year" className="big-input" inputMode="numeric" value={year} placeholder="если есть"
+                 onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))} />
+        </div>
+      </div>
+      <SiTypePicker value={siType} onChange={setSiType} inputId="fx-si-type" manufactureYear={year} onDraftChange={setDrafting} />
+      {typeChanged && verification.status !== "draft" && (
+        <p className="hint warn-text">Измерения по прежнему типу сбросятся.</p>
+      )}
+      {!drafting && (
+        <div className="actions">
+          <button className="primary" type="submit" disabled={busy}>{busy ? "Сохраняю…" : "Сохранить"}</button>
+          <button type="button" onClick={onCancel} disabled={busy}>Отмена</button>
         </div>
       )}
       {error && <div className="error">{error}</div>}
@@ -1208,6 +1286,7 @@ export default function FieldWork({
   const [verifications, setVerifications] = useState<CachedVerification[]>([]);
   const [selectedVerification, setSelectedVerification] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const [layoutsInfo, setLayoutsInfo] = useState<LayoutsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1341,6 +1420,44 @@ export default function FieldWork({
       setOrders((current) => current.map((o) => (o.id === target.id ? { ...o, ...updated } : o)));
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Не удалось отменить выезд");
+    }
+  };
+
+  const removeInstrument = async (target: CachedVerification) => {
+    const ok = await confirmDialog({
+      title: "Удалить прибор?",
+      text: `${target.si_type_name || "Прибор"} № ${target.serial_number} — вместе с измерениями, фото и черновиком протокола. ` +
+        "Подписанный протокол так не удалить — его аннулируют в журнале.",
+      danger: true,
+    });
+    if (!ok) return;
+    setError("");
+    try {
+      await removeVerification(target);
+      setSelectedVerification(null);
+      setFixing(false);
+      setVerifications((current) => current.filter((v) => v.client_id !== target.client_id));
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось удалить прибор");
+    }
+  };
+
+  const deleteOrder = async (target: WorkOrder) => {
+    const ok = await confirmDialog({
+      title: target.kind === "lab" ? "Удалить приёмку?" : "Удалить выезд?",
+      text: `${orderTitle(target)} — со всеми приборами (${verifications.length}), измерениями и черновиками протоколов. ` +
+        "Если по ней уже подписаны протоколы, удалить не получится.",
+      danger: true,
+    });
+    if (!ok) return;
+    setError("");
+    try {
+      await deleteWorkOrder(target.id);
+      setOrders((current) => current.filter((o) => o.id !== target.id));
+      if (embedded) onClose?.();
+      else setSelectedOrder(null);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Не удалось удалить");
     }
   };
 
@@ -1486,7 +1603,7 @@ export default function FieldWork({
     return (
       <div className="narrow">
         {syncBar}
-        <button type="button" className="back" onClick={() => setSelectedVerification(null)}>
+        <button type="button" className="back" onClick={() => { setSelectedVerification(null); setFixing(false); }}>
           <Icon name="chevronLeft" size={20} /> {order ? orderTitle(order) : fallbackTitle || "Все приборы"}
         </button>
         <div className="card">
@@ -1498,9 +1615,32 @@ export default function FieldWork({
             <StatusBadge v={activeVerification} />
           </div>
           {online && activeVerification.si_type_id ? <SiTypeDocuments siTypeId={activeVerification.si_type_id} /> : null}
+          {!fixing && (
+            <div className="row" style={{ justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+              <button type="button" className="sm ghost" onClick={() => setFixing(true)}
+                      disabled={activeVerification.server_id == null}
+                      title={activeVerification.server_id == null ? "Прибор ещё не отправлен — дождитесь связи" : "Ошиблись типом, номером или годом"}>
+                <Icon name="pen" size={14} /> Исправить
+              </button>
+              <button type="button" className="sm ghost danger" onClick={() => void removeInstrument(activeVerification)}>
+                <Icon name="trash" size={14} /> Удалить
+              </button>
+            </div>
+          )}
+          {error && <div className="error">{error}</div>}
         </div>
+        {fixing && (
+          <EditInstrumentForm
+            verification={activeVerification}
+            onCancel={() => setFixing(false)}
+            onSaved={(fresh) => {
+              setFixing(false);
+              setVerifications((current) => current.map((v) => (v.client_id === fresh.client_id ? fresh : v)));
+            }}
+          />
+        )}
         <VerificationEntry
-          key={activeVerification.client_id}
+          key={`${activeVerification.client_id}-${activeVerification.si_type_id}`}
           verification={activeVerification}
           layoutsInfo={layoutsInfo}
           onSaved={() => void reloadVerifications()}
@@ -1565,6 +1705,13 @@ export default function FieldWork({
         </div>
       )}
       </>)}
+      {order && (order.kind === "lab" || !order.trip_id) && !order.issued_at && (
+        <div className="row" style={{ justifyContent: "flex-end", margin: "-4px 0 8px" }}>
+          <button type="button" className="sm ghost danger" onClick={() => void deleteOrder(order)}>
+            <Icon name="trash" size={14} /> {order.kind === "lab" ? "Удалить приёмку" : "Удалить выезд"}
+          </button>
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
 
       <h2>Приборы <span className="count">{verifications.length}</span></h2>

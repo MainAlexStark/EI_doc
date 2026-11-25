@@ -1,12 +1,14 @@
 /** Карточка закупки: шапка с ключевым и вкладки «Выжимка», «Документы», «Пропуска», «Заходы». */
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchProcurement, type Procurement, type ProcurementPass } from "../../api";
+import { deleteProcurement, fetchProcurement, type Procurement, type ProcurementPass } from "../../api";
 import { PassModal, ProcurementForm } from "../../components/Procurements";
 import { errorText, ruShort } from "../../components/tripUtil";
 import { EmptyState } from "../../ui/EmptyState";
 import { useHotkey } from "../../ui/Hotkeys";
 import Icon from "../../ui/Icon";
+import { confirmDialog } from "../../ui/Modal";
+import toast from "../../ui/Toast";
 import { Skeleton, SkeletonText } from "../../ui/Skeleton";
 import { PageActions, Segmented } from "../../ui/controls";
 import { usePersistent } from "../../ui/hooks";
@@ -87,6 +89,22 @@ export default function ProcurementDetail({ id, go, onBack }: { id: number; go: 
   }
 
   const canEdit = item.can_edit;
+  const remove = async () => {
+    const ok = await confirmDialog({
+      title: "Удалить закупку?",
+      text: `${item.label} — с документами, выжимкой и пропусками. Приёмки в счёт контракта останутся, ` +
+        "но перестанут считаться в план-факт. Если по закупке есть командировки, сначала удалите их.",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteProcurement(item.id);
+      toast.success("Закупка удалена");
+      onBack();
+    } catch (exc) {
+      toast.error("Закупка не удалена", { description: errorText(exc, "Повторите позже") });
+    }
+  };
   const closed = item.status === "done" || item.status === "cancelled";
   const prompt = [
     `Собери выжимку по закупке id=${item.id} (${item.label}, заказчик ${item.customer}${item.customer_inn ? `, ИНН ${item.customer_inn}` : ""}).`,
@@ -103,6 +121,11 @@ export default function ProcurementDetail({ id, go, onBack }: { id: number; go: 
           <a className="btn" href={item.open_url} target="_blank" rel="noreferrer"><Icon name="external" size={15} /> <span className="hide-phone">ЕИС</span></a>
         )}
         {canEdit && <button type="button" onClick={() => setEditing(true)}><Icon name="pen" size={15} /> <span className="hide-phone">Реквизиты</span></button>}
+        {canEdit && (
+          <button type="button" className="ghost danger" title="Удалить закупку" onClick={() => void remove()}>
+            <Icon name="trash" size={15} /> <span className="hide-phone">Удалить</span>
+          </button>
+        )}
       </PageActions>
 
       <header className="pr-head">

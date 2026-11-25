@@ -227,3 +227,110 @@ class OrderInstrumentsBulkView(APIView):
             "existing": FieldVerificationSerializer(existing, many=True).data,
             "errors": errors,
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Один прибор: исправить ошибку ввода или удалить (apps.verification.deletion)
+# ---------------------------------------------------------------------------
+class FieldVerificationUpdateSerializer(serializers.Serializer):
+    si_type_id = serializers.IntegerField(required=False)
+    serial_number = serializers.CharField(max_length=60, required=False)
+    manufacture_year = serializers.IntegerField(required=False, allow_null=True, min_value=1900, max_value=2100)
+
+    def validate_serial_number(self, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise serializers.ValidationError("Впишите заводской номер")
+        return value
+
+
+def _visible_verification(request, pk: int) -> Verification:
+    from apps.verification.deletion import is_manager
+
+    verification = get_object_or_404(
+        Verification.objects.select_related("instrument__si_type", "work_order"), pk=pk
+    )
+    if is_manager(request.user):
+        return verification
+    employee = getattr(request.user, "employee", None)
+    if employee is None:
+        raise PermissionDenied("У учётной записи нет привязанного сотрудника")
+    order = verification.work_order
+    if verification.verifier_id != employee.pk and (order is None or order.assigned_employee_id != employee.pk):
+        from django.http import Http404
+
+        raise Http404
+    return verification
+
+
+class VerificationDetailView(APIView):
+    """PATCH/DELETE /api/verifications/{id}/
+
+    PATCH {si_type_id?, serial_number?, manufacture_year?} — поправить прибор, если ошиблись
+    типом или номером. Смена типа сбрасывает введённые измерения: у другого типа другая
+    форма и другой расчёт. DELETE — убрать прибор из приёмки/выезда. Обе операции
+    запрещены, если протокол уже подписан (номер занят) — см. deletion.verification_refusal.
+    """
+
+    @extend_schema(request=FieldVerificationUpdateSerializer, responses=FieldVerificationSerializer)
+    def patch(self, request, pk: int):
+        from apps.verification.deletion import verification_refusal
+
+        verification = _visible_verification(request, pk)
+        reason = verification_refusal(verification, request.user)
+        if reason:
+            raise PermissionDenied(reason)
+        payload = FieldVerificationUpdateSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        current = verification.instrument
+        si_type = (
+            get_object_or_404(SiType, pk=data["si_type_id"]) if "si_type_id" in data else current.si_type
+        )
+        serial = data.get("serial_number", current.serial_number)
+        year = data["manufacture_year"] if "manufacture_year" in data else current.manufacture_year
+        type_changed = si_type.pk != current.si_type_id
+
+        with transaction.atomic():
+            if si_type.pk != current.si_type_id or serial != current.serial_number:
+                target = Instrument.objects.filter(si_type=si_type, serial_number=serial).first()
+                alone = not current.verifications.exclude(pk=verification.pk).exists()
+                if target is None and alone:
+                    current.si_type, current.serial_number = si_type, serial
+                    current.manufacture_year = year
+                    current.save()
+                else:
+                    if target is None:
+                        order = verification.work_order
+                        target = Instrument.objects.create(
+                            si_type=si_type, serial_number=serial, manufacture_year=year,
+                            owner=order.client if order else current.owner,
+                            site=order.site if order else current.site,
+                        )
+                    verification.instrument = target
+                    if alone:
+                        verification.save(update_fields=["instrument"])
+                        current.delete()
+            instrument = verification.instrument
+            if instrument.manufacture_year != year:
+                instrument.manufacture_year = year
+                instrument.save(update_fields=["manufacture_year"])
+            if type_changed:
+                verification.measurements, verification.results = {}, {}
+                verification.status = VerificationStatus.DRAFT
+                verification.save(update_fields=["instrument", "measurements", "results", "status", "updated_at"])
+            else:
+                verification.save(update_fields=["instrument", "updated_at"])
+        verification.refresh_from_db()
+        return Response(FieldVerificationSerializer(verification).data)
+
+    @extend_schema(request=None, responses={204: None})
+    def delete(self, request, pk: int):
+        from apps.verification.deletion import DeleteRefused, delete_verification
+
+        verification = _visible_verification(request, pk)
+        try:
+            delete_verification(verification, request.user)
+        except DeleteRefused as exc:
+            raise PermissionDenied(str(exc)) from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)

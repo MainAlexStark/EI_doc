@@ -9,6 +9,7 @@
     GET   /api/clients/lookup/?inn=           организация по ИНН (своя база → DaData)
     POST  /api/orders/                        принять приборы: новый заказ
     PATCH /api/orders/{id}/                   контакт, примечание, закупка, заказчик
+    DELETE /api/orders/{id}/                  удалить приёмку (apps.verification.deletion)
     POST  /api/orders/{id}/issue/             отдали заказчику (или отменить выдачу)
     GET   /api/orders/{id}/act/<kind>.pdf     акт приёма (receive) или выдачи (issue)
 """
@@ -183,6 +184,16 @@ class OrderDetailView(APIView):
                 order.procurement = _procurement(data)
             order.save()
         return Response(WorkOrderSerializer(order).data)
+
+    def delete(self, request, pk: int):
+        from apps.verification.deletion import DeleteRefused, delete_order
+
+        order = _order(request, pk)
+        try:
+            delete_order(order, request.user)
+        except DeleteRefused as exc:
+            raise PermissionDenied(str(exc)) from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class OrderIssueView(APIView):

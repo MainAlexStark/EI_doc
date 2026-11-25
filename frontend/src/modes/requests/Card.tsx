@@ -7,7 +7,7 @@ import Kbd from "../../ui/Kbd";
 import toast from "../../ui/Toast";
 import { STATUS, SOURCE, mapHref, money, telHref, whenLine } from "./util";
 
-export type CardAction = "assign" | "confirm" | "reject" | "spam";
+export type CardAction = "assign" | "confirm" | "reject" | "spam" | "delete";
 
 async function copy(text: string, what: string) {
   try {
@@ -20,6 +20,17 @@ async function copy(text: string, what: string) {
 
 export function CardActions({ request, busy, onAction }: { request: HubRequest; busy?: boolean; onAction: (a: CardAction) => void }) {
   const actionable = request.status === "new" || request.status === "routed";
+  // Отклонённую или спам можно стереть насовсем (тест, явный мусор) — если по ней не было нарядов.
+  if (request.status === "rejected" || request.status === "spam") {
+    return (
+      <div className="rq-actions">
+        <span className="grow" />
+        <button type="button" className="ghost danger" disabled={busy} onClick={() => onAction("delete")}>
+          <Icon name="trash" size={15} /> Удалить насовсем
+        </button>
+      </div>
+    );
+  }
   if (!actionable) return null;
   return (
     <div className="rq-actions">

@@ -1814,3 +1814,29 @@ export const saveNotifyPrefs = (categories: Record<string, boolean>) =>
 
 export const sendTestMail = () =>
   json<{ detail: string; mail_configured: boolean }>("/api/notify/test/", { method: "POST" });
+
+// ---------------------------------------------------------------------------
+// Удаление и правка (backend: apps/verification/deletion.py и DELETE-ручки разделов)
+// ---------------------------------------------------------------------------
+/** Ответ, когда запись не стёрта, а скрыта/выключена: на неё ссылается история. */
+export type ArchivedReply = { archived: true; detail: string; instruments?: number; used?: number };
+
+/** Тип СИ без приборов удаляется (undefined), с приборами — скрывается из справочника. */
+export const deleteSiType = (id: number) =>
+  json<ArchivedReply | undefined>(`/api/catalog/si-types/${id}/`, { method: "DELETE" });
+
+export const deleteOrder = (id: number) => json<void>(`/api/orders/${id}/`, { method: "DELETE" });
+export const deleteWorkOrder = (id: number) => json<void>(`/api/work-orders/${id}/`, { method: "DELETE" });
+
+export type VerificationFix = { si_type_id?: number; serial_number?: string; manufacture_year?: number | null };
+export const updateVerification = (id: number, payload: VerificationFix) =>
+  json<FieldVerification>(`/api/verifications/${id}/`, { method: "PATCH", body: JSON.stringify(payload) });
+export const deleteVerification = (id: number) => json<void>(`/api/verifications/${id}/`, { method: "DELETE" });
+
+export const deleteProcurement = (id: number) => json<void>(`/api/procurements/${id}/`, { method: "DELETE" });
+export const deleteHubRequest = (id: number) => json<void>(`/api/hub/requests/${id}/`, { method: "DELETE" });
+export const deleteVerificationTemplate = (id: number) =>
+  json<ArchivedReply | undefined>(`/api/verification-templates/${id}/`, { method: "DELETE" });
+export const deleteAttestationProgram = (id: number) =>
+  json<void>(`/api/attestations/programs/${id}/`, { method: "DELETE" });
+export const deleteAttestation = (id: number) => json<void>(`/api/attestations/${id}/`, { method: "DELETE" });

@@ -138,6 +138,16 @@ class ProgramDetailView(APIView):
             return _fail(exc)
         return Response(program_data(program))
 
+    def delete(self, request, pk):
+        """Удалить шаблон аттестации. Уже проведённые аттестации хранят свой план и не меняются."""
+        if not service.can_edit(request.user):
+            raise PermissionDenied("Нет права менять шаблоны аттестации")
+        program = get_object_or_404(AttestationProgram, pk=pk)
+        if program.document:
+            program.document.delete(save=False)
+        program.delete()  # attestations.program → SET_NULL
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class ProgramApproveView(APIView):
     """POST /api/attestations/programs/{id}/approve/ — метролог проверил шаблон."""
@@ -250,6 +260,16 @@ class AttestationDetailView(APIView):
         except service.AttestationError as exc:
             return _fail(exc)
         return Response(detail(att, request.user))
+
+    def delete(self, request, pk):
+        """Удалить черновик аттестации. Номер присваивается при подписи — дыр в нумерации не будет."""
+        att = get_object_or_404(EquipmentAttestation, pk=pk)
+        if att.is_signed:
+            return _fail(service.AttestationError("Протокол аттестации подписан — его номер уже занят, удалить нельзя"))
+        if not service.can_edit(request.user):
+            raise PermissionDenied("Нет права удалять аттестации")
+        att.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MeasurementsView(APIView):
