@@ -29,7 +29,7 @@ const STEPS: Record<SiteVariant, [string, string][]> = {
     ["Заявка", "на сайте или по телефону"],
     ["Звонок", "согласуем день и окно визита — 2 часа"],
     ["Поверка", "у вас дома или у нас в офисе"],
-    ["Результат", "в ФГИС «Аршин», по запросу — свидетельство"],
+    ["Результат", "вносим в ФГИС «Аршин»"],
   ],
   business: [
     ["Заявка", "список приборов или оборудования"],
@@ -42,7 +42,7 @@ const STEPS: Record<SiteVariant, [string, string][]> = {
 const FAQ: Record<SiteVariant, [string, string][]> = {
   meters: [
     ["Нужно ли снимать счётчик?", "Нет, поверяем на месте — нужна только вода из крана. Если удобнее, можете снять счётчик сами и привезти к нам в офис."],
-    ["Какой документ я получу?", "Результат вносится в ФГИС «Аршин» — это и есть официальное подтверждение, управляющая компания видит его сама. Бумажное свидетельство — по запросу."],
+    ["Какой документ я получу?", "Результат поверки мы вносим в ФГИС «Аршин» — управляющая компания видит его там сама, ничего приносить не нужно."],
     ["Что если счётчик не пройдёт поверку?", "Выдадим извещение о непригодности и подскажем, какой счётчик поставить взамен."],
   ],
   business: [
@@ -123,7 +123,7 @@ export default function Landing({ variant = "meters" }: { variant?: SiteVariant 
     if (meters) {
       setMeta(
         `Поверка счётчиков воды ${CITY_IN[city]} — без снятия, от 500 ₽ | Единица Измерения`,
-        `Поверка счётчиков воды ${CITY_IN[city]}: на дому без демонтажа или в офисе. 500 ₽ в городе, 600 ₽ в пригороде. Официально, запись в ФГИС «Аршин». Тел. ${FIRM.phone}.`,
+        `Поверка счётчиков воды ${CITY_IN[city]}: на дому без демонтажа или в офисе. 500 ₽ за счётчик в городе, 600 ₽ в пригороде. Официально, запись в ФГИС «Аршин». Тел. ${FIRM.phone}.`,
         METERS_PATH[city],
       );
     } else {
@@ -166,12 +166,15 @@ export default function Landing({ variant = "meters" }: { variant?: SiteVariant 
             ))}
           </div>
         )}
+        <a className="l-top-alt" href={meters ? "/biznes/" : "/schetchiki/"}>
+          {meters ? "Для бизнеса →" : "Счётчики для жителей →"}
+        </a>
         <a className="l-top-phone" href={tel}>{FIRM.phone}</a>
       </header>
 
       <main id="top">
         <section className="l-hero" aria-labelledby="l-h1">
-          <p className="l-kicker">{meters ? "Поверка на дому и в офисе" : "Поверка и аттестация по всей России"}</p>
+          {!meters && <p className="l-kicker">Поверка и аттестация по всей России</p>}
           {meters ? (
             <h1 id="l-h1">Поверка счётчиков<br /><span className="l-h1-city">{CITY_NAME[city]}</span></h1>
           ) : (
@@ -185,8 +188,8 @@ export default function Landing({ variant = "meters" }: { variant?: SiteVariant 
 
           {meters && (
             <div className="l-prices" aria-label="Цены">
-              <div><b>500 ₽</b><span>в городе</span></div>
-              <div><b>600 ₽</b><span>в пригороде</span></div>
+              <div><b>500 ₽</b><span>за счётчик в городе</span></div>
+              <div><b>600 ₽</b><span>за счётчик в пригороде</span></div>
             </div>
           )}
 

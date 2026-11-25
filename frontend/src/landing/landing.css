@@ -77,6 +77,8 @@ html:has(.landing) { scroll-behavior: smooth; }
   font-family: var(--mono); font-size: 12px; font-weight: 700; color: #fff; background: #000;
 }
 .l-top-phone { font-family: var(--mono); font-size: 15px; white-space: nowrap; }
+.l-top-alt { font-size: 14px; white-space: nowrap; color: #000 !important; text-decoration: underline; text-underline-offset: 3px; }
+.l-top-alt:hover { text-decoration-thickness: 2px; }
 .l-top-phone:hover { text-decoration: underline !important; }
 
 .l-city { display: inline-flex; border: 1px solid #000; }
@@ -175,7 +177,7 @@ html:has(.landing) { scroll-behavior: smooth; }
 }
 @media (max-width: 640px) {
   .l-top { flex-wrap: wrap; padding: 14px 16px; gap: 10px 12px; }
-  .l-top-phone { font-size: 13px; }
+  .l-top-phone, .l-top-alt { font-size: 13px; }
   .l-city { order: 3; width: 100%; }
   .l-city button { flex: 1; }
 

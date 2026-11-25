@@ -55,6 +55,16 @@ const CONSENT_TEXT =
   "данных». Согласие действует до его отзыва по запросу, направленному любым " +
   "удобным способом.";
 
+/** Выбор дня и окна визита на форме. Выключен: заявители считали выбранное время уже
+ *  записью, и менеджеру приходилось объяснять, что оно было предварительным. День и время
+ *  согласуем по телефону. Включить (true), когда поверители будут работать полный день
+ *  и график станет настоящей записью — календарь, окна и скидка за приоритетное время
+ *  остались как были. */
+const CHOOSE_VISIT_TIME = false;
+
+/** Счётчик ли это (воды, тепла, газа) — на сайте для жителей показываем только их. */
+const isMeter = (family: Family) => /^сч[её]тчик/i.test(family.name) || /meter/.test(family.code ?? "");
+
 // Время визита для счётчиков — окнами по 2 часа (так время и называют клиенту).
 const TIME_WINDOWS: { start: string; end: string }[] = [
   { start: "08:00", end: "10:00" },
@@ -112,7 +122,7 @@ function callbackText(now = new Date()): string {
 }
 
 /** Публичная форма заявки — /zayavka/ и встроенная в сайт (/schetchiki/, /biznes/).
- *  Порядок: что поверить (счётчики первыми) → адрес → когда (окна по 2 часа) → кто вы.
+ *  Порядок: что поверить (счётчики первыми) → адрес → [когда — пока выключено, CHOOSE_VISIT_TIME] → кто вы.
  *  Обязательно — минимум: прибор, адрес, имя, телефон (или email), согласие. */
 export default function PublicRequestForm({
   embedded = false,
@@ -220,7 +230,7 @@ export default function PublicRequestForm({
 
   useEffect(() => {
     const district = form.district ?? "";
-    if (!district) {
+    if (!CHOOSE_VISIT_TIME || !district) {
       setSlots([]);
       setDistrictKnown(false);
       return;
@@ -240,7 +250,7 @@ export default function PublicRequestForm({
   // На сайте для жителей — только счётчики (им нужно время визита); если в справочнике
   // их не отметили, показываем всё, чтобы форма не осталась пустой.
   const ordered = useMemo(() => {
-    const meters = families.filter((f) => f.requires_time_slot);
+    const meters = families.filter(isMeter);
     const pool = focus === "meters" && meters.length > 0 ? meters : families;
     const sign = focus === "business" ? -1 : 1;
     return [...pool].sort((a, b) => sign * (Number(b.requires_time_slot) - Number(a.requires_time_slot)));
@@ -253,7 +263,7 @@ export default function PublicRequestForm({
     () => items.map((item) => familyById.get(item.family_id)).filter((f): f is Family => Boolean(f)),
     [items, familyById],
   );
-  const needsTime = chosenFamilies.some((f) => f.requires_time_slot);
+  const needsTime = CHOOSE_VISIT_TIME && chosenFamilies.some((f) => f.requires_time_slot);
 
   const pricing = useMemo(() => {
     const subtotal = items.reduce((sum, item) => {
@@ -426,7 +436,7 @@ export default function PublicRequestForm({
       return;
     }
 
-    const desiredDate = chosenDate || null;
+    const desiredDate = CHOOSE_VISIT_TIME ? chosenDate || null : null;
     const desiredTime = needsTime && chosenDate ? chosenTime || null : null;
 
     // свои приборы — строкой в описание заявки; недописанное поле тоже не теряем
@@ -501,7 +511,7 @@ export default function PublicRequestForm({
             <p className="sub">Вы выбрали: {dayText}{slot ? `, ${slot.start}–${slot.end}` : ""}</p>
           )}
           <ol className="thanks-next">
-            <li><b>{callbackText()}</b> — уточним приборы и подтвердим время.</li>
+            <li><b>{callbackText()}</b> — уточним приборы и {CHOOSE_VISIT_TIME ? "подтвердим время" : "согласуем день и время визита"}.</li>
             <li><b>Поверитель приедет</b>{slot ? " в выбранное окно" : " в согласованное время"} и проверит приборы на месте.</li>
             <li><b>Результат — в ФГИС «Аршин»</b>: это и есть документ о поверке.</li>
           </ol>
@@ -549,7 +559,9 @@ export default function PublicRequestForm({
                   >
                     <span className="rf-chip-mark" aria-hidden="true">{on ? "✓" : "+"}</span>
                     <span className="rf-chip-name">{family.name}</span>
-                    {Number(family.price) > 0 && <span className="rf-chip-price">от {money(Number(family.price))} ₽</span>}
+                    {Number(family.price) > 0 && (
+                      <span className="rf-chip-price">от {money(Number(family.price))} ₽{focus === "meters" ? " за счётчик" : ""}</span>
+                    )}
                   </button>
                 );
               })}
@@ -712,7 +724,7 @@ export default function PublicRequestForm({
           </div>
         </fieldset>
 
-        {items.length > 0 && (
+        {CHOOSE_VISIT_TIME && items.length > 0 && (
           <fieldset className="rf-step" id="rf-date" tabIndex={-1} {...invalid("date")}>
             <legend>
               <span className="rf-num">3</span>
@@ -772,7 +784,7 @@ export default function PublicRequestForm({
         )}
 
         <fieldset className="rf-step">
-          <legend><span className="rf-num">{items.length > 0 ? 4 : 3}</span>Как с вами связаться</legend>
+          <legend><span className="rf-num">{CHOOSE_VISIT_TIME && items.length > 0 ? 4 : 3}</span>Как с вами связаться</legend>
           <div className="field-row">
             <div className="field">
               <label htmlFor="rf-name">Имя или организация<span className="req">*</span></label>
