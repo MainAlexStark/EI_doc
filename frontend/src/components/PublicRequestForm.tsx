@@ -62,8 +62,11 @@ const CONSENT_TEXT =
  *  остались как были. */
 const CHOOSE_VISIT_TIME = false;
 
-/** Счётчик ли это (воды, тепла, газа) — на сайте для жителей показываем только их. */
-const isMeter = (family: Family) => /^сч[её]тчик/i.test(family.name) || /meter/.test(family.code ?? "");
+/** Счётчик ли это (воды, тепла, газа) — на сайте для жителей показываем только их.
+ *  По названию «Счётчики…» или коду вида «water-meter», «heat_meters». Просто «meter» в коде
+ *  искать нельзя: оно есть и в «manometers». */
+const isMeter = (family: Family) =>
+  /^сч[её]тчик/i.test(family.name.trim()) || /(^|[-_])meters?$/i.test(family.code ?? "");
 
 // Время визита для счётчиков — окнами по 2 часа (так время и называют клиенту).
 const TIME_WINDOWS: { start: string; end: string }[] = [
