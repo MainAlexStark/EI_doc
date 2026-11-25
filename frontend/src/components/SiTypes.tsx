@@ -8,6 +8,8 @@ import { Alert, EmptyState, PageActions, SearchField, Segmented, Spinner } from 
 import SiTypeDocuments from "./FifDocuments";
 import FifTypeCard from "./FifTypeCard";
 import FifTypeSearch from "./FifTypeSearch";
+import MpiBadge, { MpiHero } from "./MpiBadge";
+import { rememberMpi, useFifMpi } from "../mpi";
 import RstStatus from "./RstStatus";
 import SiTypeForm, { loadPresets, type SiTypeDraft } from "./SiTypeForm";
 import StandardKits from "./StandardKits";
@@ -56,6 +58,7 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
   const [fifNote, setFifNote] = useState("");
   const [fifOpen, setFifOpen] = useState<{ ident: string; title: string; query: string } | null>(null);
   const fifRun = useRef(0);
+  const fifMpi = useFifMpi(fif.slice(0, 12).map((item) => item.fif_uuid ?? "").filter(Boolean));
 
   const load = useCallback(async () => {
     if (view === "templates" || view === "kits") return;
@@ -93,7 +96,9 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
     const timer = setTimeout(async () => {
       const found = await searchSiTypes(q);
       if (run !== fifRun.current) return;
-      setFif(found.results.filter((item) => item.si_type_id === null));
+      const fresh = found.results.filter((item) => item.si_type_id === null);
+      fresh.forEach((item) => rememberMpi(item.fif_uuid, item.mpi));
+      setFif(fresh);
       setFifNote(found.error ?? "");
       setFifState(found.offline ? "offline" : found.fifUnavailable ? "unavailable" : "done");
     }, 350);
@@ -223,12 +228,16 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
               {items.map((item) => (
                 <div className="card type-row" key={item.id}>
                   <div className="grow">
-                    <b>{item.name}</b>
-                    {item.needs_review && <span className="pill warn" style={{ marginLeft: 8 }}>ждёт проверки</span>}
+                    <div className="pick-top">
+                      <span>
+                        <b>{item.name}</b>
+                        {item.needs_review && <span className="pill warn" style={{ marginLeft: 8 }}>ждёт проверки</span>}
+                      </span>
+                      <MpiBadge mpi={[{ parameter: "", months: item.verification_interval_months }]} />
+                    </div>
                     <div className="meta">
                       <span>№ <span className="cell-mono">{item.registry_number}</span></span>
                       <span>{item.manufacturer || "изготовитель не указан"}</span>
-                      <span>МПИ {item.verification_interval_months} мес.</span>
                       {item.needs_review ? (
                         <span>завёл {item.created_by_name || "—"}</span>
                       ) : (
@@ -287,11 +296,13 @@ export default function SiTypes({ me, onChanged }: { me: Me | null; onChanged?: 
                         })
                       }
                     >
-                      <b>{item.notation || item.name}</b>
+                      <span className="pick-top">
+                        <b>{item.notation || item.name}</b>
+                        <MpiBadge mpi={item.fif_uuid ? fifMpi[item.fif_uuid] : item.mpi} />
+                      </span>
                       {item.title && <span className="sub">{item.title}</span>}
                       <span className="sub">
                         № {item.registry_number} · {item.manufacturer || "изготовитель не указан"}
-                        {item.interval_months ? ` · МПИ ${item.interval_months} мес.` : ""}
                       </span>
                       {item.ambiguous && <span className="pill warn">такое название у нескольких — сверьте изготовителя</span>}
                     </button>
@@ -387,12 +398,12 @@ function SiTypeInfo({ item, onFif }: { item: SiType; onFif: () => void }) {
   const limits = Object.entries(item.limits ?? {});
   return (
     <div>
+      <MpiHero mpi={[{ parameter: "", months: item.verification_interval_months }]} />
       {item.type_title && <p className="hint" style={{ marginTop: 0 }}>{item.type_title}</p>}
       <div className="kv">
         <div><span className="k">Номер в Госреестре</span><span className="v cell-mono">{item.registry_number}</span></div>
         <div><span className="k">Изготовитель</span><span className="v">{item.manufacturer || "не указан"}</span></div>
         <div><span className="k">Вид СИ</span><span className="v">{item.family_name}</span></div>
-        <div><span className="k">МПИ</span><span className="v">{item.verification_interval_months} мес.</span></div>
         {item.certificate_valid_to && (
           <div><span className="k">Свидетельство до</span><span className="v">{new Date(item.certificate_valid_to).toLocaleDateString("ru-RU")}</span></div>
         )}

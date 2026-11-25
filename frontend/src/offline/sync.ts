@@ -362,6 +362,7 @@ function toSuggestion(item: SiType): SiTypeSuggestion {
     label: item.label,
     ambiguous: false,
     needs_review: item.needs_review,
+    mpi: item.verification_interval_months ? [{ parameter: "", months: item.verification_interval_months }] : [],
   };
 }
 

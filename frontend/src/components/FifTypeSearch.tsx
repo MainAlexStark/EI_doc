@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { SiTypeSuggestion } from "../api";
 import { searchSiTypes } from "../offline/sync";
 import { parseYear } from "../registryYear";
+import { rememberMpi, useFifMpi } from "../mpi";
+import MpiBadge from "./MpiBadge";
 import RstStatus from "./RstStatus";
 import { loadPresets, type SiTypeDraft } from "./SiTypeForm";
 
@@ -67,6 +69,7 @@ export default function FifTypeSearch({
     setSearching(true);
     debounce.current = setTimeout(async () => {
       const found = await searchSiTypes(query, filterYear);
+      found.results.forEach((item) => rememberMpi(item.fif_uuid, item.mpi));
       setResults(found.results);
       setHiddenByYear(found.hiddenByYear);
       setOffline(found.offline);
@@ -84,6 +87,7 @@ export default function FifTypeSearch({
   const local = results.filter((item) => item.si_type_id !== null);
   const fif = results.filter((item) => item.si_type_id === null);
   const looksLikeNumber = /\d{3,}-\d{2}/.test(query);
+  const fifMpi = useFifMpi(fif.slice(0, 12).map((item) => item.fif_uuid ?? "").filter(Boolean));
 
   return (
     <div className="field">
@@ -137,7 +141,10 @@ export default function FifTypeSearch({
               disabled={!onPickLocal}
               onClick={() => onPickLocal?.(item)}
             >
-              <b>{item.name}</b>
+              <span className="pick-top">
+                <b>{item.name}</b>
+                <MpiBadge mpi={item.mpi ?? (item.interval_months ? [{ parameter: "", months: item.interval_months }] : null)} />
+              </span>
               <span className="sub">
                 № {item.registry_number} · {item.manufacturer || "изготовитель не указан"}
               </span>
@@ -163,7 +170,10 @@ export default function FifTypeSearch({
                 })
               }
             >
-              <b>+ {item.notation || item.name}</b>
+              <span className="pick-top">
+                <b>+ {item.notation || item.name}</b>
+                <MpiBadge mpi={item.fif_uuid ? fifMpi[item.fif_uuid] : item.mpi} />
+              </span>
               {item.title && <span className="sub">{item.title}</span>}
               <span className="sub">
                 № {item.registry_number} · {item.manufacturer || "изготовитель не указан"}

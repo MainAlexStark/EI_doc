@@ -127,3 +127,47 @@ class SuggestByYearTestCase(TestCase):
         SiType.objects.create(family=family, registry_number="16078-05", name="СГВ-15", manufacturer="Бетар")
         assert "16078-05" not in self.numbers(fif, year="2020")
         assert "16078-05" in self.numbers(fif)
+
+
+class SuggestMpiTestCase(TestCase):
+    """МПИ видно прямо в подсказке: свой тип — из справочника, тип из реестра — из скачанной карточки."""
+
+    def setUp(self) -> None:
+        from django.core.cache import cache
+
+        cache.clear()
+        self.client = APIClient()
+        self.client.force_authenticate(User.objects.create_user("m@ei.test", "pw"))
+        family = MeasurementFamily.objects.create(code="water", name="Счётчики воды")
+        SiType.objects.create(family=family, registry_number="12345-06", name="СВК-15",
+                              manufacturer="Тепловодомер", verification_interval_months=72)
+
+    @mock.patch("apps.catalog.api.FifClient")
+    def test_local_and_cached_card(self, fif):
+        from apps.arshin import status as fif_status
+
+        fif.return_value.search_types.return_value = [
+            FifType(registry_number="98765-22", notation="СВК-15", manufacturer="Бетар", uuid="u-1"),
+            FifType(registry_number="55555-20", notation="СВК-15М", manufacturer="Другой", uuid="u-2"),
+        ]
+        fif_status.cache_set("fif:card:u-1", {"general": {"number": "98765-22"}, "mpi": [
+            {"parameter": "холодная вода", "mpi": "72", "valid_from": "2022-01-01"},
+            {"parameter": "горячая вода", "mpi": "48", "valid_from": "2022-01-01"},
+        ]}, 60)
+        results = {r["registry_number"]: r for r in self.client.get(reverse(URL_NAME), {"q": "СВК"}).data["results"]}
+
+        assert results["12345-06"]["mpi"] == [{"parameter": "", "months": 72}]
+        assert [m["months"] for m in results["98765-22"]["mpi"]] == [72, 48]
+        assert results["98765-22"]["interval_months"] == 48
+        assert results["55555-20"]["mpi"] is None  # карточку экран дозапросит
+
+    @mock.patch("apps.catalog.api_fif.FifClient")
+    def test_mpi_endpoint(self, fif):
+        from apps.arshin.fif import FifCard
+
+        fif.return_value.get_type.return_value = FifCard(
+            uuid="u-1", registry_number="98765-22", title="", notation="", manufacturer="",
+            valid_to=None, mpi=[{"parameter": "", "months": 72, "valid_from": ""}], documents=[],
+        )
+        data = self.client.get("/api/catalog/fif/types/u-1/mpi/").data
+        assert data["mpi"][0]["months"] == 72 and data["uuid"] == "u-1"

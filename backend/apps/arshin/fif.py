@@ -477,6 +477,21 @@ class FifClient:
         return response.content, filename, content_type
 
 
+def cached_mpi(uuid: str) -> list[dict] | None:
+    """МПИ из уже скачанной карточки типа — без запроса в ФГИС. None — карточки в кэше нет."""
+    from apps.arshin import status as fif_status
+
+    if not uuid:
+        return None
+    payload = fif_status.cache_get(f"fif:card:{uuid}")
+    if payload is None:
+        return None
+    try:
+        return FifClient.parse_card(payload, uuid).mpi
+    except FifUnavailable:
+        return None
+
+
 def _norm(text: str) -> str:
     return re.sub(r"[\s\-–«»\"'.,()]+", "", str(text or "").lower().replace("ё", "е"))
 

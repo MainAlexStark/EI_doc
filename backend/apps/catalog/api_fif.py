@@ -102,6 +102,26 @@ class FifTypeCardView(APIView):
         return Response(body)
 
 
+class FifTypeMpiView(APIView):
+    """GET /api/catalog/fif/types/<ident>/mpi/ — только межповерочный интервал и срок свидетельства.
+
+    Лёгкий ответ для строк поиска: экран дозапрашивает МПИ у видимых кандидатов из реестра,
+    чтобы дату следующей поверки было видно сразу в списке. Карточка кэшируется
+    (``FifClient.get_type``), повторный поиск отвечает мгновенно.
+    """
+
+    @extend_schema(responses={200: dict})
+    def get(self, request, ident: str):
+        try:
+            card = FifClient().get_type(ident)
+        except FifUnavailable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({
+            "uuid": card.uuid, "mpi": card.mpi,
+            "valid_to": card.valid_to.isoformat() if card.valid_to else None, "is_valid": card.is_valid,
+        })
+
+
 class LimitsRequestSerializer(serializers.Serializer):
     variant = serializers.CharField(required=False, allow_blank=True, default="")
 

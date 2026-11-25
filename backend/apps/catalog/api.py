@@ -15,7 +15,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core import cache
-from apps.arshin.fif import FifClient, FifUnavailable, mark_ambiguous
+from apps.arshin.fif import FifClient, FifUnavailable, cached_mpi, mark_ambiguous
 from apps.catalog.models import MeasurementFamily, PricingSettings, SiType
 from apps.catalog.registry_year import fits_year, parse_year
 
@@ -35,6 +35,11 @@ class SiTypeSuggestionSerializer(serializers.Serializer):
     needs_review = serializers.BooleanField(help_text="Тип заведён поверителем и ждёт проверки метролога")
     title = serializers.CharField(allow_blank=True, help_text="Наименование типа в Госреестре")
     fif_uuid = serializers.CharField(allow_blank=True, help_text="mit_uuid карточки в ФИФ")
+    mpi = serializers.ListField(
+        child=serializers.DictField(), allow_null=True,
+        help_text="Межповерочные интервалы [{parameter, months}]; null — у реестра ещё не спрашивали "
+                  "(поиск ФГИС их не отдаёт, нужна карточка: /api/catalog/fif/types/<uuid>/mpi/)",
+    )
 
 
 class SiTypeSuggestView(APIView):
@@ -77,6 +82,15 @@ class SiTypeSuggestView(APIView):
         fitting = fits_year(suggestions, year)
         hidden_by_year = len(suggestions) - len(fitting)
         suggestions = self._flag_duplicates(fitting)
+        # МПИ — первое, что нужно при выписке бумаги у клиента (дата следующей поверки).
+        # Поиск ФГИС его не отдаёт; берём из уже скачанных карточек, остальное экран дозапросит.
+        for item in suggestions:
+            if item["source"] == "local":
+                item["mpi"] = [{"parameter": "", "months": item["interval_months"]}] if item["interval_months"] else []
+            else:
+                item["mpi"] = cached_mpi(item.get("fif_uuid", ""))
+                if item["mpi"] and not item.get("interval_months"):
+                    item["interval_months"] = min(row["months"] for row in item["mpi"])
         from apps.arshin import status as fif_status
 
         payload = {"results": suggestions, "hidden_by_year": hidden_by_year,

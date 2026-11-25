@@ -659,6 +659,8 @@ export type SiTypeSuggestion = {
   needs_review?: boolean;
   title?: string;
   fif_uuid?: string;
+  /** МПИ [{parameter, months}]; null — у реестра ещё не спрашивали (см. src/mpi.ts). */
+  mpi?: { parameter: string; months: number }[] | null;
 };
 
 export type SiTypeSuggestResponse = {

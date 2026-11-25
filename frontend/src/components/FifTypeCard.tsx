@@ -4,6 +4,7 @@ import Icon from "../ui/Icon";
 import { Alert, Spinner } from "../ui/controls";
 import { FifDocumentButtons } from "./FifDocuments";
 import type { SiTypeDraft } from "./SiTypeForm";
+import { MpiHero } from "./MpiBadge";
 
 function ruDate(value: string | null): string {
   return value ? new Date(value).toLocaleDateString("ru-RU") : "";
@@ -52,6 +53,7 @@ export default function FifTypeCard({
 
   return (
     <div className="fif-card">
+      <MpiHero mpi={card.mpi} />
       {card.title && <p className="hint" style={{ marginTop: 0 }}>{card.title}</p>}
       <div className="kv">
         <div><span className="k">Номер в Госреестре</span><span className="v cell-mono">{card.registry_number}</span></div>
@@ -61,14 +63,6 @@ export default function FifTypeCard({
           <span className="k">Свидетельство</span>
           <span className={`v ${card.is_valid === false ? "warn-text" : ""}`}>{validity}</span>
         </div>
-        {card.mpi.length > 0 && (
-          <div>
-            <span className="k">МПИ</span>
-            <span className="v">
-              {card.mpi.map((m) => `${m.months} мес.${m.parameter ? ` — ${m.parameter}` : ""}`).join("; ")}
-            </span>
-          </div>
-        )}
         {card.variants.length > 0 && (
           <div>
             <span className="k">Модификации</span>

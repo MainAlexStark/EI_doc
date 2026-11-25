@@ -16,6 +16,7 @@ from apps.catalog.api_fif import (
     FifStatusView,
     FifTypeCardView,
     FifTypeLimitsView,
+    FifTypeMpiView,
     SiTypeDocumentsView,
 )
 from apps.catalog.api_types import (
@@ -151,6 +152,7 @@ urlpatterns = [
     path("api/catalog/si-types/<int:pk>/documents/", SiTypeDocumentsView.as_view(), name="si_type_documents"),
     path("api/catalog/fif/status/", FifStatusView.as_view(), name="fif_status"),
     path("api/catalog/fif/types/<str:ident>/", FifTypeCardView.as_view(), name="fif_type_card"),
+    path("api/catalog/fif/types/<str:ident>/mpi/", FifTypeMpiView.as_view(), name="fif_type_mpi"),
     path("api/catalog/fif/types/<str:ident>/limits/", FifTypeLimitsView.as_view(), name="fif_type_limits"),
     path("api/catalog/fif/documents/<int:pk>/file/", FifDocumentFileView.as_view(), name="fif_document_file"),
     path("api/catalog/families/", FamilyOptionsView.as_view(), name="family_options"),
