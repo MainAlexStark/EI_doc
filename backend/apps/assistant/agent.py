@@ -127,7 +127,7 @@ def build_messages(conversation: Conversation, *, vision: bool) -> list[dict]:
                 item["tool_calls"] = message.tool_calls
                 pending.extend(call["id"] for call in message.tool_calls)
             if item["content"] is None and not message.tool_calls:
-                item["content"] = ""
+                continue  # пустой ответ (сбой модели) — в историю не идёт, чтобы модель его не повторяла
             out.append(item)
     close_pending()
     flush_deferred()
@@ -168,6 +168,25 @@ def execute_run(run_id: int, *, extra_tools: list | None = None) -> None:
         run.finished_at = timezone.now()
         run.save(update_fields=["status", "error", "activity", "finished_at", "usage"])
         Conversation.objects.filter(pk=conversation.pk).update(updated_at=timezone.now())
+
+
+EMPTY_NUDGE = ("[Система] Твой предыдущий ответ пришёл пустым — человек ничего не увидел. "
+               "Продолжи: вызови нужный инструмент или напиши ответ человеку текстом.")
+
+
+def _is_empty(completion: llm.Completion) -> bool:
+    return (completion.finish_reason != "cancelled" and not completion.tool_calls
+            and not (completion.text or "").strip())
+
+
+def _empty_reason(completion: llm.Completion) -> str:
+    if completion.finish_reason == "length":
+        return ("Модель исчерпала лимит длины ответа, не написав текста (скорее всего, ушла в долгие "
+                "рассуждения). Повторите вопрос или выберите другую модель.")
+    if completion.reasoning:
+        return ("Модель дважды вернула только рассуждения без ответа. Похоже, она плохо работает "
+                "с инструментами — выберите другую модель и повторите вопрос.")
+    return "Модель дважды вернула пустой ответ. Повторите вопрос или выберите другую модель."
 
 
 def _loop(run: Run, conversation: Conversation, user, *, extra_tools: list | None = None) -> None:
@@ -228,6 +247,20 @@ def _loop(run: Run, conversation: Conversation, user, *, extra_tools: list | Non
             on_text=on_text, should_stop=should_stop,
         )
         _add_usage(run.usage, completion.usage)
+        if _is_empty(completion):
+            # Часть моделей (DeepSeek и др. «думающие») иногда отдают только рассуждения без текста
+            # ответа — раньше прогон тихо завершался «готово» с пустым сообщением. Даём ещё одну попытку.
+            logger.warning("Прогон %s: пустой ответ модели %s (finish_reason=%s, reasoning=%d симв.)",
+                           run.pk, run.model, completion.finish_reason, len(completion.reasoning))
+            set_activity("Модель ответила пусто — переспрашиваю…")
+            completion = llm.chat(
+                run.model, [*messages, {"role": "user", "content": EMPTY_NUDGE}],
+                tools=None if final_step else schemas, on_text=on_text, should_stop=should_stop,
+            )
+            _add_usage(run.usage, completion.usage)
+            Run.objects.filter(pk=run.pk).update(usage=run.usage)
+            if _is_empty(completion):
+                raise llm.LLMError(_empty_reason(completion))
         tool_calls = [
             {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments or "{}"}}
             for c in completion.tool_calls

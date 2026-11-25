@@ -133,6 +133,29 @@ class AgentLoopTests(Base):
         assert fake.calls[-1]["tools"] is None
         assert "Лимит шагов" in fake.calls[-1]["messages"][-1]["content"]
 
+    def test_empty_answer_is_retried(self):
+        empty = llm.Completion(reasoning="думаю…", finish_reason="stop")
+        fake = FakeLLM(call("ei_reference", {"what": "families"}), empty, answer("Вот расписание."))
+        self.send("моё расписание", fake)
+        run = Run.objects.get()
+        assert run.status == Run.Status.DONE, run.error
+        assert "пустым" in fake.calls[2]["messages"][-1]["content"]
+        assert self.conversation.messages.filter(role="assistant").last().content == "Вот расписание."
+
+    def test_empty_answer_twice_is_an_error(self):
+        empty = llm.Completion(reasoning="думаю…", finish_reason="stop")
+        self.send("привет", FakeLLM(empty, empty))
+        run = Run.objects.get()
+        assert run.status == Run.Status.ERROR and "рассуждения" in run.error
+
+    def test_old_empty_answers_not_sent_to_model(self):
+        Message.objects.create(conversation=self.conversation, role=Message.Role.USER, content="раз")
+        Message.objects.create(conversation=self.conversation, role=Message.Role.ASSISTANT, content="")
+        fake = FakeLLM(answer("ок"))
+        self.send("почему остановился?", fake)
+        roles = [m["role"] for m in fake.calls[0]["messages"][1:]]
+        assert roles == ["user", "user"]
+
     def test_llm_error_marks_run(self):
         def boom(*a, **kw):
             raise llm.LLMError("openrouter ответил 401: bad key")
