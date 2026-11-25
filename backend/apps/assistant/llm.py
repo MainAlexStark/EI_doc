@@ -54,6 +54,33 @@ class Completion:
     usage: dict = field(default_factory=dict)
     finish_reason: str = ""
     reasoning: str = ""
+    # Блоки рассуждений OpenRouter — их нужно вернуть модели как есть, иначе думающие модели
+    # (DeepSeek, Claude с thinking) теряют нить между вызовами инструментов.
+    reasoning_details: list[dict] = field(default_factory=list)
+
+
+_DETAIL_TEXT_FIELDS = ("text", "summary", "data")
+
+
+def merge_reasoning_details(target: list[dict], chunk: list) -> None:
+    """Склеить потоковые куски reasoning_details: по index, без него — с последним блоком того же типа."""
+    for item in chunk or []:
+        if not isinstance(item, dict):
+            continue
+        index = item.get("index")
+        block = None
+        if index is not None:
+            block = next((b for b in target if b.get("index") == index), None)
+        elif target and target[-1].get("type") == item.get("type") and target[-1].get("id") == item.get("id"):
+            block = target[-1]
+        if block is None:
+            target.append(dict(item))
+            continue
+        for key, value in item.items():
+            if key in _DETAIL_TEXT_FIELDS and isinstance(value, str):
+                block[key] = (block.get(key) or "") + value
+            elif value is not None:
+                block[key] = value
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +200,11 @@ def chat(
                 result.usage = event["usage"]
             for choice in event.get("choices") or []:
                 delta = choice.get("delta") or {}
-                if delta.get("reasoning"):
-                    result.reasoning += delta["reasoning"]
+                reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+                if reasoning:
+                    result.reasoning += reasoning
+                if delta.get("reasoning_details"):
+                    merge_reasoning_details(result.reasoning_details, delta["reasoning_details"])
                 text = delta.get("content")
                 if text:
                     result.text += text

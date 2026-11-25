@@ -186,6 +186,11 @@ class Message(models.Model):
     attachments = models.ManyToManyField(Attachment, blank=True, related_name="messages")
     model = models.CharField(max_length=200, blank=True)
     usage = models.JSONField(default=dict, blank=True)
+    reasoning = models.JSONField(
+        default=dict, blank=True,
+        help_text="Рассуждения модели: details (reasoning_details OpenRouter, как пришли) и text. "
+                  "Возвращаются модели в пределах текущего хода",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

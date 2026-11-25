@@ -91,7 +91,37 @@ def _user_content(message: Message, vision: bool):
     return text
 
 
-def build_messages(conversation: Conversation, *, vision: bool) -> list[dict]:
+REASONING_TEXT_LIMIT = 40_000
+
+
+def _reasoning_payload(completion: llm.Completion) -> dict:
+    out: dict = {}
+    if completion.reasoning_details:
+        out["details"] = completion.reasoning_details
+    if completion.reasoning:
+        out["text"] = completion.reasoning[:REASONING_TEXT_LIMIT]
+    return out
+
+
+def _attach_reasoning(item: dict, message: Message) -> None:
+    """Рассуждения — обратно модели, как пришли (OpenRouter: reasoning_details, иначе текстом)."""
+    reasoning = message.reasoning or {}
+    if reasoning.get("details"):
+        item["reasoning_details"] = reasoning["details"]
+    elif reasoning.get("text"):
+        item["reasoning"] = reasoning["text"]
+
+
+def build_messages(conversation: Conversation, *, vision: bool, model: str = "") -> list[dict]:
+    """История для модели.
+
+    ``model`` — модель прогона: её рассуждения из текущего хода (после последнего сообщения
+    человека) уходят обратно. Чужие (чат переключили на другую модель) и прошлых ходов — нет:
+    подписи блоков у другого провайдера невалидны, а старые рассуждения только тратят токены.
+    """
+    send_reasoning = bool(model) and llm.split_model(model)[0] == "openrouter"
+    messages = list(conversation.messages.prefetch_related("attachments").order_by("pk"))
+    last_user = max((m.pk for m in messages if m.role == Message.Role.USER), default=0)
     out: list[dict] = []
     pending: list[str] = []  # tool_call_id, на которые ещё нет результата
     deferred: list[dict] = []  # события, пришедшие посреди серии вызовов инструментов
@@ -106,7 +136,7 @@ def build_messages(conversation: Conversation, *, vision: bool) -> list[dict]:
             out.extend(deferred)
             deferred.clear()
 
-    for message in conversation.messages.prefetch_related("attachments").order_by("pk"):
+    for message in messages:
         if message.role == Message.Role.TOOL:
             if message.tool_call_id in pending:
                 pending.remove(message.tool_call_id)
@@ -128,6 +158,8 @@ def build_messages(conversation: Conversation, *, vision: bool) -> list[dict]:
                 pending.extend(call["id"] for call in message.tool_calls)
             if item["content"] is None and not message.tool_calls:
                 continue  # пустой ответ (сбой модели) — в историю не идёт, чтобы модель его не повторяла
+            if send_reasoning and message.pk > last_user and message.model == model:
+                _attach_reasoning(item, message)
             out.append(item)
     close_pending()
     flush_deferred()
@@ -223,7 +255,7 @@ def _loop(run: Run, conversation: Conversation, user, *, extra_tools: list | Non
         if should_stop():
             return
         final_step = step == config.max_steps
-        messages = [{"role": "system", "content": system}, *build_messages(conversation, vision=vision)]
+        messages = [{"role": "system", "content": system}, *build_messages(conversation, vision=vision, model=run.model)]
         if final_step:
             messages.append({
                 "role": "user",
@@ -268,6 +300,7 @@ def _loop(run: Run, conversation: Conversation, user, *, extra_tools: list | Non
         Message.objects.create(
             conversation=conversation, run=run, role=Message.Role.ASSISTANT,
             content=completion.text, tool_calls=tool_calls, model=run.model, usage=completion.usage,
+            reasoning=_reasoning_payload(completion),
         )
         cache.delete(partial_key(run.pk))
         Run.objects.filter(pk=run.pk).update(usage=run.usage)

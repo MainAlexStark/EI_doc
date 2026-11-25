@@ -156,6 +156,35 @@ class AgentLoopTests(Base):
         roles = [m["role"] for m in fake.calls[0]["messages"][1:]]
         assert roles == ["user", "user"]
 
+    def test_reasoning_returned_to_model_within_turn(self):
+        details = [{"type": "reasoning.text", "text": "открою кабинет", "index": 0, "format": "unknown"}]
+        first = call("ei_me", {})
+        first.reasoning_details, first.reasoning = details, "открою кабинет"
+        fake = FakeLLM(first, answer("Готово."))
+        self.send("моё расписание", fake)
+        saved = self.conversation.messages.filter(role="assistant").first()
+        assert saved.reasoning["details"] == details
+        sent = fake.calls[1]["messages"]
+        assert sent[-2]["tool_calls"] and sent[-2]["reasoning_details"] == details
+        # Следующий ход: рассуждения прошлого хода и другой модели не уходят
+        from apps.assistant import agent
+        Message.objects.create(conversation=self.conversation, role=Message.Role.USER, content="ещё")
+        history = agent.build_messages(self.conversation, vision=False, model=self.conversation.model)
+        assert not any("reasoning_details" in m for m in history)
+
+    def test_reasoning_of_other_model_not_sent(self):
+        from apps.assistant import agent
+        Message.objects.create(conversation=self.conversation, role=Message.Role.USER, content="раз")
+        Message.objects.create(conversation=self.conversation, role=Message.Role.ASSISTANT, content="",
+                               tool_calls=[{"id": "a", "type": "function", "function": {"name": "ei_me", "arguments": "{}"}}],
+                               model="openrouter:other/model", reasoning={"text": "чужое"})
+        history = agent.build_messages(self.conversation, vision=False, model="openrouter:test/model")
+        assert "reasoning" not in history[1]
+        own = agent.build_messages(self.conversation, vision=False, model="openrouter:other/model")
+        assert own[1]["reasoning"] == "чужое"
+        yandex = agent.build_messages(self.conversation, vision=False, model="yandex:qwen/latest")
+        assert "reasoning" not in yandex[1]
+
     def test_llm_error_marks_run(self):
         def boom(*a, **kw):
             raise llm.LLMError("openrouter ответил 401: bad key")
@@ -520,6 +549,24 @@ class LlmStreamTests(TestCase):
         assert result.text == "Ищу " and streamed == ["Ищу "]
         assert result.tool_calls[0].name == "web_search" and result.tool_calls[0].parsed() == {"query": "x"}
         assert result.usage == {"total_tokens": 7}
+
+    @override_settings(OPENROUTER_API_KEY="k")
+    def test_stream_assembles_reasoning_details(self):
+        events = [
+            {"choices": [{"delta": {"reasoning": "Сначала ", "reasoning_details": [
+                {"type": "reasoning.text", "text": "Сначала ", "format": "unknown", "index": 0}]}}]},
+            {"choices": [{"delta": {"reasoning": "кабинет", "reasoning_details": [
+                {"type": "reasoning.text", "text": "кабинет", "index": 0, "signature": None}]}}]},
+            {"choices": [{"delta": {"reasoning_details": [
+                {"type": "reasoning.text", "text": "", "index": 0, "signature": "sig"}]}}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+        ]
+        body = "\n".join(f"data: {json.dumps(e)}\n" for e in events) + "\ndata: [DONE]\n"
+        with mock.patch("requests.post", return_value=FakeResponse(body, content_type="text/event-stream")):
+            result = llm.chat("openrouter:a/b", [{"role": "user", "content": "x"}])
+        assert result.reasoning == "Сначала кабинет"
+        assert result.reasoning_details == [
+            {"type": "reasoning.text", "text": "Сначала кабинет", "format": "unknown", "index": 0, "signature": "sig"}]
 
     @override_settings(YANDEX_VISION_API_KEY="k", YANDEX_VISION_FOLDER_ID="b1g")
     def test_yandex_model_uri(self):
